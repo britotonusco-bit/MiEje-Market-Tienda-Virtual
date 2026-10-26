@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ingresar | MiEje Market</title>
+  <link rel="stylesheet" href="panel-live.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js" defer></script>
+  <script src="login.js" defer></script>
+</head>
+<body class="login-page">
+  <main class="login-card">
+    <a class="brand-login" href="index.html"><span class="brand-icon">M<span>+</span></span><span>MiEje <b>Market</b><small>Acceso seguro a los paneles</small></span></a>
+    <p class="eyebrow">ÁREA PRIVADA</p>
+    <h1>Iniciar sesión</h1>
+    <p class="muted">Ingresa con la cuenta que te asignó el administrador de la plataforma o de tu negocio.</p>
+    <form id="loginForm">
+      <label for="email">Correo electrónico</label>
+      <input id="email" type="email" autocomplete="username" required placeholder="tu@correo.com">
+      <label for="password">Contraseña</label>
+      <input id="password" type="password" autocomplete="current-password" required placeholder="Tu contraseña">
+      <button id="loginBtn" class="button primary full" type="submit">Ingresar</button>
+    </form>
+    <div id="businessChoice" class="hidden">
+      <label for="businessSelect">Selecciona el negocio y el rol</label>
+      <select id="businessSelect"></select>
+      <button id="continueBtn" class="button primary full" type="button">Continuar al panel</button>
+    </div>
+    <p id="loginMessage" class="message" role="status" aria-live="polite"></p>
+    <div class="security-note"><strong>Seguridad:</strong> cada usuario solo podrá abrir los paneles autorizados para su cuenta. No se permite registrarse desde esta pantalla.</div>
+    <a class="back-link" href="index.html">← Volver a la página pública</a>
+  </main>
+</body>
+</html>

@@ -1,0 +1,190 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MiEje Market | Comercio local</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="header">
+    <a class="logo" href="#" data-action="home">
+      <span class="logo-icon">M<span>+</span></span>
+      <span>MiEje <b>Market</b><small>Lo nuestro, más cerca</small></span>
+    </a>
+
+    <nav id="mainNav" class="nav">
+      <button data-action="home">Inicio</button>
+      <button data-action="categories">Categorías</button>
+      <button data-action="businesses">Tiendas</button>
+    </nav>
+
+    <div class="header-right">
+      <input id="globalSearch" class="search" type="search"
+        placeholder="Buscar tiendas o productos">
+      <button id="openCart" class="cart-button" type="button">
+        🛒 Carrito <span id="cartCount">0</span>
+      </button>
+      <button id="mobileMenu" class="mobile-menu" type="button"
+        aria-label="Abrir menú">☰</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="homeView">
+      <section class="hero">
+        <div class="hero-content">
+          <p class="eyebrow">PEREIRA · RISARALDA · EJE CAFETERO</p>
+          <h1>Lo mejor de tu región,<br><span>a un clic de distancia.</span></h1>
+          <p>Descubre restaurantes, tiendas y emprendimientos locales en un solo lugar.</p>
+          <div class="hero-actions">
+            <button class="btn lime" data-action="categories">Explorar categorías ↗</button>
+            <button class="btn outline" data-action="businesses">Ver tiendas</button>
+          </div>
+          <p class="hero-note">● Apoyamos el comercio de nuestra región</p>
+        </div>
+      </section>
+
+      <section class="intro wrap">
+        <div>
+          <p class="eyebrow">CERCA DE TI</p>
+          <h2>Tu región tiene<br>mucho por descubrir.</h2>
+        </div>
+        <p>Pereira es una ciudad del corazón del Eje Cafetero, reconocida por su cultura cafetera, su comercio y su gente emprendedora. MiEje Market reúne negocios locales para que puedas descubrir sus productos desde un solo lugar.</p>
+      </section>
+
+      <section id="categoriesSection" class="wrap section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">ENCUENTRA LO QUE BUSCAS</p>
+            <h2>Explora por categoría</h2>
+          </div>
+          <span class="muted">Elige una categoría para comenzar ↗</span>
+        </div>
+
+        <div class="category-grid">
+          <button class="category-card" data-category="Comidas">
+            <img src="https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1000&q=85" alt="Restaurante">
+            <span class="shade"></span>
+            <span class="category-text"><small>ANTOJOS Y SABORES</small><strong>Restaurantes</strong><span>Descubrir negocios ↗</span></span>
+          </button>
+
+          <button class="category-card" data-category="Moda">
+            <img src="https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1000&q=85" alt="Moda y ropa">
+            <span class="shade"></span>
+            <span class="category-text"><small>ESTILO LOCAL</small><strong>Moda</strong><span>Descubrir negocios ↗</span></span>
+          </button>
+
+          <button class="category-card" data-category="Tecnología">
+            <img src="https://images.unsplash.com/photo-1498049794561-7780e7231661?auto=format&fit=crop&w=1000&q=85" alt="Tecnología">
+            <span class="shade"></span>
+            <span class="category-text"><small>INNOVACIÓN</small><strong>Tecnología</strong><span>Descubrir negocios ↗</span></span>
+          </button>
+
+          <button class="category-card" data-category="Mercado">
+            <img src="https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=1000&q=85" alt="Frutas y verduras">
+            <span class="shade"></span>
+            <span class="category-text"><small>FRESCURA DIARIA</small><strong>Mercado</strong><span>Descubrir negocios ↗</span></span>
+          </button>
+
+          <button class="category-card" data-category="Hogar">
+            <img src="https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?auto=format&fit=crop&w=1000&q=85" alt="Artículos para el hogar">
+            <span class="shade"></span>
+            <span class="category-text"><small>ESPACIOS CON VIDA</small><strong>Hogar</strong><span>Descubrir negocios ↗</span></span>
+          </button>
+        </div>
+      </section>
+
+      <section class="wrap section featured">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">NEGOCIOS DE LA REGIÓN</p>
+            <h2>Tiendas para conocer</h2>
+          </div>
+          <button class="text-button" data-action="businesses">Ver todas las tiendas ↗</button>
+        </div>
+        <div id="featuredGrid" class="business-grid"></div>
+      </section>
+    </section>
+
+    <section id="listingView" class="wrap listing hidden">
+      <button class="back-button" data-action="home">← Volver al inicio</button>
+      <div class="listing-title">
+        <p class="eyebrow">MI EJE MARKET</p>
+        <h1 id="listingTitle">Tiendas locales</h1>
+        <p id="listingDescription">Descubre los negocios de la región.</p>
+      </div>
+      <div id="categoryChips" class="chips"></div>
+      <input id="listingSearch" class="listing-search" type="search"
+        placeholder="Buscar una tienda o producto...">
+      <div id="listingGrid" class="business-grid"></div>
+      <div id="emptyListing" class="empty hidden">
+        <h2>No encontramos resultados</h2>
+        <p>Intenta con otro nombre o categoría.</p>
+      </div>
+    </section>
+
+    <section id="storeView" class="wrap store-view hidden">
+      <button class="back-button" data-action="back-list">← Volver a las tiendas</button>
+      <div id="storeContent"></div>
+    </section>
+
+    <section id="policyView" class="wrap policy-view hidden" aria-live="polite">
+      <button class="back-button" data-action="policy-back">← Volver</button>
+      <div id="policyContent"></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-logo">M+ <strong>MiEje Market</strong></div>
+    <p>Lo nuestro, más cerca. Una vitrina digital para los negocios del Eje Cafetero.</p>
+    <button data-action="home">Volver al inicio ↑</button>
+    <nav class="legal-links" aria-label="Información legal">
+      <button type="button" data-policy="privacidad">Política de privacidad</button>
+      <button type="button" data-policy="datos">Tratamiento de datos</button>
+      <button type="button" data-policy="terminos">Términos y condiciones</button>
+    </nav>
+    <small>© 2026 MiEje Market · Prototipo demostrativo</small>
+  </footer>
+
+  <div id="cartBackdrop" class="cart-backdrop hidden"></div>
+  <aside id="cartDrawer" class="cart-drawer" aria-hidden="true">
+    <div class="cart-heading">
+      <div><p class="eyebrow">TU SELECCIÓN</p><h2>Mi carrito</h2></div>
+      <button id="closeCart" class="close-button" aria-label="Cerrar carrito">✕</button>
+    </div>
+    <p id="cartBusinessNote" class="muted">Tu carrito está vacío.</p>
+    <div id="cartItems" class="cart-items"></div>
+    <div class="cart-bottom">
+      <div class="total"><span>Total estimado</span><strong id="cartTotal">$0</strong></div>
+      <form id="checkoutForm" class="checkout-form">
+        <label>Nombre<input name="customerName" required placeholder="Tu nombre"></label>
+        <label>Teléfono<input name="phone" required placeholder="Tu número" inputmode="tel"></label>
+        <label>Método de entrega
+          <select name="deliveryMethod" required><option value="">Primero selecciona productos de una tienda</option></select>
+        </label>
+        <label>Dirección o indicaciones<input name="address" required placeholder="Dirección de entrega o indicaciones"></label>
+        <label>Forma de pago
+          <select name="payment" required>
+            <option value="">Selecciona una opción</option>
+            <option>Efectivo al recibir</option>
+            <option>Transferencia por coordinar</option>
+            <option>Pago en el local</option>
+          </select>
+        </label>
+        <label class="consent-line"><input name="privacyConsent" type="checkbox" required>
+          <span>He leído la <button class="inline-policy" type="button" data-policy="privacidad">Política de privacidad</button> y autorizo el tratamiento de mis datos para esta demostración.</span>
+        </label>
+        <button class="btn lime full" type="submit">Revisar pedido →</button>
+        <small>Prototipo demostrativo: los datos del formulario solo se muestran en una vista previa; el pedido no se guarda ni se envía.</small>
+      </form>
+    </div>
+  </aside>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

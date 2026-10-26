@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Activar cuenta | MiEje Market</title>
+  <link rel="stylesheet" href="panel-live.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <script src="aceptar-invitacion.js" defer></script>
+</head>
+<body class="login-page">
+  <main class="login-card">
+    <a class="brand-login" href="index.html"><span class="brand-icon">M<span>+</span></span><span>MiEje <b>Market</b><small>Activación segura de cuenta</small></span></a>
+    <h1>Activa tu cuenta</h1>
+    <p class="muted">Crea una contraseña personal para entrar al panel al que te invitó el propietario de la plataforma.</p>
+    <form id="acceptInviteForm">
+      <label for="newPassword">Nueva contraseña</label>
+      <input id="newPassword" name="password" type="password" minlength="10" autocomplete="new-password" required placeholder="Mínimo 10 caracteres">
+      <label for="confirmPassword">Confirma la contraseña</label>
+      <input id="confirmPassword" name="confirmPassword" type="password" minlength="10" autocomplete="new-password" required placeholder="Repite la contraseña">
+      <button class="button primary full" type="submit">Activar cuenta</button>
+    </form>
+    <p id="inviteStatus" class="message" role="status" aria-live="polite">Verificando el enlace de invitación…</p>
+    <a class="back-link" href="login.html">Ya activé mi cuenta: ir al inicio de sesión</a>
+  </main>
+</body>
+</html>
