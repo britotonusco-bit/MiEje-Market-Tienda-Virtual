@@ -114,7 +114,8 @@ Deno.serve(async (req: Request) => {
     let customerUserId: string | null = null;
     const authorization = req.headers.get("authorization") || "";
     const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
-    if (bearer) {
+    const publicKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || "";
+    if (bearer && bearer !== publicKey) {
       const { data: authData, error: authError } = await admin.auth.getUser(bearer);
       if (authError || !authData.user) {
         return reply(401, { error: "La sesión del cliente no es válida. Inicia sesión nuevamente." });
@@ -127,7 +128,10 @@ Deno.serve(async (req: Request) => {
         console.error("Customer profile validation failed:", profileError);
         return reply(503, { error: "No fue posible validar la cuenta del cliente." });
       }
-      if (profile?.is_blocked === true) {
+      if (!profile) {
+        return reply(403, { error: "La cuenta no tiene un perfil válido para realizar pedidos." });
+      }
+      if (profile.is_blocked === true) {
         return reply(403, { error: "Esta cuenta no puede realizar pedidos. Contacta al soporte de MiEje Market." });
       }
       customerUserId = authData.user.id;
