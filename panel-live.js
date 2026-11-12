@@ -311,17 +311,35 @@
     try {
       const result = await callTechnicalFunction({ action: 'list_business_members', business_id: id });
       const rows = result.members || [];
-      target.innerHTML = '<option value="">Selecciona una cuenta</option>' + rows.map(m => `<option value="${esc(m.user_id)}">${esc(m.profiles?.display_name || shortId(m.user_id))} · ${m.role === 'business_admin' ? 'Administrador' : 'Empleado'}${m.status !== 'active' ? ' · Suspendido' : ''}</option>`).join('');
+      target.innerHTML = '<option value="">Selecciona una cuenta</option>' + rows.map(m => `<option value="${esc(m.id)}">${esc(m.profiles?.display_name || shortId(m.user_id))} · ${m.role === 'business_admin' ? 'Administrador' : 'Empleado'}${m.status !== 'active' ? ' · Suspendido' : ''}</option>`).join('');
     } catch (error) { target.innerHTML = '<option value="">No se pudieron cargar las cuentas</option>'; }
   }
 
   async function saveMemberStatus(event) {
-    event.preventDefault(); const form=event.currentTarget, message=document.querySelector('#memberStatusMessage');
-    const blocked=form.elements.is_blocked.value==='true'; const reason=form.elements.reason.value.trim();
-    if(blocked && reason.length<5){message.textContent='Para bloquear una cuenta debes escribir un motivo de al menos 5 caracteres.';message.className='message error';return;}
-    message.textContent='Aplicando cambio y registrando auditoría…';
-    try{const result=await callTechnicalFunction({action:'set_member_status',business_id:form.elements.business_id.value,user_id:form.elements.user_id.value,is_blocked:blocked,reason});message.textContent=result.message;message.className='message success';await loadTechnicalMembers(form.elements.business_id.value);await loadBlockRequests();}
-    catch(error){message.textContent=error.message;message.className='message error';}
+    event.preventDefault();
+    const form = event.currentTarget, message = document.querySelector('#memberStatusMessage');
+    const blocked = form.elements.is_blocked.value === 'true';
+    const reason = form.elements.reason.value.trim();
+    if (!blocked) {
+      message.textContent = 'La función segura del servidor todavía no permite reactivar una membresía suspendida. No se realizó ningún cambio.';
+      message.className = 'message error';
+      return;
+    }
+    if (reason.length < 5) {
+      message.textContent = 'Para bloquear una cuenta debes escribir un motivo de al menos 5 caracteres.';
+      message.className = 'message error';
+      return;
+    }
+    message.textContent = 'Aplicando suspensión y registrando auditoría…';
+    try {
+      const result = await callTechnicalFunction({ action: 'block_member', membership_id: form.elements.user_id.value, reason });
+      message.textContent = result.message || 'Acceso suspendido y registrado en auditoría.';
+      message.className = 'message success';
+      await loadTechnicalMembers(form.elements.business_id.value);
+    } catch (error) {
+      message.textContent = error.message || 'No se pudo suspender la membresía.';
+      message.className = 'message error';
+    }
   }
 
   async function saveSuspension(event) {
