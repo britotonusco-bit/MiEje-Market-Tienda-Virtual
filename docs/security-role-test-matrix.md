@@ -184,3 +184,5 @@ Estas correcciones se prepararon en la rama de trabajo. Aún requieren pruebas d
 8. Desde el registro de clientes, comprobar que el correo de confirmación redirige a la página pública `cuenta.html`.
 9. Comprobar que la URL de `cuenta.html` esté agregada a la lista de Redirect URLs permitidas en Supabase Auth antes de probar el registro en producción.
 10. Probar envío y entrega real de correos con SMTP configurado; el servicio de correo predeterminado tiene límites y no debe asumirse como canal de producción.
+
+13. Confirmar que el historial pueda mostrar el nombre del negocio mediante permiso de lectura limitado a `businesses.id` y `businesses.name`, solo para negocios activos; no debe poder leer teléfono, dirección, horarios ni otra configuración comercial.
