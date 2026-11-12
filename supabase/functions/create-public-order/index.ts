@@ -95,9 +95,41 @@ Deno.serve(async (req: Request) => {
       return reply(400, { error: "Hay un producto o una cantidad inválidos." });
     }
 
+    const requestArgs = {
+      p_idempotency_key: idempotencyKey,
+      p_business_id: businessId,
+      p_customer_name: customerName,
+      p_customer_phone: customerPhone,
+      p_customer_email: customerEmail || null,
+      p_delivery_address: deliveryAddress,
+      p_delivery_notes: finalDeliveryNotes || null,
+      p_payment_method: paymentMethod,
+      p_items: normalizedItems,
+    };
+
+    // Recuperar primero un pedido ya confirmado: los reintentos no consumen
+    // nuevamente el límite de solicitudes por IP.
+    const { data: previousOrder, error: lookupError } = await admin.rpc(
+      "get_public_order_idempotent",
+      requestArgs
+    );
+    if (lookupError) {
+      console.error("Checkout idempotency lookup failed:", lookupError);
+      const message = lookupError.message.toLowerCase();
+      if (message.includes("clave de este intento ya fue usada")) return reply(409, { error: lookupError.message });
+      return reply(503, { error: "No fue posible verificar el intento de compra." });
+    }
+    if (previousOrder) return reply(200, { ok: true, order: previousOrder });
+
+    const { data: allowed, error: rateError } = await admin.rpc("consume_checkout_rate_limit", { p_ip: ip });
+    if (rateError) {
+      console.error("Checkout rate-limit check failed:", rateError);
+      return reply(503, { error: "No fue posible validar el pedido en este momento." });
+    }
+    if (allowed !== true) return reply(429, { error: "Se recibieron demasiadas solicitudes. Espera unos minutos e inténtalo de nuevo." });
+
     const { data, error } = await admin.rpc("create_public_order_idempotent", {
       p_idempotency_key: idempotencyKey,
-      p_ip: ip,
       p_business_id: businessId,
       p_customer_name: customerName,
       p_customer_phone: customerPhone,
