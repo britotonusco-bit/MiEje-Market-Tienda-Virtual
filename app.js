@@ -182,6 +182,7 @@
   let selectedCategory = "Todas";
   let currentBusinessId = null;
   let cart = [];
+  let pendingCheckoutRequest = null;
   let toastTimer;
 
   const getBusiness = id => businesses.find(business => business.id === id);
@@ -972,21 +973,31 @@
     button.disabled = true;
     button.textContent = "Registrando pedido…";
     try {
+      if (!window.crypto?.randomUUID) throw new Error("Este navegador no permite validar de forma segura el intento de compra. Actualiza el navegador e inténtalo de nuevo.");
+      const checkoutPayload = {
+        business_id: business.id,
+        customer_name: customerName,
+        customer_phone: customerPhone,
+        delivery_address: address,
+        delivery_notes: `Método de entrega: ${deliveryMethod === "delivery" ? "Domicilio" : deliveryMethod}`,
+        payment_method_id: paymentMethodId,
+        items: cart.map(item => ({ product_id: item.productId, quantity: item.quantity }))
+      };
+      const requestFingerprint = JSON.stringify(checkoutPayload);
+      if (!pendingCheckoutRequest || pendingCheckoutRequest.fingerprint !== requestFingerprint) {
+        pendingCheckoutRequest = {
+          fingerprint: requestFingerprint,
+          idempotencyKey: window.crypto.randomUUID()
+        };
+      }
       const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
       const { data, error } = await client.functions.invoke("create-public-order", {
-        body: {
-          business_id: business.id,
-          customer_name: customerName,
-          customer_phone: customerPhone,
-          delivery_address: address,
-          delivery_notes: `Método de entrega: ${deliveryMethod === "delivery" ? "Domicilio" : deliveryMethod}`,
-          payment_method_id: paymentMethodId,
-          items: cart.map(item => ({ product_id: item.productId, quantity: item.quantity }))
-        }
+        body: { ...checkoutPayload, idempotency_key: pendingCheckoutRequest.idempotencyKey }
       });
       if (error) throw new Error(error.message || "No se pudo registrar el pedido.");
       if (!data?.ok || !data.order) throw new Error(data?.error || "El servidor no confirmó el registro del pedido.");
       const order = data.order;
+      pendingCheckoutRequest = null;
       const tracking = order.public_tracking_token ? `\nCódigo privado de seguimiento: ${order.public_tracking_token}` : "";
       window.alert(`Pedido registrado correctamente.\nNúmero de pedido: #${order.order_number}\nTotal: ${money(order.total)}${tracking}\n\nGuarda el código de seguimiento para consultar el estado de tu pedido.`);
       cart = [];
