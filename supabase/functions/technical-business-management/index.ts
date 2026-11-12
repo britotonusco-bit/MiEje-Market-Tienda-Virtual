@@ -227,6 +227,7 @@ Deno.serve(async (req: Request) => {
       if (!targetUser) {
         const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
           data: displayName ? { display_name: displayName } : {},
+          redirectTo: "https://britotonusco-bit.github.io/MiEje-Market-Tienda-Virtual/aceptar-invitacion.html",
         });
         if (inviteError) {
           targetUser = await findUserByEmail(admin, email);
