@@ -55,3 +55,29 @@ WITH CHECK (
 
 -- No se crea una política DELETE nueva: se conserva el comportamiento actual.
 -- No se modifican las políticas de lectura pública del directorio en este cambio.
+
+
+-- Los datos financieros y detalles de reembolso pertenecen al negocio.
+-- Se elimina el acceso directo global del propietario técnico a estas tablas.
+-- La gestión técnica continúa por funciones autorizadas, sin exponer datos
+-- bancarios o referencias de clientes desde consultas generales del panel.
+
+DROP POLICY IF EXISTS financial_admin_select ON public.financial_transactions;
+CREATE POLICY financial_admin_select
+ON public.financial_transactions
+FOR SELECT
+TO authenticated
+USING (
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+);
+
+DROP POLICY IF EXISTS refund_admin_select ON public.refund_details;
+CREATE POLICY refund_admin_select
+ON public.refund_details
+FOR SELECT
+TO authenticated
+USING (
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+);
