@@ -359,3 +359,28 @@ La revisión de seguridad del proyecto independiente del 12 de noviembre de 2026
 Referencia del aviso de Supabase: https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection
 
 La consulta fue de solo lectura. No se modificaron permisos ni configuración de Auth.
+
+## Segunda auditoría de aislamiento entre negocios y panel técnico
+
+La inspección de solo lectura de las políticas RLS y privilegios del proyecto live confirmó que todavía están activos varios bypass de `platform_owner` en pedidos, productos, líneas de pedido, métodos de pago, costos, gastos, reembolsos, postulaciones y contenido comercial. El borrador `business-admin-boundaries.sql` reemplaza esas políticas por reglas de negocio activo y rol de membresía; también limita perfiles a la propia cuenta. Estos cambios siguen pendientes de aplicar y probar en staging.
+
+### Hallazgos de compatibilidad entre el borrador RLS y los paneles
+- El panel técnico cargaba las publicaciones comerciales mediante una consulta directa a `business_content_pages`. El borrador elimina el bypass global del técnico en esa tabla, por lo que esa consulta dejaría de funcionar aunque la moderación siga siendo una función legítima del técnico.
+- Se corrigió `technical-business-management` con la acción `list_content_moderation`, que devuelve como máximo 100 publicaciones para el panel técnico usando la función de servidor ya protegida por verificación de sesión y MFA.
+- Se corrigió `panel-live.js` para cargar la bandeja de moderación mediante esa Edge Function y no mediante el Data API. La acción de aprobar/rechazar ya utilizaba la Edge Function.
+- El panel técnico sigue sin consultar globalmente pedidos, clientes, productos ni finanzas. Su acceso a negocios, membresías, auditoría y moderación pasa por endpoints específicos.
+- La vista `storefront_business_directory` usa `security_invoker=true` y `security_barrier=true`; el esquema otorga a los roles públicos solo las columnas necesarias del directorio, no las columnas internas de negocios.
+- Los privilegios de membresías permanecen en lectura; la creación y modificación de asignaciones se hace desde la Edge Function técnica. Los métodos de pago no tienen permiso DELETE para authenticated.
+- El borrador impide actualizar `business_id` en productos, gastos y métodos de pago mediante privilegios por columna y triggers de inmutabilidad; los costos de producto también validan que producto y negocio coincidan.
+- Las restricciones compuestas existentes en costos, movimientos financieros, pedidos y postulaciones vinculan los registros con el negocio correcto.
+
+### Pruebas de aislamiento que aún deben ejecutarse en staging
+1. Crear dos negocios de prueba A y B, cada uno con administrador y empleado distintos.
+2. Como admin A, consultar/actualizar productos, métodos, contenido, pedidos, costos, gastos, postulaciones y finanzas de B: debe devolver cero filas o permiso denegado.
+3. Repetir como empleado A; solo debe poder ver y actualizar los pedidos permitidos de A, sin acceder a costos, finanzas, equipo ni configuración comercial de B.
+4. Como usuario con membresía en A y B, confirmar que solo ve los datos de los negocios a los que pertenece y que no puede cambiar el `business_id` de registros existentes.
+5. Como técnico, verificar que el Data API no permita leer pedidos, clientes, productos ni datos financieros de todas las tiendas; la gestión de negocios, miembros, auditoría y moderación debe funcionar por Edge Function con MFA.
+6. Comprobar que el panel técnico puede listar y moderar contenido después de aplicar el borrador, sin recuperar SELECT global a `business_content_pages`.
+7. Confirmar que las páginas públicas siguen leyendo únicamente directorio, productos activos y contenido aprobado de negocios activos.
+
+No se aplicaron las políticas live ni se ejecutaron pruebas con usuarios reales. Los cambios de moderación solo están en la rama `correcciones-funcionales`; la Edge Function no se desplegó.
