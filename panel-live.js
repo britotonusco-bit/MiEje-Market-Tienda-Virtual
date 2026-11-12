@@ -372,14 +372,11 @@
       message.textContent = `Negocio creado: ${result.business.name}. Identificador público: ${result.business.slug}. Ahora puedes invitar a su administrador y empleados.`;
       form.reset();
       await loadTechnical();
-      const memberBusinessSelect = document.querySelector('#memberBusinessSelect');
-    if (memberBusinessSelect) memberBusinessSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
-    const suspensionSelect = document.querySelector('#suspensionBusinessSelect');
-    if (suspensionSelect) suspensionSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.is_active ? '' : ' (suspendido)'}</option>`).join('');
-    const inviteSelect = document.querySelector('#inviteBusinessSelect');
+      const inviteSelect = document.querySelector('#inviteBusinessSelect');
       if (inviteSelect) inviteSelect.value = result.business.id;
       const filterSelect = document.querySelector('#businessSelect');
       if (filterSelect) filterSelect.value = result.business.id;
+      await loadSelectedBusiness(result.business.id);
     } catch (error) {
       message.className = 'message error';
       message.textContent = error.message || 'No se pudo crear el negocio.';
