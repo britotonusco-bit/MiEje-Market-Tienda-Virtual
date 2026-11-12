@@ -163,6 +163,21 @@ USING (
   )
 );
 
+
+-- Las solicitudes de cancelación solo son visibles para el administrador del
+-- negocio. Los empleados pueden crear solicitudes mediante la RPC controlada,
+-- pero no consultar la bandeja ni decidir solicitudes.
+DROP POLICY IF EXISTS cancellation_members_select ON public.order_cancellation_requests;
+CREATE POLICY cancellation_admin_select
+ON public.order_cancellation_requests
+FOR SELECT
+TO authenticated
+USING (
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+);
+
+
 -- El trigger también bloquea cambios de estado cuando el negocio está suspendido
 -- y elimina el bypass del propietario técnico.
 CREATE OR REPLACE FUNCTION private.enforce_order_status_transition()
