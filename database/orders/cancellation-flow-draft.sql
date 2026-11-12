@@ -102,6 +102,9 @@ AS $function$
 DECLARE
   v_actor uuid := auth.uid();
   v_request record;
+  v_order_id uuid;
+  v_business_id uuid;
+  v_order_status text;
   v_response text := NULLIF(pg_catalog.btrim(p_admin_response), '');
   v_restored_products integer := 0;
   v_expected_products integer := 0;
@@ -118,18 +121,42 @@ BEGIN
     RAISE EXCEPTION 'La respuesta no puede superar 2000 caracteres.' USING ERRCODE = '22023';
   END IF;
 
-  SELECT r.id, r.business_id, r.order_id, r.status AS request_status,
-         o.status AS order_status
-  INTO v_request
+  -- Obtener las referencias sin bloquear y fijar un orden de bloqueo estable:
+  -- primero el pedido y después la solicitud. request_order_cancellation()
+  -- también bloquea primero el pedido, evitando invertir el orden entre flujos.
+  SELECT r.business_id, r.order_id
+  INTO v_business_id, v_order_id
   FROM public.order_cancellation_requests r
-  JOIN public.orders o
-    ON o.id = r.order_id AND o.business_id = r.business_id
-  WHERE r.id = p_request_id
-  FOR UPDATE OF r, o;
+  WHERE r.id = p_request_id;
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'No se encontró la solicitud.' USING ERRCODE = 'P0002';
   END IF;
+
+  SELECT o.status
+  INTO v_order_status
+  FROM public.orders o
+  WHERE o.id = v_order_id
+    AND o.business_id = v_business_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'No se encontró el pedido asociado a la solicitud.' USING ERRCODE = 'P0002';
+  END IF;
+
+  SELECT r.id, r.business_id, r.order_id, r.status AS request_status
+  INTO v_request
+  FROM public.order_cancellation_requests r
+  WHERE r.id = p_request_id
+    AND r.business_id = v_business_id
+    AND r.order_id = v_order_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'La solicitud cambió o ya no existe.' USING ERRCODE = 'P0002';
+  END IF;
+
+  v_request.order_status := v_order_status;
 
   IF NOT private.business_is_active(v_request.business_id)
      OR NOT private.has_business_role(v_request.business_id, ARRAY['business_admin']::text[]) THEN
