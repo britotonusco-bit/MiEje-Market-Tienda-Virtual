@@ -171,3 +171,16 @@ Estas correcciones se prepararon en la rama de trabajo. Aún requieren pruebas d
 10. Eliminar un favorito propio y comprobar que desaparezca de la lista.
 11. Verificar que los pedidos históricos anteriores a la migración sigan conservados y no se asignen automáticamente por coincidencia de correo.
 12. Verificar que la cuenta bloqueada no pueda crear nuevos pedidos y que la navegación pública y el checkout de invitados continúen disponibles.
+
+## Recuperación y confirmación de cuentas
+
+1. Desde la cuenta de cliente, solicitar recuperación de contraseña; la respuesta de la página debe ser genérica y no revelar si el correo existe.
+2. Confirmar que el correo de recuperación dirige a `actualizar-clave.html` en GitHub Pages.
+3. Abrir un enlace vigente: solo el evento Auth `PASSWORD_RECOVERY` debe habilitar el formulario de cambio.
+4. Abrir `actualizar-clave.html` con una sesión normal ya iniciada, pero sin un evento de recuperación: el formulario debe permanecer bloqueado.
+5. Abrir un enlace vencido o ya utilizado: no debe permitir cambiar la contraseña y debe indicar que se solicite otro enlace.
+6. Cambiar la contraseña correctamente: debe cerrar la sesión si es posible y permitir iniciar sesión con la nueva contraseña.
+7. Confirmar que un error al cerrar sesión después de actualizar la contraseña no muestre falsamente que el cambio de contraseña falló.
+8. Desde el registro de clientes, comprobar que el correo de confirmación redirige a la página pública `cuenta.html`.
+9. Comprobar que la URL de `cuenta.html` esté agregada a la lista de Redirect URLs permitidas en Supabase Auth antes de probar el registro en producción.
+10. Probar envío y entrega real de correos con SMTP configurado; el servicio de correo predeterminado tiene límites y no debe asumirse como canal de producción.
