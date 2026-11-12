@@ -197,3 +197,18 @@ Estas correcciones se prepararon en la rama de trabajo. Aún requieren pruebas d
 6. Intentar crear un pedido nuevo con un método desactivado: debe rechazarse.
 7. Reintentar una compra existente sin encabezado de IP: la consulta idempotente debe poder recuperar el pedido; una clave nueva sin IP válida debe rechazarse antes de crear el pedido.
 8. Comprobar que el límite por IP sigue funcionando para claves nuevas y que no se cuenta dos veces desde Edge Function y SQL.
+
+## Cancelaciones, inventario y reembolsos
+
+1. Solicitar cancelación desde un empleado del mismo negocio y comprobar que queda pendiente.
+2. Intentar solicitar cancelación desde una cuenta de otro negocio: debe rechazarse.
+3. Aprobar con el administrador correcto: pedido y reposición de inventario deben confirmarse en una sola transacción.
+4. Rechazar una solicitud: el estado del pedido y el inventario deben permanecer iguales.
+5. Intentar aprobar dos veces o en paralelo: solo una decisión puede completarse y el inventario no debe duplicarse.
+6. Intentar cancelar un pedido entregado o ya cancelado: debe rechazarse.
+7. Comprobar que un producto eliminado (product_id nulo en el detalle histórico) no impide cancelar los demás artículos; si un producto asociado ya no pertenece al negocio esperado, la operación debe revertirse.
+8. Registrar reembolso solo para un pedido cancelado, pagado y con solicitud aprobada.
+9. Rechazar reembolso para pedido gratuito (total cero), pendiente de pago, no cancelado o sin solicitud aprobada.
+10. Intentar registrar dos reembolsos simultáneos para el mismo pedido: solo uno debe completarse.
+11. Verificar que el reembolso registre importe, método, referencia y auditoría, y cambie payment_status a refunded en la misma transacción.
+12. Confirmar que la aplicación no comunica que el dinero fue transferido: el procedimiento solo registra una devolución que el negocio ya realizó por fuera de MiEje.
