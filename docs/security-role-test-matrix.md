@@ -94,3 +94,14 @@ Este hallazgo es una diferencia entre el estado actual de Supabase y el estado p
 7. Si el correo se envía pero la creación de membresía falla, comprobar el estado de Auth antes de reintentar; el usuario no debe recibir asignaciones duplicadas.
 
 Estas correcciones se prepararon en la rama de trabajo. Aún requieren pruebas de integración en staging y despliegue posterior autorizado.
+
+## Pruebas de campos editables y protección de identificadores
+
+1. Admin A puede editar nombre, categoría, descripción, ciudad, contacto, logo, horarios, domicilio y pedido mínimo de A.
+2. Admin A no puede modificar directamente el estado del negocio, el slug, el identificador ni el creador técnico.
+3. Admin A puede cambiar nombre, categoría, descripción, precio, inventario, imagen, SKU y estado de sus productos.
+4. Admin A no puede cambiar el ID, la fecha de creación ni el business_id de un producto.
+5. Admin A puede actualizar las instrucciones y activación de sus métodos de pago, pero no su ID ni business_id.
+6. Admin A puede actualizar el costo de un producto de A, pero no cambiar la asociación del costo a otro producto o negocio.
+7. Empleado A intenta realizar cualquiera de las operaciones anteriores: debe ser rechazado.
+8. Verificar que las actualizaciones normales de la interfaz sigan funcionando después de retirar los permisos de UPDATE a nivel de tabla y conceder únicamente columnas específicas.
