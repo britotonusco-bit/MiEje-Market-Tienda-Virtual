@@ -65,18 +65,19 @@ Deno.serve(async (req: Request) => {
   });
 
   try {
+    // Leer también métodos desactivados: un reintento idempotente debe poder
+    // recuperar un pedido ya creado aunque el negocio haya desactivado el método.
     const { data: enabledMethod, error: methodError } = await admin.from("business_payment_methods")
-      .select("id,method_code,display_name")
+      .select("id,method_code,display_name,is_enabled")
       .eq("id", paymentMethodId)
       .eq("business_id", businessId)
-      .eq("is_enabled", true)
       .maybeSingle();
     if (methodError) {
       console.error("Payment method validation failed:", methodError);
       return reply(503, { error: "No fue posible validar la forma de pago." });
     }
     if (!enabledMethod) {
-      return reply(409, { error: "Esta forma de pago no está habilitada por el negocio. Actualiza el carrito e inténtalo de nuevo." });
+      return reply(409, { error: "Esta forma de pago ya no está disponible. Actualiza el carrito e inténtalo de nuevo." });
     }
 
     const paymentMethod = enabledMethod.method_code;
@@ -151,12 +152,11 @@ Deno.serve(async (req: Request) => {
     }
     if (previousOrder) return reply(200, { ok: true, order: previousOrder });
 
-    const { data: allowed, error: rateError } = await admin.rpc("consume_checkout_rate_limit", { p_ip: ip });
-    if (rateError) {
-      console.error("Checkout rate-limit check failed:", rateError);
-      return reply(503, { error: "No fue posible validar el pedido en este momento." });
+    // La función SQL idempotente aplica el límite dentro de la misma
+    // transacción y solo para una clave nueva. No consumirlo también aquí.
+    if (enabledMethod.is_enabled !== true) {
+      return reply(409, { error: "Esta forma de pago ya no está habilitada. Selecciona otra forma de pago." });
     }
-    if (allowed !== true) return reply(429, { error: "Se recibieron demasiadas solicitudes. Espera unos minutos e inténtalo de nuevo." });
 
     const { data, error } = await admin.rpc("create_public_order_idempotent", requestArgs);
 
