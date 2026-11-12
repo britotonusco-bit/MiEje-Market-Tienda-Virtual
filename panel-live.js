@@ -382,19 +382,40 @@
   }
 
   async function showSupportLink() {
-    const link = document.querySelector('#technicalSupportLink'); if (!link) return;
-    const { data } = await db.from('platform_public_settings').select('support_whatsapp').eq('id', true).maybeSingle();
-    const phone = String(data?.support_whatsapp || '').replace(/[^0-9]/g, '');
-    if (phone) { link.href = `https://wa.me/${phone}?text=${encodeURIComponent('Hola, necesito ayuda con mi acceso a MiEje Market.')}`; link.classList.remove('hidden'); }
-    else { link.href = '#'; link.classList.add('hidden'); const msg = document.querySelector('#technicalSupportMessage'); if (msg) msg.textContent = 'El servicio técnico aún no ha configurado su número de WhatsApp.'; }
+    const link = document.querySelector('#technicalSupportLink');
+    if (!link) return;
+    link.href = '#';
+    link.classList.add('hidden');
+    const message = document.querySelector('#technicalSupportMessage');
+    if (message) message.textContent = 'El número de soporte de la plataforma aún no está configurado en el proyecto independiente.';
   }
 
   async function initBusinessSettings() {
     await showSupportLink();
+    const [businessResult, methodsResult] = await Promise.all([
+      db.from('businesses').select('name,tagline,description,city,contact_phone,whatsapp_support,logo_url,delivery_fee,minimum_order_amount').eq('id', businessId).single(),
+      db.from('business_payment_methods').select('method_code,display_name,is_enabled,sort_order').eq('business_id', businessId).order('sort_order')
+    ]);
+    const form = document.querySelector('#storeSettingsForm');
+    if (businessResult.error) {
+      const message = document.querySelector('#storeSettingsMessage');
+      if (message) { message.textContent = 'No se pudieron cargar los datos del negocio: ' + businessResult.error.message; message.className = 'message error'; }
+    } else if (form) {
+      const b = businessResult.data;
+      for (const key of ['name','tagline','description','city','contact_phone','whatsapp_support','logo_url','delivery_fee','minimum_order_amount']) {
+        if (form.elements[key]) form.elements[key].value = b[key] ?? (['delivery_fee','minimum_order_amount'].includes(key) ? 0 : '');
+      }
+    }
+    const paymentField = form?.elements.payment_methods;
+    if (paymentField && !methodsResult.error) paymentField.value = (methodsResult.data || []).filter(m => m.is_enabled).sort((a,b) => a.sort_order-b.sort_order).map(m => m.display_name).join('\n');
+    if (methodsResult.error) {
+      const message = document.querySelector('#storeSettingsMessage');
+      if (message) { message.textContent = 'No se pudieron cargar los métodos de pago: ' + methodsResult.error.message; message.className = 'message error'; }
+    }
     const pending = [
-      ['configuracion-tienda', 'Configuración de la tienda', 'La base independiente ya tiene los datos principales del negocio y una tabla separada para métodos de pago. Falta conectar este formulario con esos campos y sus permisos. No guardes información aquí todavía.'],
       ['contenido-tienda', 'Promociones y formularios de empleo', 'Las tablas de promociones, páginas de contenido y postulaciones todavía no existen en el esquema independiente. Esta sección queda pendiente para evitar guardar datos en una tabla inexistente.'],
-      ['ia-negocio', 'IA exclusiva del negocio', 'La configuración de IA por negocio aún no está implementada en la base independiente.']
+      ['ia-negocio', 'IA exclusiva del negocio', 'La configuración de IA por negocio aún no está implementada en la base independiente.'],
+      ['solicitudes-bloqueo', 'Solicitudes de bloqueo', 'Las solicitudes de bloqueo desde el panel del negocio todavía no están implementadas en el servidor.']
     ];
     for (const [id, heading, message] of pending) {
       const section = document.getElementById(id);
@@ -403,11 +424,92 @@
   }
 
   async function saveStoreSettings(event) {
-    event.preventDefault(); const form=event.currentTarget, message=document.querySelector('#storeSettingsMessage');
-    const list = name => form.elements[name].value.split('\n').map(v=>v.trim()).filter(Boolean).map(label=>({label,enabled:true}));
-    const contactNotes=form.elements.contact_options.value.split('\n').map(v=>v.trim()).filter(Boolean).slice(0,30);
-    const payload={business_id:businessId,whatsapp_number:form.elements.whatsapp_number.value.replace(/[^0-9]/g,'').slice(0,18),payment_methods:list('payment_methods'),delivery_options:list('delivery_options'),contact_options:{notes:contactNotes},updated_by:currentUser.id,updated_at:new Date().toISOString()};
-    const {error}=await db.from('business_store_settings').upsert(payload,{onConflict:'business_id'}); message.textContent=error?`No se pudo guardar: ${error.message}`:'Configuración de pago, entrega y contacto guardada.'; message.className=error?'message error':'message success';
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#storeSettingsMessage');
+    const value = name => String(form.elements[name]?.value || '').trim();
+    const name = value('name');
+    const city = value('city');
+    if (!name || !city) {
+      message.textContent = 'El nombre del negocio y la ciudad son obligatorios.';
+      message.className = 'message error';
+      return;
+    }
+    const toAmount = name => {
+      const n = Number(form.elements[name]?.value || 0);
+      return Number.isFinite(n) && n >= 0 ? n : null;
+    };
+    const deliveryFee = toAmount('delivery_fee');
+    const minimumOrder = toAmount('minimum_order_amount');
+    if (deliveryFee === null || minimumOrder === null) {
+      message.textContent = 'El costo de domicilio y el pedido mínimo deben ser valores iguales o mayores que cero.';
+      message.className = 'message error';
+      return;
+    }
+    const businessPayload = {
+      name,
+      tagline: value('tagline') || null,
+      description: value('description') || null,
+      city,
+      contact_phone: value('contact_phone') || null,
+      whatsapp_support: value('whatsapp_support').replace(/[^0-9+]/g, '').slice(0, 50) || null,
+      logo_url: value('logo_url') || null,
+      delivery_fee: deliveryFee,
+      minimum_order_amount: minimumOrder,
+      updated_at: new Date().toISOString()
+    };
+    message.textContent = 'Guardando datos del negocio…';
+    message.className = 'message';
+    const { error: businessError } = await db.from('businesses').update(businessPayload).eq('id', businessId);
+    if (businessError) {
+      message.textContent = 'No se pudieron guardar los datos del negocio: ' + businessError.message;
+      message.className = 'message error';
+      return;
+    }
+    try {
+      const labels = [...new Set(value('payment_methods').split('\n').map(v => v.trim()).filter(v => v.length >= 2 && v.length <= 100))];
+      const methods = labels.map((displayName, sortOrder) => ({
+        displayName,
+        methodCode: displayName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50),
+        sortOrder
+      })).filter(m => m.methodCode.length >= 2);
+      const { data: existing, error: readError } = await db.from('business_payment_methods')
+        .select('id,method_code,display_name,is_enabled,sort_order')
+        .eq('business_id', businessId);
+      if (readError) throw readError;
+      const byCode = new Map();
+      (existing || []).forEach(row => { if (!byCode.has(row.method_code)) byCode.set(row.method_code, row); });
+      const retained = new Set();
+      for (const method of methods) {
+        const old = byCode.get(method.methodCode);
+        if (old) {
+          const { error } = await db.from('business_payment_methods').update({
+            display_name: method.displayName, is_enabled: true, sort_order: method.sortOrder, updated_at: new Date().toISOString()
+          }).eq('id', old.id).eq('business_id', businessId);
+          if (error) throw error;
+          retained.add(old.id);
+        } else {
+          const { error } = await db.from('business_payment_methods').insert({
+            business_id: businessId, method_code: method.methodCode, display_name: method.displayName,
+            is_enabled: true, sort_order: method.sortOrder
+          });
+          if (error) throw error;
+        }
+      }
+      for (const old of (existing || [])) {
+        if (!retained.has(old.id) && !methods.some(m => m.methodCode === old.method_code) && old.is_enabled) {
+          const { error } = await db.from('business_payment_methods').update({ is_enabled: false, updated_at: new Date().toISOString() }).eq('id', old.id).eq('business_id', businessId);
+          if (error) throw error;
+        }
+      }
+      message.textContent = 'Datos del negocio y métodos de pago guardados correctamente.';
+      message.className = 'message success';
+      businessName = name;
+      const heading = document.querySelector('#businessName'); if (heading) heading.textContent = name;
+    } catch (error) {
+      message.textContent = 'Los datos generales se guardaron, pero hubo un problema al actualizar los métodos de pago: ' + (error.message || 'Error desconocido');
+      message.className = 'message error';
+    }
   }
 
   async function saveBusinessContent(event) {
