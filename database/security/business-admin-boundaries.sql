@@ -386,3 +386,60 @@ USING (
   private.has_business_role(business_id, ARRAY['business_admin']::text[])
   AND private.business_is_active(business_id)
 );
+
+
+-- Impedir trasladar registros entre tiendas cuando una misma cuenta
+-- administra más de un negocio. La política RLS valida el destino, pero
+-- esta protección conserva inmutable la pertenencia original del registro.
+CREATE OR REPLACE FUNCTION private.prevent_business_scope_change()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_product_business_id uuid;
+BEGIN
+  IF NEW.business_id IS DISTINCT FROM OLD.business_id THEN
+    RAISE EXCEPTION 'No se puede trasladar un registro de un negocio a otro.'
+      USING ERRCODE = '42501';
+  END IF;
+
+  IF TG_TABLE_NAME = 'product_costs' THEN
+    SELECT p.business_id
+    INTO v_product_business_id
+    FROM public.products p
+    WHERE p.id = NEW.product_id;
+
+    IF v_product_business_id IS NULL
+       OR v_product_business_id <> NEW.business_id THEN
+      RAISE EXCEPTION 'El costo debe corresponder a un producto del mismo negocio.'
+        USING ERRCODE = '23514';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$function$;
+
+DROP TRIGGER IF EXISTS prevent_product_business_scope_change ON public.products;
+CREATE TRIGGER prevent_product_business_scope_change
+BEFORE UPDATE OF business_id ON public.products
+FOR EACH ROW EXECUTE FUNCTION private.prevent_business_scope_change();
+
+DROP TRIGGER IF EXISTS prevent_expense_business_scope_change ON public.business_expenses;
+CREATE TRIGGER prevent_expense_business_scope_change
+BEFORE UPDATE OF business_id ON public.business_expenses
+FOR EACH ROW EXECUTE FUNCTION private.prevent_business_scope_change();
+
+DROP TRIGGER IF EXISTS prevent_payment_method_business_scope_change ON public.business_payment_methods;
+CREATE TRIGGER prevent_payment_method_business_scope_change
+BEFORE UPDATE OF business_id ON public.business_payment_methods
+FOR EACH ROW EXECUTE FUNCTION private.prevent_business_scope_change();
+
+DROP TRIGGER IF EXISTS prevent_product_cost_business_scope_change ON public.product_costs;
+CREATE TRIGGER prevent_product_cost_business_scope_change
+BEFORE UPDATE OF business_id, product_id ON public.product_costs
+FOR EACH ROW EXECUTE FUNCTION private.prevent_business_scope_change();
+
+REVOKE ALL ON FUNCTION private.prevent_business_scope_change() FROM PUBLIC, anon, authenticated;
