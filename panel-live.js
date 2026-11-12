@@ -758,7 +758,7 @@
     if (error) { showError(target, error); return; }
     const rows = data || [];
     if (!rows.length) { target.innerHTML = '<div class="empty">Todavía no se han recibido postulaciones.</div>'; return; }
-    target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Postulante</th><th>Contacto</th><th>Mensaje y respuestas</th><th>Estado</th><th>Notas internas</th><th>Guardar</th></tr></thead><tbody>' +
+    target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Postulante</th><th>Contacto</th><th>Mensaje y respuestas</th><th>Hoja de vida</th><th>Estado</th><th>Notas internas</th><th>Guardar</th></tr></thead><tbody>' +
       (await Promise.all(rows.map(async row => {
         let resumeLink = '<span class="muted">No adjuntó</span>';
         if (row.resume_path) {
