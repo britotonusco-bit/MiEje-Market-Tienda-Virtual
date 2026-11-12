@@ -263,3 +263,28 @@ Se consultó el esquema live y se confirmó que los estados permitidos por la re
 La inspección de las políticas RLS activas de `order_cancellation_requests` encontró que empleados y administradores podían consultar la bandeja de solicitudes, aunque la matriz funcional reserva esa bandeja al administrador. Se añadió al borrador `business-admin-boundaries.sql` el reemplazo de esa política: solo el administrador del negocio activo puede leer las solicitudes. Los empleados conservan la posibilidad de registrar solicitudes mediante `request_order_cancellation`, pero no pueden consultar la bandeja ni aprobar/rechazar.
 
 La tabla solo concede SELECT a `authenticated`; no concede INSERT, UPDATE ni DELETE a ese rol. La creación y decisión se mantienen detrás de funciones RPC controladas. Esta es una corrección de borrador: no se ha aplicado a Supabase.
+
+
+## Auditoría de reembolsos y movimientos financieros
+
+Consultas de solo lectura al esquema live confirmaron:
+- `financial_transactions.amount` exige un valor mayor que cero; el borrador ya rechaza pedidos con total cero antes del INSERT.
+- Los estados financieros permitidos son `pending`, `completed`, `failed` y `reversed`; el tipo `refund` está admitido.
+- `refund_details` exige `financial_transaction_id`, negocio, pedido, método y usuario registrador; el borrador aporta esos campos.
+- Las claves foráneas compuestas vinculan la transacción y el detalle al mismo negocio y pedido.
+- No se encontraron reembolsos completados duplicados en los datos existentes al momento de la consulta; el índice único parcial propuesto no colisiona con esos datos.
+- La tabla `orders` solo concede UPDATE directo a `authenticated` en `status` y `delivery_tracking`; no concede actualización directa de `payment_status`. El procedimiento SECURITY DEFINER es el único flujo propuesto para marcar el pedido como `refunded`.
+- El trigger de transición de estado solo ejecuta reglas cuando cambia `orders.status`; actualizar `payment_status` no provoca una transición ficticia de estado.
+
+### Corrección encontrada en política de cancelaciones
+Una pasada final detectó que el mismo archivo SQL volvía a declarar más abajo la política de lectura de cancelaciones permitiendo `business_admin` y `employee`, anulando el cambio previo. Se corrigió esa última declaración para que la política efectiva del borrador sea `cancellation_admin_select`, exclusiva del administrador del negocio activo. Los empleados siguen solicitando cancelaciones por RPC sin consultar la bandeja.
+
+Pruebas de staging pendientes:
+1. Reembolso válido por el importe total, con pago previamente realizado fuera de MiEje.
+2. Segundo intento simultáneo de reembolso para el mismo pedido: debe rechazarse por bloqueo del pedido y por el índice único.
+3. Empleado, administrador de otro negocio y técnico por Data API: no pueden consultar ni registrar reembolsos de ese negocio.
+4. Pedido pendiente, fallido, no cancelado, sin cancelación aprobada o con total cero: debe rechazarse.
+5. Verificar que la transacción financiera, detalle, cambio de `payment_status` y auditoría se confirmen juntos o se reviertan juntos.
+6. Confirmar que la interfaz solo muestra pedidos cancelados y pagados, y que después de registrar el reembolso desaparecen de la lista.
+
+No se ejecutó SQL ni se desplegó la función. La devolución del dinero debe haberse realizado por fuera de MiEje antes de registrar el comprobante.
