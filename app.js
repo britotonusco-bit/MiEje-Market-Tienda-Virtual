@@ -384,6 +384,45 @@
     showView("listing");
   }
 
+  async function toggleFavorite(productId, button) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(productId)) {
+      showToast("Este producto no está disponible para guardarse como favorito.");
+      return;
+    }
+    if (!window.supabase || !window.MIEJE_SUPABASE_URL || !window.MIEJE_SUPABASE_PUBLISHABLE_KEY) {
+      showToast("No fue posible conectar con tu cuenta.");
+      return;
+    }
+    button.disabled = true;
+    try {
+      const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
+      const { data: userData, error: userError } = await client.auth.getUser();
+      if (userError || !userData.user) {
+        window.location.href = "cuenta.html";
+        return;
+      }
+      const { data: existing, error: lookupError } = await client.from("customer_favorites")
+        .select("id").eq("user_id", userData.user.id).eq("product_id", productId).maybeSingle();
+      if (lookupError) throw lookupError;
+      if (existing) {
+        const { error } = await client.from("customer_favorites").delete().eq("id", existing.id);
+        if (error) throw error;
+        button.textContent = "♡ Guardar";
+        showToast("Producto retirado de tus favoritos.");
+      } else {
+        const { error } = await client.from("customer_favorites").insert({ user_id:userData.user.id, product_id:productId });
+        if (error) throw error;
+        button.textContent = "♥ Guardado";
+        showToast("Producto agregado a tus favoritos.");
+      }
+    } catch (error) {
+      console.warn("No se pudo actualizar el favorito.", error);
+      showToast(error.message || "No fue posible actualizar tus favoritos.");
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   function productCard(business, product) {
     const canOrder = business.isRegistered === true && business.isActive !== false && Number(product.inventory || 0) > 0;
     const buttonText = !business.isRegistered ? "Demostración" : Number(product.inventory || 0) > 0 ? "+ Agregar" : "Agotado";
@@ -399,6 +438,7 @@
               data-action="add"
               data-business="${escapeHtml(business.id)}"
               data-product="${escapeHtml(product.id)}">${buttonText}</button>
+            ${business.isRegistered === true ? `<button type="button" class="add-button" data-action="favorite" data-product="${escapeHtml(product.id)}">♡ Guardar</button>` : ""}
           </div>
         </div>
       </article>`;
@@ -813,6 +853,10 @@
 
       if (action === "add") {
         addToCart(actionButton.dataset.business, actionButton.dataset.product);
+      }
+
+      if (action === "favorite") {
+        void toggleFavorite(actionButton.dataset.product, actionButton);
       }
 
       if (action === "quantity") {
