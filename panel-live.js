@@ -396,7 +396,10 @@
     try {
       const result = await callTechnicalFunction(payload);
       message.className = 'message success';
-      message.textContent = `Invitación preparada para ${result.email} como ${result.role === 'business_admin' ? 'administrador' : 'empleado'} de ${result.business}. La persona debe abrir el correo y configurar su contraseña.`;
+      const assignedRole = result.membership?.role === 'business_admin' ? 'administrador' : 'empleado';
+      message.textContent = result.message || (result.invitation_sent
+        ? `Invitación enviada para el nuevo usuario como ${assignedRole}.`
+        : `Usuario existente asignado como ${assignedRole} al negocio.`);
       const keepBusiness = form.elements.business_id.value;
       form.reset();
       form.elements.business_id.value = keepBusiness;
