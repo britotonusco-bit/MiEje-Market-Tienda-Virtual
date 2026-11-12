@@ -249,13 +249,17 @@ BEGIN
     v_business_id := OLD.business_id;
     v_removing_active_admin := OLD.role = 'business_admin' AND OLD.status = 'active';
   ELSE
+    IF NEW.business_id IS DISTINCT FROM OLD.business_id THEN
+      RAISE EXCEPTION 'No se puede trasladar una membresía a otro negocio.'
+        USING ERRCODE = '42501';
+    END IF;
+
     v_business_id := OLD.business_id;
     v_removing_active_admin :=
       OLD.role = 'business_admin'
       AND OLD.status = 'active'
       AND NOT (
-        NEW.business_id = OLD.business_id
-        AND NEW.role = 'business_admin'
+        NEW.role = 'business_admin'
         AND NEW.status = 'active'
       );
   END IF;
@@ -290,7 +294,7 @@ DROP TRIGGER IF EXISTS guard_last_active_business_admin
 ON public.business_memberships;
 
 CREATE TRIGGER guard_last_active_business_admin
-BEFORE UPDATE OF role, status OR DELETE
+BEFORE UPDATE OF business_id, role, status OR DELETE
 ON public.business_memberships
 FOR EACH ROW
 EXECUTE FUNCTION private.guard_last_active_business_admin();
