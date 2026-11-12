@@ -185,40 +185,43 @@
       if (!window.supabase || !window.MIEJE_SUPABASE_URL || !window.MIEJE_SUPABASE_PUBLISHABLE_KEY) return;
       const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
       const { data: rows, error } = await client.from("businesses")
-        .select("id,name,slug,business_type,category,description,tagline,city,contact_phone,opening_hours,logo_url,is_active,suspension_reason,suspension_public_message")
+        .select("id,name,slug,business_type,category,description,tagline,city,contact_phone,whatsapp_support,opening_hours,logo_url,status,suspension_reason,public_suspension_message,delivery_fee,minimum_order_amount")
         .order("created_at", { ascending: false }).limit(200);
-      if (error || !rows?.length) return;
-      const { data: productRows, error: productError } = await client.from("products")
-        .select("id,business_id,name,description,image_url,price,stock_quantity,track_inventory,is_active")
-        .in("business_id", rows.map(row => row.id)).eq("is_active", true).order("created_at", { ascending: false }).limit(1000);
-      const products = productError ? [] : (productRows || []);
-      const [settingsResult, contentResult] = await Promise.all([
-        client.from("business_store_settings").select("business_id,whatsapp_number,payment_methods,delivery_options,contact_options,advertising_enabled").in("business_id", rows.filter(r=>r.is_active).map(row => row.id)),
-        client.from("business_content_pages").select("id,business_id,content_type,title,body,content,created_at").in("business_id", rows.filter(r=>r.is_active).map(row => row.id)).eq("is_published", true).order("created_at", { ascending: false }).limit(300)
-      ]);
-      const settingsByBusiness = new Map((settingsResult.data || []).map(item => [item.business_id, item]));
-      const contentRows = contentResult.data || [];
+      if (error) throw error;
+      if (!rows?.length) return;
+      const activeBusinessIds = rows.filter(row => row.status === "active").map(row => row.id);
+      let products = [];
+      if (activeBusinessIds.length) {
+        const { data: productRows, error: productError } = await client.from("products")
+          .select("id,business_id,name,description,image_url,price,inventory,is_active")
+          .in("business_id", activeBusinessIds).eq("is_active", true).order("created_at", { ascending: false }).limit(1000);
+        if (productError) throw productError;
+        products = productRows || [];
+      }
       const registered = rows.map(row => ({
         id: row.id,
         name: row.name,
         category: row.category || row.business_type || "General",
         tagline: row.tagline || row.description || "Conoce los productos de este negocio local.",
         location: row.city || "Eje Cafetero",
-        hours: row.opening_hours || "Consulta el horario con el negocio.",
+        hours: "Consulta el horario con el negocio.",
         phone: row.contact_phone || "",
         rating: "Nuevo",
-        isActive: row.is_active !== false,
+        isActive: row.status === "active",
         suspensionReason: row.suspension_reason || "",
-        publicSuspensionMessage: row.suspension_public_message || "Esta tienda no está disponible temporalmente.",
-        storeSettings: settingsByBusiness.get(row.id) || {},
-        contentPages: contentRows.filter(item => item.business_id === row.id),
+        publicSuspensionMessage: row.public_suspension_message || "Esta tienda no está disponible temporalmente.",
+        storeSettings: { whatsapp_number: row.whatsapp_support || "", payment_methods: [], delivery_options: [] },
+        contentPages: [],
         image: row.logo_url || "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1000&q=85",
         slug: row.slug,
+        deliveryFee: Number(row.delivery_fee || 0),
+        minimumOrderAmount: Number(row.minimum_order_amount || 0),
         products: products.filter(product => product.business_id === row.id).map(product => ({
           id: product.id,
           name: product.name,
           description: product.description || "Producto disponible en esta tienda.",
           price: Number(product.price || 0),
+          inventory: Number(product.inventory || 0),
           image: product.image_url || "https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=700&q=80"
         }))
       }));
