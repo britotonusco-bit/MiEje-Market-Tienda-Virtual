@@ -183,6 +183,15 @@
         <button class="btn lime full" type="submit">Confirmar pedido</button>
         <small>Al confirmar, el pedido se registra en MiEje Market y se envía al negocio. El cobro se coordina según la forma de pago seleccionada.</small>
       </form>
+      <section class="tracking-panel" aria-labelledby="trackingTitle">
+        <h3 id="trackingTitle">Consultar un pedido</h3>
+        <p class="muted">Ingresa el código privado que recibiste al confirmar tu compra.</p>
+        <form id="trackingForm" class="checkout-form">
+          <label>Código de seguimiento<input name="token" required inputmode="text" autocomplete="off" maxlength="36" pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></label>
+          <button class="btn secondary full" type="submit">Consultar estado</button>
+        </form>
+        <div id="trackingResult" class="muted" role="status" aria-live="polite"></div>
+      </section>
     </div>
   </aside>
 
