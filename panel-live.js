@@ -269,22 +269,13 @@
   async function loadTechnical() {
     const result = await callTechnicalFunction({ action: 'list_businesses' });
     cachedBusinesses = result.businesses || [];
-    const [productsResult, ordersResult, auditResult] = await Promise.all([
-      db.from('products').select('id', { count: 'exact', head: true }),
-      db.from('orders').select('id,status,total,payment_status', { count: 'exact' }),
-      db.from('audit_logs').select('id', { count: 'exact', head: true })
-    ]);
-    if (productsResult.error) throw productsResult.error;
-    if (ordersResult.error) throw ordersResult.error;
+    const auditResult = await db.from('audit_logs').select('id', { count: 'exact', head: true });
     if (auditResult.error) throw auditResult.error;
-    const activeOrders = ordersResult.data || [];
-    const paidOrders = activeOrders.filter(o => o.payment_status === 'paid');
     renderStats([
-      ['Negocios', number(cachedBusinesses.length), `${number(cachedBusinesses.filter(b => b.status === 'active').length)} activos`],
-      ['Productos', number(productsResult.count || 0), 'En todos los negocios'],
-      ['Pedidos', number(ordersResult.count || activeOrders.length), `${number(activeOrders.filter(o => !['delivered','cancelled'].includes(o.status)).length)} abiertos`],
-      ['Ingresos de pedidos pagados', money(paidOrders.reduce((sum,o) => sum + Number(o.total || 0), 0)), `${number(paidOrders.length)} pedidos con pago confirmado`],
-      ['Eventos de auditoría', number(auditResult.count || 0), 'Registros en audit_logs']
+      ['Negocios registrados', number(cachedBusinesses.length), 'Administración de la plataforma'],
+      ['Negocios activos', number(cachedBusinesses.filter(b => b.status === 'active').length), 'Con acceso habilitado'],
+      ['Negocios suspendidos', number(cachedBusinesses.filter(b => b.status === 'suspended').length), 'Requieren revisión o reactivación'],
+      ['Eventos de auditoría', number(auditResult.count || 0), 'Registros de actividad']
     ]);
     const options = `<option value="">Todos los negocios</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (inactivo)'}</option>`).join('');
     const select = document.querySelector('#businessSelect'); if (select) select.innerHTML = options;
@@ -432,15 +423,11 @@
 
   async function loadSelectedBusiness(id) {
     const ordersTarget = document.querySelector('#businessOrdersContainer');
-    if (!id) {
-      if (ordersTarget) ordersTarget.innerHTML = '<div class="empty">Selecciona un negocio para consultar sus pedidos.</div>';
-      return;
-    }
+    if (!ordersTarget) return;
     const business = cachedBusinesses.find(b => b.id === id);
-    if (!business) return;
-    const { data, error } = await db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,payment_status,status,total,created_at,order_items(product_name,quantity)').eq('business_id', id).order('created_at', { ascending: false }).limit(100);
-    if (error) showError(ordersTarget, error);
-    else renderOrders(ordersTarget, (data || []).map(o => ({ ...o, items: o.order_items || [] })), true);
+    ordersTarget.innerHTML = business
+      ? '<div class="empty">El panel técnico administra el negocio y sus accesos. Los pedidos, clientes, productos y movimientos comerciales solo se consultan desde el panel de ese negocio.</div>'
+      : '<div class="empty">Selecciona un negocio para administrar sus usuarios y accesos. La información comercial permanece en su panel administrativo.</div>';
   }
 
   async function loadTechnicalMembers(id) {
