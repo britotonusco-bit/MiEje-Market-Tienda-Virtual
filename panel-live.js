@@ -823,11 +823,40 @@
   }
 
   async function loadContentModeration() {
-    const target=document.querySelector('#contentModerationContainer'); if(!target) return;
-    const {data,error}=await db.from('business_content_pages').select('id,business_id,content_type,title,body,is_published,moderation_status,created_at,businesses(name)').order('created_at',{ascending:false}).limit(100);
-    if(error){showError(target,error);return;} const rows=data||[]; if(!rows.length){target.innerHTML='<div class="empty">No hay publicaciones enviadas por los negocios.</div>';return;}
-    target.innerHTML=`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Negocio</th><th>Tipo</th><th>Título y contenido</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${dateTime(r.created_at)}</td><td>${esc(r.businesses?.name||shortId(r.business_id))}</td><td>${esc(r.content_type)}</td><td><strong>${esc(r.title)}</strong><br>${esc(r.body)}</td><td>${esc(r.moderation_status||'pending')}</td><td>${r.moderation_status!=='approved'?`<button class="small-button" data-moderate-content="${esc(r.id)}" data-decision="approved">Aprobar</button>`:''} ${r.moderation_status!=='rejected'?`<button class="small-button" data-moderate-content="${esc(r.id)}" data-decision="rejected">Rechazar</button>`:'—'}</td></tr>`).join('')}</tbody></table></div>`;
-    target.querySelectorAll('[data-moderate-content]').forEach(btn=>btn.addEventListener('click',async()=>{const note=window.prompt('Nota de revisión (opcional):','')||'';btn.disabled=true;try{const result=await callTechnicalFunction({action:'moderate_business_content',content_id:btn.dataset.moderateContent,decision:btn.dataset.decision,moderation_note:note});alert(result.message);await loadContentModeration();await loadAuditEvents(null,'#auditContainer');}catch(e){alert(e.message);btn.disabled=false;}}));
+    const target = document.querySelector('#contentModerationContainer');
+    if (!target) return;
+    target.innerHTML = '<div class="empty">Cargando publicaciones para revisión…</div>';
+    try {
+      // La moderación técnica usa la Edge Function privilegiada; no abre
+      // lectura global de business_content_pages mediante el Data API/RLS.
+      const result = await callTechnicalFunction({ action: 'list_content_moderation', limit: 100 });
+      const rows = result.contents || [];
+      if (!rows.length) {
+        target.innerHTML = '<div class="empty">No hay publicaciones enviadas por los negocios.</div>';
+        return;
+      }
+      target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Negocio</th><th>Tipo</th><th>Título y contenido</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${rows.map(r => `<tr><td>${dateTime(r.created_at)}</td><td>${esc(r.businesses?.name || shortId(r.business_id))}</td><td>${esc(r.content_type)}</td><td><strong>${esc(r.title)}</strong><br>${esc(r.body)}</td><td>${esc(r.moderation_status || 'pending')}</td><td>${r.moderation_status !== 'approved' ? `<button class="small-button" data-moderate-content="${esc(r.id)}" data-decision="approved">Aprobar</button>` : ''} ${r.moderation_status !== 'rejected' ? `<button class="small-button" data-moderate-content="${esc(r.id)}" data-decision="rejected">Rechazar</button>` : '—'}</td></tr>`).join('')}</tbody></table></div>`;
+      target.querySelectorAll('[data-moderate-content]').forEach(btn => btn.addEventListener('click', async () => {
+        const note = window.prompt('Nota de revisión (opcional):', '') || '';
+        btn.disabled = true;
+        try {
+          const actionResult = await callTechnicalFunction({
+            action: 'moderate_business_content',
+            content_id: btn.dataset.moderateContent,
+            decision: btn.dataset.decision,
+            moderation_note: note
+          });
+          alert(actionResult.message);
+          await loadContentModeration();
+          await loadAuditEvents(null, '#auditContainer');
+        } catch (error) {
+          alert(error.message);
+          btn.disabled = false;
+        }
+      }));
+    } catch (error) {
+      showError(target, error);
+    }
   }
 
   async function loadBlockRequests() {
