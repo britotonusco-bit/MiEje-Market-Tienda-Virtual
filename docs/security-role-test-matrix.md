@@ -288,3 +288,26 @@ Pruebas de staging pendientes:
 6. Confirmar que la interfaz solo muestra pedidos cancelados y pagados, y que después de registrar el reembolso desaparecen de la lista.
 
 No se ejecutó SQL ni se desplegó la función. La devolución del dinero debe haberse realizado por fuera de MiEje antes de registrar el comprobante.
+
+## Auditoría de inventario y protección de reintentos del checkout
+
+La inspección de solo lectura del esquema y de la función live `public.create_public_order` confirmó:
+- Cada producto se consulta con `FOR UPDATE` antes de validar disponibilidad; las compras concurrentes del mismo producto quedan serializadas.
+- La función comprueba que el inventario alcance para la cantidad solicitada y descuenta las unidades dentro de la misma transacción que crea el pedido y sus detalles.
+- La restricción `products_inventory_check` impide inventario negativo.
+- La cancelación propuesta agrupa las líneas por producto y suma las cantidades antes de restituirlas. Verifica que se hayan actualizado todos los productos vinculados; si falta alguno, revierte la operación completa.
+- Los detalles de pedido conservan `product_name`, `quantity` y `unit_price`; si un producto se elimina, su FK queda en NULL y ya no existe una fila de inventario que pueda restituirse.
+
+Se corrigió `app.js` para conservar la clave idempotente del intento de checkout en `sessionStorage` durante la pestaña. El contenido almacenado incluye únicamente una huella SHA-256 del payload y la clave UUID, no los datos personales del comprador. Así, si el navegador recarga la página después de enviar el pedido, el mismo payload puede reutilizar la clave y recuperar la respuesta original del servidor. La clave se limpia al confirmar el pedido.
+
+Pruebas pendientes en staging:
+1. Dos compras simultáneas que soliciten las últimas unidades de un producto: solo una debe completarse.
+2. Compra con inventario exacto: debe terminar en cero; una unidad adicional debe rechazarse.
+3. Dos líneas repetidas del mismo producto: la API debe rechazarlas o normalizarlas sin permitir una venta superior al inventario.
+4. Cancelación aprobada con varios productos y cantidades repetidas: cada inventario debe aumentar exactamente por la suma comprada.
+5. Cancelación rechazada: no debe cambiar el inventario.
+6. Recargar la pestaña después de enviar el checkout, antes de recibir respuesta, y reenviar el mismo payload: debe recuperarse el mismo pedido.
+7. Reutilizar la clave con un payload diferente: debe devolver conflicto y no crear otro pedido.
+8. Simular un error durante la restitución: el estado del pedido y el inventario deben revertirse juntos.
+
+La corrección de `app.js` está en la rama `correcciones-funcionales`. La migración de checkout idempotente y la migración de cancelaciones siguen siendo borradores; no se ejecutó SQL ni se desplegó ninguna Edge Function. Las pruebas de concurrencia y navegador todavía no se han ejecutado.
