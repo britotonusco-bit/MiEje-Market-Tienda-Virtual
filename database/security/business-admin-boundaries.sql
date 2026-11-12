@@ -253,7 +253,11 @@ BEGIN
     v_removing_active_admin :=
       OLD.role = 'business_admin'
       AND OLD.status = 'active'
-      AND NOT (NEW.role = 'business_admin' AND NEW.status = 'active');
+      AND NOT (
+        NEW.business_id = OLD.business_id
+        AND NEW.role = 'business_admin'
+        AND NEW.status = 'active'
+      );
   END IF;
 
   IF NOT v_removing_active_admin THEN
