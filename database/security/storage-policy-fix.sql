@@ -99,3 +99,31 @@ USING (
 -- Nota: business-assets es un bucket público. Esta política limita la gestión
 -- autenticada de objetos; la lectura pública se controla por la configuración
 -- public del bucket. job-applications-private no se modifica aquí.
+
+-- Lectura estricta de hojas de vida privadas.
+-- Convención generada por create-job-application:
+-- <business_uuid>/<application_uuid>/<random_uuid>.(pdf|doc|docx)
+-- El bucket sigue siendo privado; el administrador obtiene enlaces firmados
+-- de corta duración únicamente después de leer la postulación de su negocio.
+DROP POLICY IF EXISTS job_application_documents_business_admin_read ON storage.objects;
+CREATE POLICY job_application_documents_business_admin_read
+ON storage.objects
+FOR SELECT
+TO authenticated
+USING (
+  bucket_id = 'job-applications-private'
+  AND array_length(storage.foldername(objects.name), 1) = 2
+  AND (storage.foldername(objects.name))[1] ~*
+    '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+  AND (storage.foldername(objects.name))[2] ~*
+    '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+  AND storage.filename(objects.name) ~*
+    '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(pdf|doc|docx)$'
+  AND EXISTS (
+    SELECT 1
+    FROM public.businesses AS b
+    WHERE b.id = ((storage.foldername(objects.name))[1])::uuid
+      AND b.status = 'active'
+      AND private.has_business_role(b.id, ARRAY['business_admin']::text[])
+  )
+);
