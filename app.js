@@ -926,6 +926,29 @@
     }
   });
 
+  $("#trackingForm")?.addEventListener("submit", async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const result = $("#trackingResult");
+    const button = form.querySelector('button[type="submit"]');
+    const token = String(new FormData(form).get("token") || "").trim();
+    result.textContent = "Consultando pedido…";
+    button.disabled = true;
+    try {
+      const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
+      const { data, error } = await client.functions.invoke("track-public-order", { body: { token } });
+      if (error || !data?.order) throw new Error(data?.error || error?.message || "No se encontró el pedido.");
+      const order = data.order;
+      const labels = { pending: "Recibido", confirmed: "Confirmado", preparing: "En preparación", ready: "Listo", out_for_delivery: "En camino", delivered: "Entregado", cancelled: "Cancelado" };
+      const created = order.created_at ? new Intl.DateTimeFormat("es-CO", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Bogota" }).format(new Date(order.created_at)) : "—";
+      result.innerHTML = `<div class="info-panel"><strong>Pedido #${escapeHtml(order.order_number)}</strong><p>Negocio: ${escapeHtml(order.business_name || "—")}</p><p>Estado: <strong>${escapeHtml(labels[order.status] || order.status)}</strong></p><p>Fecha: ${escapeHtml(created)}</p><p>Total: ${money(order.total)}</p>${order.delivery_tracking ? `<p>Seguimiento: ${escapeHtml(order.delivery_tracking)}</p>` : ""}</div>`;
+    } catch (error) {
+      result.textContent = error.message || "No se pudo consultar el pedido.";
+    } finally {
+      button.disabled = false;
+    }
+  });
+
   document.addEventListener("keydown", event => {
     if (event.key === "Escape") closeCart();
   });
