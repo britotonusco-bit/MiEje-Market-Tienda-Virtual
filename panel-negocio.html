@@ -5,7 +5,7 @@
 <label>Descripción<textarea class="field" name="description" rows="3" maxlength="3000" placeholder="Describe el producto"></textarea></label>
 <label>Precio (COP)<input class="field" name="price" type="number" min="0" step="1" required></label>
 <label>Existencias<input class="field" name="inventory" type="number" min="0" step="1" required value="0"></label>
-<label>Imagen del producto (URL)<input class="field" name="image_url" type="url" maxlength="1000" placeholder="https://..."></label>
+<label>Subir imagen del producto<input class="field" name="image_file" type="file" accept="image/png,image/jpeg,image/webp"></label><p class="muted">PNG, JPG o WEBP. Máximo 5 MB. También puedes usar una URL externa:</p><label>URL de imagen externa (opcional)<input class="field" name="image_url" type="url" maxlength="1000" placeholder="https://..."></label>
 <label><input type="checkbox" name="is_active" checked> Producto activo y visible</label>
 <div class="button-row"><button class="button primary" type="submit">Guardar producto</button><button class="button secondary" type="reset">Limpiar formulario</button></div>
 <p id="productMessage" class="message" aria-live="polite"></p></form>
@@ -17,7 +17,7 @@
 <label>Ciudad<input class="field" name="city" maxlength="160" placeholder="Pereira, Risaralda"></label>
 <label>Teléfono de contacto<input class="field" name="contact_phone" maxlength="50" inputmode="tel"></label>
 <label>WhatsApp del negocio<input class="field" name="whatsapp_support" maxlength="50" inputmode="tel" placeholder="573001234567"></label>
-<label>Dirección web del logo (URL)<input class="field" name="logo_url" type="url" maxlength="1000" placeholder="https://..."></label>
+<label>Subir logo del negocio<input class="field" name="logo_file" type="file" accept="image/png,image/jpeg,image/webp"></label><p class="muted">PNG, JPG o WEBP. Máximo 5 MB. También puedes usar una URL externa:</p><label>URL externa del logo (opcional)<input class="field" name="logo_url" type="url" maxlength="1000" placeholder="https://..."></label>
 <label>Costo de domicilio (COP)<input class="field" name="delivery_fee" type="number" min="0" step="100" value="0"></label>
 <label>Pedido mínimo (COP)<input class="field" name="minimum_order_amount" type="number" min="0" step="100" value="0"></label>
 <label>Métodos de pago (uno por línea; usa Método | instrucciones públicas)<textarea class="field" name="payment_methods" rows="4" placeholder="Efectivo contra entrega&#10;Nequi | Instrucciones para pagar por Nequi&#10;Transferencia bancaria | Banco, tipo de cuenta e indicaciones"></textarea></label>
