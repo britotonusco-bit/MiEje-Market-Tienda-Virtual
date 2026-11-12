@@ -158,18 +158,7 @@ Deno.serve(async (req: Request) => {
     }
     if (allowed !== true) return reply(429, { error: "Se recibieron demasiadas solicitudes. Espera unos minutos e inténtalo de nuevo." });
 
-    const { data, error } = await admin.rpc("create_public_order_idempotent", {
-      p_idempotency_key: idempotencyKey,
-      p_business_id: businessId,
-      p_payment_method_id: paymentMethodId,
-      p_customer_name: customerName,
-      p_customer_phone: customerPhone,
-      p_customer_email: customerEmail || null,
-      p_delivery_address: deliveryAddress,
-      p_delivery_notes: finalDeliveryNotes || null,
-      p_payment_method: paymentMethod,
-      p_items: normalizedItems,
-    });
+    const { data, error } = await admin.rpc("create_public_order_idempotent", requestArgs);
 
     if (error) {
       console.error("Order creation failed:", error);
