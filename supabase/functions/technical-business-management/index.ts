@@ -133,7 +133,7 @@ Deno.serve(async (req: Request) => {
 
     if (action === "list_businesses") {
       const { data, error } = await admin.from("businesses")
-        .select("id,name,slug,category,description,tagline,city,contact_phone,whatsapp_support,opening_hours,business_type,logo_url,status,suspension_reason,public_suspension_message,delivery_fee,minimum_order_amount,created_by,created_at,updated_at")
+        .select("id,name,slug,category,status,suspension_reason,public_suspension_message,created_at")
         .order("created_at", { ascending: false });
       if (error) throw error;
       return reply(200, { ok: true, businesses: data ?? [] });
