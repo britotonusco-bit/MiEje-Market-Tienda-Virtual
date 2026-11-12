@@ -208,6 +208,7 @@
       paymentMethods.forEach(method => {
         if (!paymentMap.has(method.business_id)) paymentMap.set(method.business_id, []);
         paymentMap.get(method.business_id).push({
+          id: method.id,
           code: method.method_code,
           label: method.display_name,
           instructions: method.public_instructions || ""
@@ -397,7 +398,9 @@
     }
 
     const settings = business.storeSettings || {};
-    const payments = (settings.payment_methods || []).map(item => typeof item === "string" ? item : item.label).filter(Boolean);
+    const paymentMethods = settings.payment_methods || [];
+    const payments = paymentMethods.map(item => item.label).filter(Boolean);
+    const paymentDetails = paymentMethods.map(item => '<div class="info-line"><span>💳</span><span><strong>' + escapeHtml(item.label) + '</strong>' + (item.instructions ? '<br>' + escapeHtml(item.instructions) : '') + '</span></div>').join("");
     const delivery = (settings.delivery_options || []).map(item => typeof item === "string" ? item : item.label).filter(Boolean);
     const contentPages = business.contentPages || [];
     const publicWhatsapp = String(settings.whatsapp_number || business.phone || "").replace(/[^0-9]/g, "");
@@ -432,7 +435,7 @@
             <div class="info-line"><span>📍</span><span>${escapeHtml(business.location)}</span></div>
             <div class="info-line"><span>🕒</span><span>${escapeHtml(business.hours)}</span></div>
             <div class="info-line"><span>✓</span><span>Negocio registrado en MiEje Market</span></div>
-            ${payments.length ? `<div class="info-line"><span>💳</span><span><strong>Pagos:</strong> ${payments.map(escapeHtml).join(", ")}</span></div>` : ""}
+            ${paymentDetails}
             ${delivery.length ? `<div class="info-line"><span>🛵</span><span><strong>Entrega:</strong> ${delivery.map(escapeHtml).join(", ")}</span></div>` : ""}
             ${publicWhatsapp ? `<div class="info-line"><span>☎</span><span><a href="https://wa.me/${publicWhatsapp}" target="_blank" rel="noopener">Contactar por WhatsApp</a></span></div>` : ""}
             ${contactNotes.map(note => `<div class="info-line"><span>ℹ</span><span>${escapeHtml(note)}</span></div>`).join("")}
