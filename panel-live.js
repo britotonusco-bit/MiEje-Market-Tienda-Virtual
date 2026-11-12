@@ -402,26 +402,25 @@
   async function saveMemberStatus(event) {
     event.preventDefault();
     const form = event.currentTarget, message = document.querySelector('#memberStatusMessage');
-    const blocked = form.elements.is_blocked.value === 'true';
+    const suspended = form.elements.is_blocked.value === 'true';
     const reason = form.elements.reason.value.trim();
-    if (!blocked) {
-      message.textContent = 'La función segura del servidor todavía no permite reactivar una membresía suspendida. No se realizó ningún cambio.';
-      message.className = 'message error';
-      return;
-    }
     if (reason.length < 5) {
-      message.textContent = 'Para bloquear una cuenta debes escribir un motivo de al menos 5 caracteres.';
+      message.textContent = 'Escribe un motivo de al menos 5 caracteres para dejar constancia en auditoría.';
       message.className = 'message error';
       return;
     }
-    message.textContent = 'Aplicando suspensión y registrando auditoría…';
+    message.textContent = suspended ? 'Suspendiendo acceso y registrando auditoría…' : 'Reactivando acceso y registrando auditoría…';
     try {
-      const result = await callTechnicalFunction({ action: 'block_member', membership_id: form.elements.user_id.value, reason });
-      message.textContent = result.message || 'Acceso suspendido y registrado en auditoría.';
+      const result = await callTechnicalFunction({
+        action: suspended ? 'block_member' : 'unblock_member',
+        membership_id: form.elements.user_id.value,
+        reason
+      });
+      message.textContent = result.message || (suspended ? 'Acceso suspendido.' : 'Acceso reactivado.');
       message.className = 'message success';
       await loadTechnicalMembers(form.elements.business_id.value);
     } catch (error) {
-      message.textContent = error.message || 'No se pudo suspender la membresía.';
+      message.textContent = error.message || 'No se pudo cambiar el acceso.';
       message.className = 'message error';
     }
   }
