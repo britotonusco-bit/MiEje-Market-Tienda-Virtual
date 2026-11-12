@@ -29,7 +29,15 @@ CREATE POLICY customer_favorites_select_own ON public.customer_favorites
 
 DROP POLICY IF EXISTS customer_favorites_insert_own ON public.customer_favorites;
 CREATE POLICY customer_favorites_insert_own ON public.customer_favorites
-  FOR INSERT TO authenticated WITH CHECK (user_id = (SELECT auth.uid()));
+  FOR INSERT TO authenticated WITH CHECK (
+    user_id = (SELECT auth.uid())
+    AND EXISTS (
+      SELECT 1 FROM public.products p
+      WHERE p.id = customer_favorites.product_id
+        AND p.is_active = true
+        AND (SELECT private.business_is_active(p.business_id))
+    )
+  );
 
 DROP POLICY IF EXISTS customer_favorites_delete_own ON public.customer_favorites;
 CREATE POLICY customer_favorites_delete_own ON public.customer_favorites
