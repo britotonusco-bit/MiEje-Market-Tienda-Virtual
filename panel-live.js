@@ -8,11 +8,11 @@
   let isBusinessOwner = false;
   let cachedBusinesses = [];
   const statusLabels = {
-    received: 'Recibido', confirmed: 'Confirmado', preparing: 'En preparación',
-    ready: 'Listo', on_the_way: 'En camino', delivered: 'Entregado', cancelled: 'Cancelado'
+    pending: 'Recibido', confirmed: 'Confirmado', preparing: 'En preparación',
+    ready: 'Listo', out_for_delivery: 'En camino', delivered: 'Entregado', cancelled: 'Cancelado'
   };
-  const nextStatus = { received: 'confirmed', confirmed: 'preparing', preparing: 'ready', ready: 'on_the_way', on_the_way: 'delivered' };
-  const statusClass = { received: 'yellow', confirmed: 'blue', preparing: 'blue', ready: 'green', on_the_way: 'blue', delivered: 'green', cancelled: 'red' };
+  const nextStatus = { pending: 'confirmed', confirmed: 'preparing', preparing: 'ready', ready: 'out_for_delivery', out_for_delivery: 'delivered' };
+  const statusClass = { pending: 'yellow', confirmed: 'blue', preparing: 'blue', ready: 'green', out_for_delivery: 'blue', delivered: 'green', cancelled: 'red' };
 
   document.addEventListener('DOMContentLoaded', boot);
 
@@ -468,20 +468,26 @@
     }
     try {
       const labels = [...new Set(value('payment_methods').split('\n').map(v => v.trim()).filter(v => v.length >= 2 && v.length <= 100))];
-      const methods = labels.map((displayName, sortOrder) => ({
-        displayName,
-        methodCode: displayName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50),
-        sortOrder
-      })).filter(m => m.methodCode.length >= 2);
+      const methodCodeFor = label => {
+        const normalized = label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+        if (normalized.includes('efectivo') || normalized.includes('contra entrega')) return 'cash';
+        if (normalized.includes('transfer') || normalized.includes('nequi') || normalized.includes('bancolombia') || normalized.includes('daviplata')) return 'transfer';
+        if (normalized.includes('tarjeta') || normalized.includes('card')) return 'card';
+        return 'other';
+      };
+      const methods = labels.map((displayName, sortOrder) => ({ displayName, methodCode: methodCodeFor(displayName), sortOrder }));
       const { data: existing, error: readError } = await db.from('business_payment_methods')
         .select('id,method_code,display_name,is_enabled,sort_order')
         .eq('business_id', businessId);
       if (readError) throw readError;
       const byCode = new Map();
-      (existing || []).forEach(row => { if (!byCode.has(row.method_code)) byCode.set(row.method_code, row); });
+      (existing || []).forEach(row => {
+        if (!byCode.has(row.method_code)) byCode.set(row.method_code, []);
+        byCode.get(row.method_code).push(row);
+      });
       const retained = new Set();
       for (const method of methods) {
-        const old = byCode.get(method.methodCode);
+        const old = byCode.get(method.methodCode)?.shift();
         if (old) {
           const { error } = await db.from('business_payment_methods').update({
             display_name: method.displayName, is_enabled: true, sort_order: method.sortOrder, updated_at: new Date().toISOString()
@@ -497,7 +503,7 @@
         }
       }
       for (const old of (existing || [])) {
-        if (!retained.has(old.id) && !methods.some(m => m.methodCode === old.method_code) && old.is_enabled) {
+        if (!retained.has(old.id) && old.is_enabled) {
           const { error } = await db.from('business_payment_methods').update({ is_enabled: false, updated_at: new Date().toISOString() }).eq('id', old.id).eq('business_id', businessId);
           if (error) throw error;
         }
