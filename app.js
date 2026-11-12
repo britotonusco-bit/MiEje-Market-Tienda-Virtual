@@ -212,6 +212,23 @@
         if (paymentError) console.warn("No se pudieron cargar las formas de pago públicas.", paymentError);
         else paymentMethods = paymentData?.payment_methods || [];
       }
+      let publicContentPages = [];
+      if (activeBusinessIds.length) {
+        const { data: contentRows, error: contentError } = await client.from('business_content_pages')
+          .select('id,business_id,content_type,title,body,content')
+          .in('business_id', activeBusinessIds)
+          .eq('is_published', true)
+          .eq('moderation_status', 'approved')
+          .order('created_at', { ascending: false })
+          .limit(500);
+        if (contentError) console.warn('No se pudieron cargar las publicaciones públicas.', contentError);
+        else publicContentPages = contentRows || [];
+      }
+      const contentPagesByBusiness = new Map();
+      publicContentPages.forEach(page => {
+        if (!contentPagesByBusiness.has(page.business_id)) contentPagesByBusiness.set(page.business_id, []);
+        contentPagesByBusiness.get(page.business_id).push(page);
+      });
       const paymentMap = new Map();
       paymentMethods.forEach(method => {
         if (!paymentMap.has(method.business_id)) paymentMap.set(method.business_id, []);
@@ -240,7 +257,7 @@
           payment_methods: paymentMap.get(row.id) || [],
           delivery_options: row.status === "active" ? [{ code: "delivery", label: "Domicilio" }] : []
         },
-        contentPages: [],
+        contentPages: contentPagesByBusiness.get(row.id) || [],
         image: row.logo_url || "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1000&q=85",
         slug: row.slug,
         deliveryFee: Number(row.delivery_fee || 0),
@@ -856,7 +873,18 @@
       const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
       const formData = new FormData(jobForm);
       const applicationData = Object.fromEntries([...formData.entries()].filter(([key]) => key.startsWith("custom_field_")).map(([key, value]) => [key, String(value).trim()]));
-      const { error } = await client.from("job_applications").insert({ business_id: business.id, content_page_id: jobForm.dataset.jobPage, applicant_name: String(formData.get("applicant_name")||"").trim(), applicant_contact: String(formData.get("applicant_contact")||"").trim(), applicant_message: String(formData.get("applicant_message")||"").trim(), application_data: applicationData });
+      const submitButton = jobForm.querySelector('button[type="submit"]');
+      submitButton.disabled = true;
+      const { error } = await client.from("job_applications").insert({
+        business_id: business.id,
+        content_page_id: jobForm.dataset.jobPage,
+        applicant_name: String(formData.get("applicant_name") || "").trim(),
+        applicant_contact: String(formData.get("applicant_contact") || "").trim(),
+        applicant_message: String(formData.get("applicant_message") || "").trim(),
+        form_responses: applicationData,
+        privacy_consent: formData.get("privacy_consent") === "on"
+      });
+      submitButton.disabled = false;
       if (error) { showToast("No se pudo guardar la postulación. Intenta más tarde."); console.warn("job application submit failed", error); return; }
       jobForm.reset(); showToast("Postulación enviada correctamente."); return;
     }
