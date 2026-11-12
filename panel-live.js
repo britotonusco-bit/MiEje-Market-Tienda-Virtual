@@ -564,6 +564,15 @@
     const name = value('name');
     const city = value('city');
     const category = value('category');
+    const paymentEntries = value('payment_methods').split('\n').map(line => {
+      const parts = line.split('|');
+      return { displayName: (parts.shift() || '').trim(), publicInstructions: parts.join('|').trim() };
+    }).filter(item => item.displayName.length >= 2 && item.displayName.length <= 100);
+    if (!paymentEntries.length) {
+      message.textContent = 'Configura al menos un método de pago para que los clientes puedan completar sus pedidos.';
+      message.className = 'message error';
+      return;
+    }
     if (!name || !city || !category) {
       message.textContent = 'El nombre, la categoría y la ciudad son obligatorios.';
       message.className = 'message error';
@@ -629,10 +638,7 @@
         throw new Error('No se pudieron guardar los datos del negocio: ' + (businessError?.message || 'No se encontró el negocio o no tienes permiso para modificarlo.'));
       }
       try {
-        const entries = value('payment_methods').split('\n').map(line => {
-          const parts = line.split('|');
-          return { displayName: (parts.shift() || '').trim(), publicInstructions: parts.join('|').trim() };
-        }).filter(item => item.displayName.length >= 2 && item.displayName.length <= 100);
+        const entries = paymentEntries;
         const methodCodeFor = label => {
           const normalized = label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
           if (normalized.includes('efectivo') || normalized.includes('contra entrega')) return 'cash';
