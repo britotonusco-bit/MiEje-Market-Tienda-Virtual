@@ -437,6 +437,7 @@
             <div class="info-line"><span>✓</span><span>Negocio registrado en MiEje Market</span></div>
             ${paymentDetails}
             ${delivery.length ? `<div class="info-line"><span>🛵</span><span><strong>Entrega:</strong> ${delivery.map(escapeHtml).join(", ")}</span></div>` : ""}
+            <div class="info-line"><span>💰</span><span>Domicilio: ${money(business.deliveryFee || 0)} · Pedido mínimo: ${money(business.minimumOrderAmount || 0)}</span></div>
             ${publicWhatsapp ? `<div class="info-line"><span>☎</span><span><a href="https://wa.me/${publicWhatsapp}" target="_blank" rel="noopener">Contactar por WhatsApp</a></span></div>` : ""}
             ${contactNotes.map(note => `<div class="info-line"><span>ℹ</span><span>${escapeHtml(note)}</span></div>`).join("")}
           </section>
