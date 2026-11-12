@@ -156,3 +156,18 @@ Estas correcciones se prepararon en la rama de trabajo. Aún requieren pruebas d
 - El servidor comprueba que una clave existente corresponda al mismo contenido antes de devolver el pedido guardado.
 - La consulta de recuperación ocurre antes del límite por IP, para que una compra confirmada cuya respuesta se perdió pueda recuperarse sin duplicarla.
 - La creación del pedido y el registro de su respuesta idempotente se ejecutan en la misma transacción PostgreSQL.
+
+## Pruebas de cuentas de clientes, historial y favoritos
+
+1. Registrar una cuenta con correo y nombre; verificar que el trigger existente cree su perfil con rol público predeterminado `user`.
+2. Confirmar el correo si la configuración de Auth lo exige y después iniciar sesión.
+3. Crear un pedido con sesión autenticada: el pedido debe guardar el UUID de esa cuenta en `customer_user_id`.
+4. Crear un pedido como invitado: `customer_user_id` debe permanecer NULL y el checkout público debe seguir funcionando.
+5. Consultar el historial con el cliente A: solo debe devolver pedidos asociados al UUID del cliente A.
+6. Intentar consultar directamente el pedido del cliente B desde la sesión A: RLS debe ocultarlo.
+7. Consultar los artículos del pedido: solo deben aparecer artículos de pedidos propios.
+8. Guardar un producto favorito desde una sesión autenticada; comprobar que no se pueda insertar un favorito para otro `user_id`.
+9. Intentar leer o eliminar favoritos de otro usuario: RLS debe impedirlo.
+10. Eliminar un favorito propio y comprobar que desaparezca de la lista.
+11. Verificar que los pedidos históricos anteriores a la migración sigan conservados y no se asignen automáticamente por coincidencia de correo.
+12. Verificar que la cuenta bloqueada no pueda crear nuevos pedidos y que la navegación pública y el checkout de invitados continúen disponibles.
