@@ -43,6 +43,12 @@ DROP POLICY IF EXISTS customer_favorites_delete_own ON public.customer_favorites
 CREATE POLICY customer_favorites_delete_own ON public.customer_favorites
   FOR DELETE TO authenticated USING (user_id = (SELECT auth.uid()));
 
+-- El historial muestra el nombre del negocio, pero no expone su ficha privada.
+GRANT SELECT (id, name) ON public.businesses TO authenticated;
+DROP POLICY IF EXISTS businesses_customer_order_name_select ON public.businesses;
+CREATE POLICY businesses_customer_order_name_select ON public.businesses
+  FOR SELECT TO authenticated USING (status = 'active');
+
 DROP POLICY IF EXISTS orders_customer_select_own ON public.orders;
 CREATE POLICY orders_customer_select_own ON public.orders
   FOR SELECT TO authenticated USING (customer_user_id = (SELECT auth.uid()));
