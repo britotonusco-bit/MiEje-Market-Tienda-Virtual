@@ -113,7 +113,7 @@ Deno.serve(async (req: Request) => {
     // nuevamente el límite de solicitudes por IP.
     let customerUserId: string | null = null;
     const authorization = req.headers.get("authorization") || "";
-    const bearer = authorization.match(/^Bearer\\s+(.+)$/i)?.[1];
+    const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
     if (bearer) {
       const { data: authData, error: authError } = await admin.auth.getUser(bearer);
       if (authError || !authData.user) {
