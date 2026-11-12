@@ -384,3 +384,33 @@ La inspección de solo lectura de las políticas RLS y privilegios del proyecto 
 7. Confirmar que las páginas públicas siguen leyendo únicamente directorio, productos activos y contenido aprobado de negocios activos.
 
 No se aplicaron las políticas live ni se ejecutaron pruebas con usuarios reales. Los cambios de moderación solo están en la rama `correcciones-funcionales`; la Edge Function no se desplegó.
+
+## Auditoría de Storage y hojas de vida privadas
+
+### Configuración live comprobada por introspección
+- `business-assets`: bucket público, máximo 5 MB, tipos PNG/JPEG/WebP. Se utiliza para logos e imágenes de productos que deben mostrarse en la tienda pública.
+- `job-applications-private`: bucket privado, máximo 5 MB, tipos PDF/DOC/DOCX. No debe convertirse en público.
+- La tabla `job_applications` concede SELECT a authenticated, pero RLS limita las filas a administradores del negocio. El borrador también exige que el negocio esté activo.
+- La tabla `job_application_upload_sessions` tiene RLS activado y no concede privilegios a anon ni authenticated; solo service_role accede a ella.
+- Las funciones RPC `submit_public_job_application` y `consume_job_application_rate_limit` solo tienen EXECUTE para postgres/service_role, no para anon ni authenticated.
+- La política live de lectura de hojas de vida exige el bucket privado y un administrador activo del negocio indicado en la primera carpeta. No se encontró una política SELECT para anon.
+- El panel administrativo genera enlaces firmados de descarga con duración de 300 segundos (5 minutos), solo después de listar las postulaciones de su negocio.
+- La función pública `create-job-application` usa enlaces firmados de carga, valida vacante publicada/aprobada y negocio activo, comprueba nombre/extensión/MIME/tamaño declarado, usa una ruta aleatoria y una sesión de carga de 30 minutos. La carga se limita además por el bucket a 5 MB y MIME permitidos.
+- La RPC de envío consume la sesión de carga una sola vez y exige que corresponda al mismo negocio, vacante, ruta y vencimiento.
+
+### Correcciones preparadas en la rama
+- Se guardó en el repositorio el código fuente de la Edge Function live `create-job-application`, que antes existía desplegada pero no estaba versionada.
+- Se amplió `database/security/storage-policy-fix.sql` con una política de lectura privada que acepta únicamente la ruta exacta `<business_uuid>/<application_uuid>/<random_uuid>.(pdf|doc|docx)`, y exige administrador de ese negocio activo.
+- La política nueva no habilita INSERT/UPDATE/DELETE en el bucket privado: la carga continúa exclusivamente por signed upload URL emitida por la Edge Function.
+- Las políticas de `business-assets` siguen siendo borradores; corrigen el uso incorrecto de `storage.foldername(b.name)` para consultar la ruta real `storage.foldername(objects.name)`.
+
+### Límites y pruebas pendientes
+- Los buckets no tenían objetos al momento de la consulta; por eso no fue posible probar una descarga real, el vencimiento de enlaces ni el aislamiento entre dos negocios con archivos.
+- No se ejecutó el SQL de Storage ni se desplegó la Edge Function desde el repositorio.
+- La función valida MIME y extensión declarados, y el bucket restringe MIME, pero no realiza análisis antivirus ni inspección profunda del contenido. No se debe tratar un DOC/DOCX/PDF como libre de malware solo por su extensión.
+- En staging crear dos negocios A/B, subir una postulación con archivo a cada uno y comprobar que admin A solo obtiene enlace de A, admin B solo obtiene enlace de B, empleados no pueden descargar, y anon no puede listar ni descargar objetos privados.
+- Verificar que un enlace firmado deja de funcionar al vencer, que una sesión de carga expirada/reutilizada se rechaza y que archivos mayores de 5 MB o MIME no permitido no se aceptan.
+- Probar carga sin adjunto, carga interrumpida, solicitud repetida, vacante suspendida/no aprobada y descarga tras suspender el negocio.
+- Revisar una estrategia de análisis antimalware antes de permitir que personal descargue archivos adjuntos de usuarios externos.
+
+No se alteró la configuración live de Storage, no se subieron ni descargaron archivos reales y no se enviaron postulaciones de prueba.
