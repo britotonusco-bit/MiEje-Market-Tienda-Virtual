@@ -49,7 +49,13 @@
   async function verifyOwnerMfa() {
     const { data: factorData, error: factorError } = await client.auth.mfa.listFactors();
     if (factorError) throw factorError;
-    const verified = (factorData?.totp || []).find(factor => factor.status === 'verified');
+    const factors = factorData?.totp || [];
+    const verified = factors.find(factor => factor.status === 'verified');
+    const pending = factors.find(factor => factor.status !== 'verified');
+    if (!verified && pending) {
+      const { error: cleanupError } = await client.auth.mfa.unenroll({ factorId: pending.id });
+      if (cleanupError) throw cleanupError;
+    }
     let factorId = verified?.id;
     let challengeId = null;
     const box = ensureMfaBox();
