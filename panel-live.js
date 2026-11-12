@@ -165,12 +165,12 @@
   function renderBusinesses() {
     const target = document.querySelector('#businessesContainer');
     const search = (document.querySelector('#businessSearch')?.value || '').trim().toLocaleLowerCase('es');
-    const filtered = cachedBusinesses.filter(b => [b.name, b.slug, b.business_type].some(v => String(v || '').toLocaleLowerCase('es').includes(search)));
+    const filtered = cachedBusinesses.filter(b => [b.name, b.slug, b.business_type, b.category].some(v => String(v || '').toLocaleLowerCase('es').includes(search)));
     const count = document.querySelector('#businessCount');
     if (count) count.textContent = `${filtered.length} de ${cachedBusinesses.length} negocios`;
     if (!cachedBusinesses.length) { target.innerHTML = '<div class="empty">Todavía no hay negocios. Usa el formulario de arriba para crear el primero.</div>'; return; }
     if (!filtered.length) { target.innerHTML = '<div class="empty">No hay negocios que coincidan con la búsqueda.</div>'; return; }
-    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Negocio</th><th>Tipo</th><th>Identificador</th><th>Estado / motivo</th><th>Creado</th><th>Acción</th></tr></thead><tbody>${filtered.map(b => `<tr><td><strong>${esc(b.name)}</strong></td><td>${esc(b.business_type)}</td><td>${esc(b.slug)}</td><td><span class="pill ${b.is_active ? 'green':'red'}">${b.is_active ? 'Activo':'Suspendido'}</span>${!b.is_active ? `<br><small>${esc(b.suspension_reason || 'Motivo pendiente de registrar')}</small>` : ''}</td><td>${dateTime(b.created_at)}</td><td><button class="small-button" data-business-status="${esc(b.id)}" data-active="${b.is_active ? 'false':'true'}">${b.is_active ? 'Suspender':'Reactivar'}</button></td></tr>`).join('')}</tbody></table></div>`;
+    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Negocio</th><th>Tipo</th><th>Identificador</th><th>Estado / motivo</th><th>Creado</th><th>Acción</th></tr></thead><tbody>${filtered.map(b => { const active = b.status === 'active'; return `<tr><td><strong>${esc(b.name)}</strong></td><td>${esc(b.business_type || b.category || '—')}</td><td>${esc(b.slug)}</td><td><span class="pill ${active ? 'green':'red'}">${active ? 'Activo':'Suspendido'}</span>${!active ? `<br><small>${esc(b.suspension_reason || 'Motivo pendiente de registrar')}</small>` : ''}</td><td>${dateTime(b.created_at)}</td><td><button class="small-button" data-business-status="${esc(b.id)}" data-active="${active ? 'false':'true'}">${active ? 'Suspender':'Reactivar'}</button></td></tr>`; }).join('')}</tbody></table></div>`;
     target.querySelectorAll('[data-business-status]').forEach(button => button.addEventListener('click', () => changeBusinessStatus(button.dataset.businessStatus, button.dataset.active === 'true', button)));
   }
 
@@ -273,14 +273,14 @@
     const business = cachedBusinesses.find(item => item.id === id);
     if (!business) return;
     const verb = isActive ? 'reactivar' : 'suspender';
-    const reason = isActive ? (window.prompt(`Nota de reactivación para ${business.name}:`, 'Se revisó el caso y se autoriza la reactivación.') || '') : (window.prompt(`Motivo interno de suspensión de ${business.name}. Lo verán el propietario, administrador y personal:`, '') || '');
+    const reason = isActive ? (window.prompt(`Nota de reactivación para ${business.name}:`, 'Se revisó el caso y se autoriza la reactivación.') || '') : (window.prompt(`Motivo interno de suspensión de ${business.name}:`, '') || '');
     if (!isActive && reason.trim().length < 5) { alert('Escribe un motivo de al menos 5 caracteres. No se realizó ningún cambio.'); return; }
-    const publicMessage = isActive ? '' : (window.prompt('Mensaje distinto para los clientes:', 'Esta tienda no está disponible temporalmente. Contacta con el negocio para más información.') || 'Esta tienda no está disponible temporalmente.');
+    const publicMessage = isActive ? '' : (window.prompt('Mensaje distinto para los clientes:', 'Esta tienda no está disponible temporalmente.') || 'Esta tienda no está disponible temporalmente.');
     if (!window.confirm(`¿Deseas ${verb} el negocio "${business.name}"?`)) return;
     button.disabled = true;
     try {
-      const result = await callTechnicalFunction({ action: 'set_business_status', business_id: id, is_active: isActive, reason, public_message: publicMessage });
-      document.querySelector('#notice').textContent = result.message;
+      const result = await callTechnicalFunction({ action: 'set_business_status', business_id: id, status: isActive ? 'active' : 'suspended', reason, public_message: publicMessage });
+      document.querySelector('#notice').textContent = result.message || `Negocio ${isActive ? 'reactivado' : 'suspendido'}.`;
       document.querySelector('#notice').className = 'notice';
       await loadTechnical();
     } catch (error) {
@@ -326,10 +326,13 @@
     event.preventDefault();
     const form = event.currentTarget, message = document.querySelector('#suspensionMessage');
     const data = Object.fromEntries(new FormData(form).entries());
-    data.action = 'set_business_status'; data.is_active = data.is_active === 'true';
-    if (!data.is_active && String(data.reason || '').trim().length < 5) { message.textContent = 'El motivo debe tener al menos 5 caracteres.'; return; }
+    const active = data.is_active === 'true';
+    data.action = 'set_business_status';
+    data.status = active ? 'active' : 'suspended';
+    delete data.is_active;
+    if (!active && String(data.reason || '').trim().length < 5) { message.textContent = 'El motivo debe tener al menos 5 caracteres.'; return; }
     message.textContent = 'Guardando estado y auditoría…';
-    try { const result = await callTechnicalFunction(data); message.textContent = result.message; message.className = 'message success'; await loadTechnical(); }
+    try { const result = await callTechnicalFunction(data); message.textContent = result.message || 'Estado actualizado.'; message.className = 'message success'; await loadTechnical(); }
     catch (error) { message.textContent = error.message; message.className = 'message error'; }
   }
 
@@ -456,11 +459,15 @@
 
   async function loadAuditEvents(id, selector) {
     const target = document.querySelector(selector);
-    const result = await callTechnicalFunction({ action: 'list_audit_logs', business_id: id || '', limit: 100 });
-    const rows = result.audit_logs || [];
+    let query = db.from('audit_logs').select('id,business_id,actor_id,action,entity_type,entity_id,details,created_at').order('created_at', { ascending: false }).limit(100);
+    if (id) query = query.eq('business_id', id);
+    else if (panel !== 'technical') query = query.eq('actor_id', currentUser.id);
+    const { data, error } = await query;
+    if (error) return showError(target, error);
+    const rows = data || [];
     const names = await getUserNames(rows.map(e => e.actor_id));
     if (!rows.length) { target.innerHTML = '<div class="empty">No hay registros de auditoría para este filtro todavía.</div>'; return; }
-    target.innerHTML = tableHtml(['Fecha y hora','Usuario','Acción','Entidad','Registro','Detalle'], rows.map(e => [dateTime(e.created_at), names.get(e.actor_id) || shortId(e.actor_id), e.action, e.entity_type, e.entity_id || '—', esc(JSON.stringify(e.details || {}))]));
+    target.innerHTML = tableHtml(['Fecha y hora','Usuario','Acción','Entidad','Registro','Detalle'], rows.map(e => [dateTime(e.created_at), names.get(e.actor_id) || shortId(e.actor_id), esc(e.action), esc(e.entity_type), e.entity_id || '—', esc(JSON.stringify(e.details || {}))]));
   }
 
   async function getUserNames(ids) {
