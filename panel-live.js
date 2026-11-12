@@ -119,6 +119,12 @@
       message.className = 'message error';
       return;
     }
+    const imageUrl = form.elements.image_url.value.trim();
+    if (imageUrl && !/^https?:\/\//i.test(imageUrl)) {
+      message.textContent = 'La dirección de la imagen debe comenzar por https:// o http://.';
+      message.className = 'message error';
+      return;
+    }
     const payload = {
       business_id: businessId,
       name,
@@ -126,7 +132,7 @@
       description: form.elements.description.value.trim() || null,
       price,
       inventory,
-      image_url: form.elements.image_url.value.trim() || null,
+      image_url: imageUrl || null,
       is_active: form.elements.is_active.checked,
       updated_at: new Date().toISOString()
     };
@@ -203,7 +209,7 @@
     if (error) return showError(target, error);
     cachedProducts = data || [];
     if (!cachedProducts.length) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene productos registrados. Puedes crear el primero en el formulario.</div>'; return; }
-    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Categoría</th><th>Precio</th><th>Existencias</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${cachedProducts.map(p => `<tr><td><strong>${esc(p.name)}</strong>${p.image_url ? `<br><a href="${esc(p.image_url)}" target="_blank" rel="noopener">Ver imagen</a>` : ''}<br><small>${esc(p.description || '')}</small></td><td>${esc(p.category || '—')}</td><td>${money(p.price)}</td><td>${number(p.inventory)}</td><td><span class="pill ${p.is_active ? 'green':'red'}">${p.is_active ? 'Activo':'Inactivo'}</span></td><td><button class="small-button" data-edit-product="${esc(p.id)}">Editar</button> <button class="small-button" data-toggle-product="${esc(p.id)}">${p.is_active ? 'Desactivar':'Activar'}</button></td></tr>`).join('')}</tbody></table></div>`;
+    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Categoría</th><th>Precio</th><th>Existencias</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${cachedProducts.map(p => `<tr><td><strong>${esc(p.name)}</strong>${p.image_url && /^https?:\/\//i.test(p.image_url) ? `<br><a href="${esc(p.image_url)}" target="_blank" rel="noopener">Ver imagen</a>` : ''}<br><small>${esc(p.description || '')}</small></td><td>${esc(p.category || '—')}</td><td>${money(p.price)}</td><td>${number(p.inventory)}</td><td><span class="pill ${p.is_active ? 'green':'red'}">${p.is_active ? 'Activo':'Inactivo'}</span></td><td><button class="small-button" data-edit-product="${esc(p.id)}">Editar</button> <button class="small-button" data-toggle-product="${esc(p.id)}">${p.is_active ? 'Desactivar':'Activar'}</button></td></tr>`).join('')}</tbody></table></div>`;
     target.querySelectorAll('[data-edit-product]').forEach(button => button.addEventListener('click', () => editProduct(button.dataset.editProduct)));
     target.querySelectorAll('[data-toggle-product]').forEach(button => button.addEventListener('click', () => toggleProductStatus(button.dataset.toggleProduct, button)));
   }
@@ -524,6 +530,12 @@
       message.className = 'message error';
       return;
     }
+    const logoUrl = value('logo_url');
+    if (logoUrl && !/^https?:\/\//i.test(logoUrl)) {
+      message.textContent = 'La dirección del logo debe comenzar por https:// o http://.';
+      message.className = 'message error';
+      return;
+    }
     const businessPayload = {
       name,
       tagline: value('tagline') || null,
@@ -531,7 +543,7 @@
       city,
       contact_phone: value('contact_phone') || null,
       whatsapp_support: value('whatsapp_support').replace(/[^0-9+]/g, '').slice(0, 50) || null,
-      logo_url: value('logo_url') || null,
+      logo_url: logoUrl || null,
       delivery_fee: deliveryFee,
       minimum_order_amount: minimumOrder,
       updated_at: new Date().toISOString()
