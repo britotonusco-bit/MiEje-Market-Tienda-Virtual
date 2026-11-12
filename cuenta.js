@@ -2,6 +2,7 @@
   const $ = selector => document.querySelector(selector);
   const message = $("#customerMessage");
   let client;
+  let activeUserId = null;
 
   function say(text, kind = "") {
     message.textContent = text;
@@ -23,10 +24,15 @@
   }
   async function showSession(session) {
     if (!session) {
+      activeUserId = null;
       $("#accountAccess").hidden = false;
       $("#customerDashboard").hidden = true;
+      $("#customerOrders").replaceChildren();
+      $("#customerFavorites").replaceChildren();
+      $("#customerEmailLabel").textContent = "";
       return;
     }
+    activeUserId = session.user.id;
     $("#accountAccess").hidden = true;
     $("#customerDashboard").hidden = false;
     $("#customerWelcome").textContent = "Hola, " + (session.user.user_metadata?.display_name || "cliente");
@@ -41,6 +47,7 @@
       .eq("customer_user_id", userId)
       .order("created_at", { ascending:false })
       .limit(50);
+    if (activeUserId !== userId) return;
     if (error) {
       target.textContent = "No fue posible cargar el historial. Comprueba que la migración de clientes esté aplicada.";
       console.warn("Customer order history:", error);
@@ -65,6 +72,7 @@
       .select("id,product_id,created_at,products(id,name,price,image_url,business_id)")
       .eq("user_id", userId)
       .order("created_at", { ascending:false });
+    if (activeUserId !== userId) return;
     if (error) {
       target.textContent = "No fue posible cargar los favoritos. Comprueba que la migración de clientes esté aplicada.";
       console.warn("Customer favorites:", error);
@@ -148,7 +156,10 @@
   $("#customerLogoutBtn").addEventListener("click", async () => {
     const { error } = await client.auth.signOut();
     if (error) say("No fue posible cerrar sesión.", "error");
-    else say("Sesión cerrada.");
+    else {
+      await showSession(null);
+      say("Sesión cerrada.");
+    }
   });
 
   document.addEventListener("click", async event => {
