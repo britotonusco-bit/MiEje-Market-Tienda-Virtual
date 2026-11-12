@@ -92,7 +92,10 @@
     const { data, error } = await client.auth.getSession();
     if (error) say("No fue posible comprobar tu sesión.", "error");
     else await showSession(data.session);
-    client.auth.onAuthStateChange((_event, session) => { void showSession(session); });
+    client.auth.onAuthStateChange((_event, session) => {
+      // Evita ejecutar consultas Supabase dentro del callback de Auth.
+      window.setTimeout(() => { void showSession(session); }, 0);
+    });
   });
 
   $("#customerLoginForm").addEventListener("submit", async event => {
@@ -118,12 +121,17 @@
     const name = $("#customerName").value.trim();
     const email = $("#registerEmail").value.trim();
     const password = $("#registerPassword").value;
-    if (name.length < 2 || password.length < 8) return say("Escribe tu nombre y una contraseña de al menos 8 caracteres.", "error");
+    if (name.length < 2 || password.length < 10) return say("Escribe tu nombre y una contraseña de al menos 10 caracteres.", "error");
     button.disabled = true;
     say("Creando cuenta…");
     try {
       const { data, error } = await client.auth.signUp({
-        email, password, options:{ data:{ display_name:name } }
+        email,
+        password,
+        options:{
+          data:{ display_name:name },
+          emailRedirectTo:new URL("cuenta.html", window.location.href).href
+        }
       });
       if (error) throw error;
       if (data.session) {
