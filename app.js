@@ -408,7 +408,6 @@
     const settings = business.storeSettings || {};
     const paymentMethods = settings.payment_methods || [];
     const payments = paymentMethods.map(item => item.label).filter(Boolean);
-    const businessHoursHtml = '<div class="info-line"><span>🕒</span><span><strong>Horario de atención</strong><br>' + escapeHtml(business.hours || "Horario por confirmar con el negocio.") + '</span></div>';
     const paymentDetails = paymentMethods.map(item => '<div class="info-line"><span>💳</span><span><strong>' + escapeHtml(item.label) + '</strong>' + (item.instructions ? '<br>' + escapeHtml(item.instructions) : '') + '</span></div>').join("");
     const delivery = (settings.delivery_options || []).map(item => typeof item === "string" ? item : item.label).filter(Boolean);
     const contentPages = business.contentPages || [];
@@ -444,7 +443,7 @@
             <div class="info-line"><span>📍</span><span>${escapeHtml(business.location)}</span></div>
             <div class="info-line"><span>🕒</span><span>${escapeHtml(business.hours)}</span></div>
             <div class="info-line"><span>✓</span><span>Negocio registrado en MiEje Market</span></div>
-            ${businessHoursHtml}${paymentDetails}
+            ${paymentDetails}
             ${delivery.length ? `<div class="info-line"><span>🛵</span><span><strong>Entrega:</strong> ${delivery.map(escapeHtml).join(", ")}</span></div>` : ""}
             <div class="info-line"><span>💰</span><span>Domicilio: ${money(business.deliveryFee || 0)} · Pedido mínimo: ${money(business.minimumOrderAmount || 0)}</span></div>
             ${publicWhatsapp ? `<div class="info-line"><span>☎</span><span><a href="https://wa.me/${publicWhatsapp}" target="_blank" rel="noopener">Contactar por WhatsApp</a></span></div>` : ""}
