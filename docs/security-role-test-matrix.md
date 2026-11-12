@@ -134,3 +134,16 @@ Estas correcciones se prepararon en la rama de trabajo. Aún requieren pruebas d
 2. Intentar guardar sin ningún método de pago válido: debe detenerse antes de modificar la ficha comercial y explicar que el checkout necesita al menos una opción.
 3. Si falla la actualización de un método existente o la desactivación de uno anterior, la interfaz debe reportar el resultado parcial con claridad y no afirmar que todo quedó guardado.
 4. Confirmar que Nequi, Bancolombia y Daviplata se clasifican como transferencia, sin perder su nombre e instrucciones particulares para el cliente.
+
+## Pruebas de idempotencia del checkout público
+
+1. Enviar una compra con una clave nueva: se debe crear un único pedido y descontar inventario una sola vez.
+2. Repetir la misma solicitud con la misma clave y el mismo contenido: debe devolver el mismo pedido, sin crear otro pedido ni descontar inventario de nuevo.
+3. Enviar simultáneamente dos solicitudes con la misma clave: debe existir un solo pedido.
+4. Reutilizar la misma clave con un carrito, dirección, cliente o forma de pago diferente: debe responder conflicto y no crear un segundo pedido.
+5. Simular pérdida de respuesta después de que el servidor confirmó la transacción: el reintento con la misma clave debe recuperar el pedido original.
+6. Verificar que los reintentos idempotentes no consuman nuevos cupos del límite por IP.
+7. Una clave nueva debe consumir el límite normal de 10 solicitudes por IP en 10 minutos.
+8. Si falla el inventario o la creación del pedido, la transacción no debe conservar una clave exitosa ni dejar descuentos parciales.
+9. Confirmar que solo service_role puede ejecutar la función idempotente y que anon/authenticated no pueden consultar la tabla privada de claves.
+10. Verificar que el endpoint público siga funcionando con verify_jwt=false y valide la clave UUID en el servidor.
