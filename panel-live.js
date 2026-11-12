@@ -597,7 +597,7 @@
         const enabled = Boolean(form.elements['hours_'+day+'_open_day'] && form.elements['hours_'+day+'_open_day'].checked);
         const open = String(form.elements['hours_'+day+'_open'] ? form.elements['hours_'+day+'_open'].value : '');
         const close = String(form.elements['hours_'+day+'_close'] ? form.elements['hours_'+day+'_close'].value : '');
-        if (enabled && (!/^([01]\\d|2[0-3]):[0-5]\\d$/.test(open) || !/^([01]\\d|2[0-3]):[0-5]\\d$/.test(close) || close <= open)) {
+        if (enabled && (!/^([01]\d|2[0-3]):[0-5]\d$/.test(open) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(close) || close <= open)) {
           message.textContent = 'Revisa los horarios: el cierre debe ser posterior a la apertura en cada día activo.';
           message.className = 'message error';
           return;
