@@ -144,7 +144,8 @@ BEGIN
     RAISE EXCEPTION 'No se encontró el pedido asociado a la solicitud.' USING ERRCODE = 'P0002';
   END IF;
 
-  SELECT r.id, r.business_id, r.order_id, r.status AS request_status
+  SELECT r.id, r.business_id, r.order_id, r.status AS request_status,
+         v_order_status AS order_status
   INTO v_request
   FROM public.order_cancellation_requests r
   WHERE r.id = p_request_id
@@ -156,7 +157,6 @@ BEGIN
     RAISE EXCEPTION 'La solicitud cambió o ya no existe.' USING ERRCODE = 'P0002';
   END IF;
 
-  v_request.order_status := v_order_status;
 
   IF NOT private.business_is_active(v_request.business_id)
      OR NOT private.has_business_role(v_request.business_id, ARRAY['business_admin']::text[]) THEN
