@@ -37,7 +37,7 @@ BEGIN
     RAISE EXCEPTION 'Debes iniciar sesión.' USING ERRCODE = '42501';
   END IF;
 
-  IF pg_catalog.char_length(v_reason) < 5 OR pg_catalog.char_length(v_reason) > 2000 THEN
+  IF p_customer_reason IS NULL OR pg_catalog.char_length(v_reason) < 5 OR pg_catalog.char_length(v_reason) > 2000 THEN
     RAISE EXCEPTION 'El motivo debe tener entre 5 y 2000 caracteres.' USING ERRCODE = '22023';
   END IF;
 
@@ -109,7 +109,7 @@ BEGIN
     RAISE EXCEPTION 'Debes iniciar sesión.' USING ERRCODE = '42501';
   END IF;
 
-  IF p_decision NOT IN ('approved','rejected') THEN
+  IF p_decision IS NULL OR p_decision NOT IN ('approved','rejected') THEN
     RAISE EXCEPTION 'La decisión debe ser approved o rejected.' USING ERRCODE = '22023';
   END IF;
 
