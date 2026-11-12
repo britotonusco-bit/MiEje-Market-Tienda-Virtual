@@ -1028,9 +1028,14 @@
 
   async function changeOrderStatus(orderId, next, button) {
     button.disabled = true;
-    const { error } = await db.from('orders').update({ status: next }).eq('id', orderId).eq('business_id', businessId);
-    if (error) {
-      alert(`No se pudo cambiar el estado: ${error.message}`);
+    const { data: updatedOrder, error } = await db.from('orders')
+      .update({ status: next })
+      .eq('id', orderId)
+      .eq('business_id', businessId)
+      .select('id,status')
+      .maybeSingle();
+    if (error || !updatedOrder) {
+      alert(`No se pudo cambiar el estado: ${error?.message || 'El pedido no existe, pertenece a otro negocio o no tienes permiso para cambiarlo.'}`);
       button.disabled = false;
       return;
     }
