@@ -186,3 +186,14 @@ Estas correcciones se prepararon en la rama de trabajo. Aún requieren pruebas d
 10. Probar envío y entrega real de correos con SMTP configurado; el servicio de correo predeterminado tiene límites y no debe asumirse como canal de producción.
 
 13. Confirmar que el historial pueda mostrar el nombre del negocio mediante permiso de lectura limitado a `businesses.id` y `businesses.name`, solo para negocios activos; no debe poder leer teléfono, dirección, horarios ni otra configuración comercial.
+
+## Checkout idempotente y formas de pago
+
+1. Crear un pedido con una clave nueva: el límite por IP debe consumirse exactamente una vez.
+2. Repetir la misma solicitud con la misma clave y contenido: debe recuperar el mismo pedido sin consumir otro intento ni descontar inventario.
+3. Ejecutar dos solicitudes simultáneas con la misma clave: debe existir un solo pedido.
+4. Reutilizar la clave con datos distintos: debe responder conflicto y no crear otro pedido.
+5. Desactivar el método de pago después de crear el pedido y repetir la solicitud original: debe recuperarse el pedido existente.
+6. Intentar crear un pedido nuevo con un método desactivado: debe rechazarse.
+7. Reintentar una compra existente sin encabezado de IP: la consulta idempotente debe poder recuperar el pedido; una clave nueva sin IP válida debe rechazarse antes de crear el pedido.
+8. Comprobar que el límite por IP sigue funcionando para claves nuevas y que no se cuenta dos veces desde Edge Function y SQL.
