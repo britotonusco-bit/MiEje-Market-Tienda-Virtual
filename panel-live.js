@@ -7,12 +7,13 @@
   let businessName = '';
   let isBusinessOwner = false;
   let cachedBusinesses = [];
+  let cachedProducts = [];
   const statusLabels = {
-    received: 'Recibido', confirmed: 'Confirmado', preparing: 'En preparación',
-    ready: 'Listo', on_the_way: 'En camino', delivered: 'Entregado', cancelled: 'Cancelado'
+    pending: 'Recibido', confirmed: 'Confirmado', preparing: 'En preparación',
+    ready: 'Listo', out_for_delivery: 'En camino', delivered: 'Entregado', cancelled: 'Cancelado'
   };
-  const nextStatus = { received: 'confirmed', confirmed: 'preparing', preparing: 'ready', ready: 'on_the_way', on_the_way: 'delivered' };
-  const statusClass = { received: 'yellow', confirmed: 'blue', preparing: 'blue', ready: 'green', on_the_way: 'blue', delivered: 'green', cancelled: 'red' };
+  const nextStatus = { pending: 'confirmed', confirmed: 'preparing', preparing: 'ready', ready: 'out_for_delivery', out_for_delivery: 'delivered' };
+  const statusClass = { pending: 'yellow', confirmed: 'blue', preparing: 'blue', ready: 'green', out_for_delivery: 'blue', delivered: 'green', cancelled: 'red' };
 
   document.addEventListener('DOMContentLoaded', boot);
 
@@ -26,9 +27,10 @@
       const { data: auth, error: authError } = await db.auth.getUser();
       if (authError || !auth.user) { window.location.replace('login.html'); return; }
       currentUser = auth.user;
-      const { data: profile, error: profileError } = await db.from('profiles').select('id,display_name,platform_role').eq('id', currentUser.id).single();
-      if (profileError || !profile) throw new Error('No se pudo verificar el perfil. Cierra sesión y vuelve a ingresar.');
-      currentProfile = profile;
+      const { data: access, error: accessError } = await db.functions.invoke('resolve-my-access', { body: {} });
+      if (accessError || !access?.ok || !access.profile) throw new Error(access?.error || 'No se pudo verificar tu acceso. Cierra sesión y vuelve a ingresar.');
+      currentProfile = access.profile;
+      const profile = access.profile;
       document.querySelector('#userName').textContent = profile.display_name || currentUser.email || 'Usuario';
       document.querySelector('#logoutBtn').addEventListener('click', signOut);
       document.querySelector('#refreshTechnicalBtn')?.addEventListener('click', refreshTechnical);
@@ -41,46 +43,34 @@
       document.querySelector('#memberBusinessSelect')?.addEventListener('change', event => loadTechnicalMembers(event.currentTarget.value));
       document.querySelector('#platformAiForm')?.addEventListener('submit', savePlatformAi);
       document.querySelector('#storeSettingsForm')?.addEventListener('submit', saveStoreSettings);
+      document.querySelector('#productForm')?.addEventListener('submit', saveProduct);
       document.querySelector('#businessContentForm')?.addEventListener('submit', saveBusinessContent);
       document.querySelector('#businessAiForm')?.addEventListener('submit', saveBusinessAi);
       document.querySelector('#blockRequestForm')?.addEventListener('submit', submitBlockRequest);
       document.querySelector('#refreshOrders')?.addEventListener('click', () => panel === 'business_admin' ? loadBusinessOrders() : loadEmployeeOrders());
 
       if (panel === 'technical') {
-        if (profile.platform_role !== 'platform_owner') throw new Error('Esta sección es exclusiva del propietario técnico autorizado.');
+        if (!access.is_platform_owner || profile.platform_role !== 'platform_owner') throw new Error('Esta sección es exclusiva del propietario técnico autorizado.');
+        const { data: assurance, error: assuranceError } = await db.auth.mfa.getAuthenticatorAssuranceLevel();
+        if (assuranceError || assurance?.currentLevel !== 'aal2') {
+          await db.auth.signOut();
+          window.location.replace('login.html');
+          return;
+        }
         await logPanel(null, 'technical', 'panel_open');
-        notice.textContent = 'Acceso validado. Los registros se consultan desde la base de datos.';
+        notice.textContent = 'Acceso validado. Consultando datos disponibles del proyecto independiente.';
         notice.className = 'notice';
         await loadTechnical();
-        await initPlatformAi();
       } else {
-        const { data: memberships, error: memberError } = await db.from('business_members')
-          .select('business_id,role,is_active,is_blocked,block_reason,is_business_owner,businesses(name,slug,is_active,suspension_reason,suspension_public_message)')
-          .eq('user_id', currentUser.id);
-        if (memberError) throw memberError;
-        const available = (memberships || []).filter(m => m.businesses);
+        const available = access.memberships || [];
         const requested = new URLSearchParams(window.location.search).get('business');
         const match = available.find(m => m.business_id === requested) || (available.length === 1 ? available[0] : null);
-        if (!match) throw new Error('No tienes un negocio asignado a esta cuenta o el negocio no coincide. Vuelve al inicio de sesión.');
-        if (match.is_blocked || !match.is_active) {
-          notice.textContent = `Acceso bloqueado para este usuario. Motivo: ${match.block_reason || 'El acceso fue suspendido por el servicio técnico.'}`;
-          notice.className = 'notice error';
-          await showSupportLink();
-          document.querySelectorAll('.panel-section, #statsGrid').forEach(el => { if (!el.closest('#soporte')) el.classList.add('hidden'); });
-          return;
-        }
-        if (match.businesses.is_active === false) {
-          notice.textContent = `El negocio ${match.businesses.name} está suspendido. Motivo: ${match.businesses.suspension_reason || 'El negocio no está disponible temporalmente.'}`;
-          notice.className = 'notice error';
-          await showSupportLink();
-          document.querySelectorAll('.panel-section, #statsGrid').forEach(el => { if (!el.closest('#soporte')) el.classList.add('hidden'); });
-          return;
-        }
+        if (!match) throw new Error('No tienes un negocio activo asignado a esta cuenta o el negocio no coincide. Vuelve al inicio de sesión.');
         if (panel === 'business_admin' && match.role !== 'business_admin') throw new Error('Tu cuenta no tiene el rol administrativo requerido para este panel.');
-        if (panel === 'employee' && !['employee','business_admin'].includes(match.role)) throw new Error('Tu cuenta no tiene permiso para el panel del personal.');
+        if (panel === 'employee' && match.role !== 'employee') throw new Error('Tu cuenta no tiene permiso para el panel del personal.');
         businessId = match.business_id;
-        businessName = match.businesses.name;
-        isBusinessOwner = match.is_business_owner === true;
+        businessName = match.business.name;
+        isBusinessOwner = match.role === 'business_admin';
         document.querySelector('#businessName').textContent = businessName;
         await logPanel(businessId, panel, 'panel_open');
         notice.textContent = `Acceso validado para ${businessName}. Los permisos se aplican en la base de datos.`;
@@ -96,8 +86,8 @@
   }
 
   async function logPanel(id, panelName, eventType) {
-    const { error } = await db.rpc('log_panel_access', { p_business_id: id, p_panel: panelName, p_event_type: eventType });
-    if (error) throw new Error('No se pudo guardar el registro de acceso. Por seguridad, el panel no se abrirá: ' + error.message);
+    const result = await callTechnicalFunction({ action: 'log_login', business_id: id, panel: panelName });
+    if (!result?.ok) throw new Error('No se pudo registrar el acceso.');
   }
 
   async function signOut() {
@@ -105,81 +95,214 @@
   }
 
   async function loadBusinessAdmin() {
-    const { data: summary, error: summaryError } = await db.rpc('get_business_summary', { p_business_id: businessId });
-    if (summaryError) throw summaryError;
+    const [ordersResult, productsResult] = await Promise.all([
+      db.from('orders').select('id,total,payment_status,status,created_at').eq('business_id', businessId),
+      db.from('products').select('id,inventory,is_active').eq('business_id', businessId)
+    ]);
+    if (ordersResult.error) throw ordersResult.error;
+    if (productsResult.error) throw productsResult.error;
+    const orders = ordersResult.data || [], products = productsResult.data || [];
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+    const todayOrders = orders.filter(o => new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) === today && o.status !== 'cancelled');
+    const received = orders.filter(o => o.payment_status === 'paid').reduce((sum,o) => sum + Number(o.total || 0), 0);
     renderStats([
-      ['Ventas de hoy', money(summary.today_sales), 'Pedidos creados hoy, sin cancelados'],
-      ['Dinero recibido', money(summary.money_received), 'Pedidos marcados como pagados'],
-      ['Pedidos abiertos', number(summary.open_orders), 'Pendientes de completar'],
-      ['Productos con poco stock', number(summary.low_stock_products), 'Cinco unidades o menos']
+      ['Ventas de hoy', money(todayOrders.reduce((sum,o) => sum + Number(o.total || 0), 0)), 'Pedidos creados hoy, sin cancelados'],
+      ['Dinero recibido', money(received), 'Pedidos marcados como pagados'],
+      ['Pedidos abiertos', number(orders.filter(o => !['delivered','cancelled'].includes(o.status)).length), 'Pendientes de completar'],
+      ['Productos con poco stock', number(products.filter(p => p.is_active && Number(p.inventory || 0) <= 5).length), 'Cinco unidades o menos']
     ]);
     await Promise.all([loadBusinessOrders(), loadProducts(), loadAccessEvents(businessId, '#accessContainer'), loadAuditEvents(businessId, '#auditContainer')]);
+  }
+
+  async function uploadBusinessImage(file, folder) {
+    if (!file) return null;
+    const allowedTypes = new Set(['image/png', 'image/jpeg', 'image/webp']);
+    if (!allowedTypes.has(file.type)) throw new Error('El archivo debe ser PNG, JPG o WEBP.');
+    if (file.size > 5 * 1024 * 1024) throw new Error('La imagen no puede superar los 5 MB.');
+    const extension = file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1];
+    const path = `${businessId}/${folder}/${crypto.randomUUID()}.${extension}`;
+    const { data, error } = await db.storage.from('business-assets').upload(path, file, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: file.type
+    });
+    if (error) {
+      if (/bucket.*not found|not found.*bucket/i.test(error.message || '')) {
+        throw new Error('Falta crear el bucket público "business-assets" en Storage de Supabase. La imagen no se ha guardado.');
+      }
+      throw new Error('No se pudo subir la imagen: ' + error.message);
+    }
+    const { data: publicData } = db.storage.from('business-assets').getPublicUrl(data.path);
+    return { path: data.path, publicUrl: publicData.publicUrl };
+  }
+
+  async function removeUploadedBusinessImage(path) {
+    if (!path) return;
+    const { error } = await db.storage.from('business-assets').remove([path]);
+    if (error) console.warn('No se pudo retirar una imagen que quedó sin asociar:', error.message);
+  }
+
+  async function saveProduct(event) {
+    event.preventDefault();
+    const form = event.currentTarget, message = document.querySelector('#productMessage');
+    const name = form.elements.name.value.trim();
+    const price = Number(form.elements.price.value);
+    const inventory = Number(form.elements.inventory.value);
+    if (!name || !Number.isFinite(price) || price < 0 || !Number.isInteger(inventory) || inventory < 0) {
+      message.textContent = 'Revisa el nombre, el precio y las existencias. El precio debe ser igual o mayor que cero y las existencias un número entero.';
+      message.className = 'message error';
+      return;
+    }
+    const imageFile = form.elements.image_file.files?.[0] || null;
+    const externalImageUrl = form.elements.image_url.value.trim();
+    if (externalImageUrl && !/^https?:\/\//i.test(externalImageUrl)) {
+      message.textContent = 'La dirección de la imagen debe comenzar por https:// o http://.';
+      message.className = 'message error';
+      return;
+    }
+    const id = form.elements.id.value;
+    const button = form.querySelector('button[type="submit"]');
+    let uploadedImage = null;
+    button.disabled = true;
+    message.textContent = imageFile ? 'Subiendo imagen y guardando producto…' : 'Guardando producto…';
+    message.className = 'message';
+    try {
+      if (imageFile) uploadedImage = await uploadBusinessImage(imageFile, 'products');
+      const payload = {
+        business_id: businessId,
+        name,
+        category: form.elements.category.value.trim() || null,
+        description: form.elements.description.value.trim() || null,
+        price,
+        inventory,
+        image_url: uploadedImage?.publicUrl || externalImageUrl || null,
+        is_active: form.elements.is_active.checked,
+        updated_at: new Date().toISOString()
+      };
+      const result = id
+        ? await db.from('products').update(payload).eq('id', id).eq('business_id', businessId)
+        : await db.from('products').insert(payload);
+      if (result.error) {
+        await removeUploadedBusinessImage(uploadedImage?.path);
+        throw new Error(result.error.message);
+      }
+      form.reset();
+      form.elements.id.value = '';
+      message.textContent = id ? 'Producto actualizado.' : 'Producto creado.';
+      message.className = 'message success';
+      await loadProducts();
+    } catch (error) {
+      message.textContent = 'No se pudo guardar el producto: ' + (error.message || 'Error desconocido');
+      message.className = 'message error';
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function editProduct(id) {
+    const product = cachedProducts.find(item => item.id === id);
+    const form = document.querySelector('#productForm');
+    if (!product || !form) return;
+    form.elements.id.value = product.id;
+    form.elements.name.value = product.name || '';
+    form.elements.category.value = product.category || '';
+    form.elements.description.value = product.description || '';
+    form.elements.price.value = product.price ?? 0;
+    form.elements.inventory.value = product.inventory ?? 0;
+    form.elements.image_url.value = product.image_url || '';
+    if (form.elements.image_file) form.elements.image_file.value = '';
+    form.elements.is_active.checked = Boolean(product.is_active);
+    const message = document.querySelector('#productMessage');
+    message.textContent = 'Editando: ' + product.name;
+    message.className = 'message';
+    form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  async function toggleProductStatus(id, button) {
+    const product = cachedProducts.find(item => item.id === id);
+    if (!product) return;
+    const action = product.is_active ? 'desactivar' : 'activar';
+    if (!window.confirm(`¿Deseas ${action} el producto "${product.name}"? No se eliminará del historial de pedidos.`)) return;
+    button.disabled = true;
+    const { error } = await db.from('products').update({ is_active: !product.is_active, updated_at: new Date().toISOString() }).eq('id', id).eq('business_id', businessId);
+    if (error) {
+      alert('No se pudo cambiar el estado del producto: ' + error.message);
+      button.disabled = false;
+      return;
+    }
+    await loadProducts();
   }
 
   async function loadBusinessOrders() {
     const target = document.querySelector('#ordersContainer');
     target.innerHTML = '<div class="empty">Cargando pedidos…</div>';
-    const { data, error } = await db.rpc('get_business_orders', { p_business_id: businessId, p_panel: 'business_admin' });
+    const { data, error } = await db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,payment_status,status,total,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
     if (error) return showError(target, error);
-    renderOrders(target, data || [], true);
+    renderOrders(target, (data || []).map(o => ({ ...o, items: o.order_items || [] })), true);
   }
 
   async function loadEmployeeOrders() {
     const target = document.querySelector('#ordersContainer');
     target.innerHTML = '<div class="empty">Cargando pedidos…</div>';
-    const { data, error } = await db.rpc('get_business_orders', { p_business_id: businessId, p_panel: 'employee' });
+    const { data, error } = await db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,status,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
     if (error) return showError(target, error);
-    renderOrders(target, data || [], false);
+    renderOrders(target, (data || []).map(o => ({ ...o, items: o.order_items || [] })), false);
   }
 
   async function loadProducts() {
     const target = document.querySelector('#productsContainer');
-    const { data, error } = await db.from('products').select('id,name,price,stock_quantity,track_inventory,is_active').eq('business_id', businessId).order('name').limit(250);
+    const { data, error } = await db.from('products').select('id,name,category,description,price,inventory,image_url,is_active').eq('business_id', businessId).order('name').limit(250);
     if (error) return showError(target, error);
-    if (!data?.length) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene productos registrados.</div>'; return; }
-    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Precio</th><th>Existencias</th><th>Estado</th></tr></thead><tbody>${data.map(p => `<tr><td>${esc(p.name)}</td><td>${money(p.price)}</td><td>${p.track_inventory ? number(p.stock_quantity) : 'No controlado'}</td><td><span class="pill ${p.is_active ? 'green':'red'}">${p.is_active ? 'Activo':'Inactivo'}</span></td></tr>`).join('')}</tbody></table></div>`;
+    cachedProducts = data || [];
+    if (!cachedProducts.length) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene productos registrados. Puedes crear el primero en el formulario.</div>'; return; }
+    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Categoría</th><th>Precio</th><th>Existencias</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${cachedProducts.map(p => `<tr><td><strong>${esc(p.name)}</strong>${p.image_url && /^https?:\/\//i.test(p.image_url) ? `<br><a href="${esc(p.image_url)}" target="_blank" rel="noopener"><img src="${esc(p.image_url)}" alt="Imagen de ${esc(p.name)}" loading="lazy" style="width:54px;height:54px;object-fit:cover;border-radius:10px;vertical-align:middle"> Ver imagen</a>` : ''}<br><small>${esc(p.description || '')}</small></td><td>${esc(p.category || '—')}</td><td>${money(p.price)}</td><td>${number(p.inventory)}</td><td><span class="pill ${p.is_active ? 'green':'red'}">${p.is_active ? 'Activo':'Inactivo'}</span></td><td><button class="small-button" data-edit-product="${esc(p.id)}">Editar</button> <button class="small-button" data-toggle-product="${esc(p.id)}">${p.is_active ? 'Desactivar':'Activar'}</button></td></tr>`).join('')}</tbody></table></div>`;
+    target.querySelectorAll('[data-edit-product]').forEach(button => button.addEventListener('click', () => editProduct(button.dataset.editProduct)));
+    target.querySelectorAll('[data-toggle-product]').forEach(button => button.addEventListener('click', () => toggleProductStatus(button.dataset.toggleProduct, button)));
   }
 
   async function loadTechnical() {
-    const { data: summary, error: summaryError } = await db.rpc('get_platform_summary');
-    if (summaryError) throw summaryError;
-    renderStats([
-      ['Negocios', number(summary.total_businesses), `${number(summary.active_businesses)} activos`],
-      ['Productos', number(summary.total_products), 'En todos los negocios'],
-      ['Pedidos', number(summary.total_orders), `${number(summary.open_orders)} abiertos`],
-      ['Ventas registradas', money(summary.sales_total), `Recibido: ${money(summary.money_received)}`],
-      ['Accesos registrados', number(summary.access_events), 'Historial central'],
-      ['Eventos de auditoría', number(summary.audit_events), 'Cambios importantes'],
-      ['Nómina pagada', money(summary.payroll_paid), 'Registros marcados como pagados']
+    const result = await callTechnicalFunction({ action: 'list_businesses' });
+    cachedBusinesses = result.businesses || [];
+    const [productsResult, ordersResult, auditResult] = await Promise.all([
+      db.from('products').select('id', { count: 'exact', head: true }),
+      db.from('orders').select('id,status,total', { count: 'exact' }),
+      db.from('audit_logs').select('id', { count: 'exact', head: true })
     ]);
-    const { data: businesses, error: businessError } = await db.from('businesses')
-      .select('id,name,slug,business_type,is_active,suspension_reason,suspension_public_message,created_at').order('created_at', { ascending: false });
-    if (businessError) throw businessError;
-    cachedBusinesses = businesses || [];
-    const select = document.querySelector('#businessSelect');
-    select.innerHTML = `<option value="">Todos los negocios</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.is_active ? '' : ' (inactivo)'}</option>`).join('');
-    const memberBusinessSelect = document.querySelector('#memberBusinessSelect');
-    if (memberBusinessSelect) memberBusinessSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
-    const suspensionSelect = document.querySelector('#suspensionBusinessSelect');
-    if (suspensionSelect) suspensionSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.is_active ? '' : ' (suspendido)'}</option>`).join('');
-    const inviteSelect = document.querySelector('#inviteBusinessSelect');
-    if (inviteSelect) inviteSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.filter(b => b.is_active).map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+    if (productsResult.error) throw productsResult.error;
+    if (ordersResult.error) throw ordersResult.error;
+    if (auditResult.error) throw auditResult.error;
+    const activeOrders = ordersResult.data || [];
+    renderStats([
+      ['Negocios', number(cachedBusinesses.length), `${number(cachedBusinesses.filter(b => b.status === 'active').length)} activos`],
+      ['Productos', number(productsResult.count || 0), 'En todos los negocios'],
+      ['Pedidos', number(ordersResult.count || activeOrders.length), `${number(activeOrders.filter(o => !['delivered','cancelled'].includes(o.status)).length)} abiertos`],
+      ['Ventas registradas', money(activeOrders.reduce((sum,o) => sum + Number(o.total || 0), 0)), 'Total de pedidos consultables'],
+      ['Eventos de auditoría', number(auditResult.count || 0), 'Registros en audit_logs']
+    ]);
+    const options = `<option value="">Todos los negocios</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (inactivo)'}</option>`).join('');
+    const select = document.querySelector('#businessSelect'); if (select) select.innerHTML = options;
+    const memberSelect = document.querySelector('#memberBusinessSelect'); if (memberSelect) memberSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+    const suspensionSelect = document.querySelector('#suspensionBusinessSelect'); if (suspensionSelect) suspensionSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (suspendido)'}</option>`).join('');
+    const inviteSelect = document.querySelector('#inviteBusinessSelect'); if (inviteSelect) inviteSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.filter(b => b.status === 'active').map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
     renderBusinesses();
-    await loadFinance();
     await loadSelectedBusiness('');
-    await loadBlockRequests();
+    await loadAuditEvents(null, '#auditContainer');
+    const finance = document.querySelector('#financeContainer'); if (finance) finance.innerHTML = '<div class="empty">El módulo financiero global y nómina aún no está conectado al esquema independiente.</div>';
+    const blocks = document.querySelector('#blockRequestsContainer'); if (blocks) blocks.innerHTML = '<div class="empty">Las solicitudes de bloqueo no están disponibles en este proyecto todavía.</div>';
     await loadContentModeration();
+    const platformAi = document.getElementById('ia-general');
+    if (platformAi) platformAi.innerHTML = '<div class="section-heading"><div><h2>IA general</h2></div></div><div class="empty">La configuración de IA general aún no está conectada al esquema independiente.</div>';
   }
 
   function renderBusinesses() {
     const target = document.querySelector('#businessesContainer');
     const search = (document.querySelector('#businessSearch')?.value || '').trim().toLocaleLowerCase('es');
-    const filtered = cachedBusinesses.filter(b => [b.name, b.slug, b.business_type].some(v => String(v || '').toLocaleLowerCase('es').includes(search)));
+    const filtered = cachedBusinesses.filter(b => [b.name, b.slug, b.business_type, b.category].some(v => String(v || '').toLocaleLowerCase('es').includes(search)));
     const count = document.querySelector('#businessCount');
     if (count) count.textContent = `${filtered.length} de ${cachedBusinesses.length} negocios`;
     if (!cachedBusinesses.length) { target.innerHTML = '<div class="empty">Todavía no hay negocios. Usa el formulario de arriba para crear el primero.</div>'; return; }
     if (!filtered.length) { target.innerHTML = '<div class="empty">No hay negocios que coincidan con la búsqueda.</div>'; return; }
-    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Negocio</th><th>Tipo</th><th>Identificador</th><th>Estado / motivo</th><th>Creado</th><th>Acción</th></tr></thead><tbody>${filtered.map(b => `<tr><td><strong>${esc(b.name)}</strong></td><td>${esc(b.business_type)}</td><td>${esc(b.slug)}</td><td><span class="pill ${b.is_active ? 'green':'red'}">${b.is_active ? 'Activo':'Suspendido'}</span>${!b.is_active ? `<br><small>${esc(b.suspension_reason || 'Motivo pendiente de registrar')}</small>` : ''}</td><td>${dateTime(b.created_at)}</td><td><button class="small-button" data-business-status="${esc(b.id)}" data-active="${b.is_active ? 'false':'true'}">${b.is_active ? 'Suspender':'Reactivar'}</button></td></tr>`).join('')}</tbody></table></div>`;
+    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Negocio</th><th>Tipo</th><th>Identificador</th><th>Estado / motivo</th><th>Creado</th><th>Acción</th></tr></thead><tbody>${filtered.map(b => { const active = b.status === 'active'; return `<tr><td><strong>${esc(b.name)}</strong></td><td>${esc(b.business_type || b.category || '—')}</td><td>${esc(b.slug)}</td><td><span class="pill ${active ? 'green':'red'}">${active ? 'Activo':'Suspendido'}</span>${!active ? `<br><small>${esc(b.suspension_reason || 'Motivo pendiente de registrar')}</small>` : ''}</td><td>${dateTime(b.created_at)}</td><td><button class="small-button" data-business-status="${esc(b.id)}" data-active="${active ? 'false':'true'}">${active ? 'Suspender':'Reactivar'}</button></td></tr>`; }).join('')}</tbody></table></div>`;
     target.querySelectorAll('[data-business-status]').forEach(button => button.addEventListener('click', () => changeBusinessStatus(button.dataset.businessStatus, button.dataset.active === 'true', button)));
   }
 
@@ -282,14 +405,14 @@
     const business = cachedBusinesses.find(item => item.id === id);
     if (!business) return;
     const verb = isActive ? 'reactivar' : 'suspender';
-    const reason = isActive ? (window.prompt(`Nota de reactivación para ${business.name}:`, 'Se revisó el caso y se autoriza la reactivación.') || '') : (window.prompt(`Motivo interno de suspensión de ${business.name}. Lo verán el propietario, administrador y personal:`, '') || '');
+    const reason = isActive ? (window.prompt(`Nota de reactivación para ${business.name}:`, 'Se revisó el caso y se autoriza la reactivación.') || '') : (window.prompt(`Motivo interno de suspensión de ${business.name}:`, '') || '');
     if (!isActive && reason.trim().length < 5) { alert('Escribe un motivo de al menos 5 caracteres. No se realizó ningún cambio.'); return; }
-    const publicMessage = isActive ? '' : (window.prompt('Mensaje distinto para los clientes:', 'Esta tienda no está disponible temporalmente. Contacta con el negocio para más información.') || 'Esta tienda no está disponible temporalmente.');
+    const publicMessage = isActive ? '' : (window.prompt('Mensaje distinto para los clientes:', 'Esta tienda no está disponible temporalmente.') || 'Esta tienda no está disponible temporalmente.');
     if (!window.confirm(`¿Deseas ${verb} el negocio "${business.name}"?`)) return;
     button.disabled = true;
     try {
-      const result = await callTechnicalFunction({ action: 'set_business_status', business_id: id, is_active: isActive, reason, public_message: publicMessage });
-      document.querySelector('#notice').textContent = result.message;
+      const result = await callTechnicalFunction({ action: 'set_business_status', business_id: id, status: isActive ? 'active' : 'suspended', reason, public_message: publicMessage });
+      document.querySelector('#notice').textContent = result.message || `Negocio ${isActive ? 'reactivado' : 'suspendido'}.`;
       document.querySelector('#notice').className = 'notice';
       await loadTechnical();
     } catch (error) {
@@ -301,43 +424,64 @@
   async function loadSelectedBusiness(id) {
     const ordersTarget = document.querySelector('#businessOrdersContainer');
     if (!id) {
-      ordersTarget.innerHTML = '<div class="empty">Selecciona un negocio para consultar sus pedidos. Los accesos y la auditoría muestran todos los negocios.</div>';
-      await Promise.all([loadAccessEvents(null, '#accessContainer'), loadAuditEvents(null, '#auditContainer')]);
+      if (ordersTarget) ordersTarget.innerHTML = '<div class="empty">Selecciona un negocio para consultar sus pedidos.</div>';
       return;
     }
     const business = cachedBusinesses.find(b => b.id === id);
     if (!business) return;
-    const { data: orders, error: ordersError } = await db.rpc('get_business_orders', { p_business_id: id, p_panel: 'business_admin' });
-    if (ordersError) showError(ordersTarget, ordersError);
-    else renderOrders(ordersTarget, orders || [], true);
-    await Promise.all([loadAccessEvents(id, '#accessContainer'), loadAuditEvents(id, '#auditContainer')]);
+    const { data, error } = await db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,payment_status,status,total,created_at,order_items(product_name,quantity)').eq('business_id', id).order('created_at', { ascending: false }).limit(100);
+    if (error) showError(ordersTarget, error);
+    else renderOrders(ordersTarget, (data || []).map(o => ({ ...o, items: o.order_items || [] })), true);
   }
 
   async function loadTechnicalMembers(id) {
-    const target=document.querySelector('#memberTargetSelect'); if(!target) return;
-    target.innerHTML='<option value="">Cargando cuentas…</option>'; if(!id){target.innerHTML='<option value="">Selecciona primero un negocio</option>';return;}
-    const {data,error}=await db.from('business_members').select('user_id,role,is_active,is_blocked,profiles(display_name)').eq('business_id',id).order('created_at',{ascending:false});
-    if(error){target.innerHTML='<option value="">No se pudieron cargar las cuentas</option>';return;}
-    target.innerHTML='<option value="">Selecciona una cuenta</option>'+(data||[]).map(m=>`<option value="${esc(m.user_id)}">${esc(m.profiles?.display_name||shortId(m.user_id))} · ${m.role==='business_admin'?'Administrador':'Empleado'}${m.is_blocked?' · Bloqueado':''}${!m.is_active?' · Inactivo':''}</option>`).join('');
+    const target = document.querySelector('#memberTargetSelect'); if (!target) return;
+    target.innerHTML = '<option value="">Cargando cuentas…</option>';
+    if (!id) { target.innerHTML = '<option value="">Selecciona primero un negocio</option>'; return; }
+    try {
+      const result = await callTechnicalFunction({ action: 'list_business_members', business_id: id });
+      const rows = result.members || [];
+      target.innerHTML = '<option value="">Selecciona una cuenta</option>' + rows.map(m => `<option value="${esc(m.id)}">${esc(m.profiles?.display_name || shortId(m.user_id))} · ${m.role === 'business_admin' ? 'Administrador' : 'Empleado'}${m.status !== 'active' ? ' · Suspendido' : ''}</option>`).join('');
+    } catch (error) { target.innerHTML = '<option value="">No se pudieron cargar las cuentas</option>'; }
   }
 
   async function saveMemberStatus(event) {
-    event.preventDefault(); const form=event.currentTarget, message=document.querySelector('#memberStatusMessage');
-    const blocked=form.elements.is_blocked.value==='true'; const reason=form.elements.reason.value.trim();
-    if(blocked && reason.length<5){message.textContent='Para bloquear una cuenta debes escribir un motivo de al menos 5 caracteres.';message.className='message error';return;}
-    message.textContent='Aplicando cambio y registrando auditoría…';
-    try{const result=await callTechnicalFunction({action:'set_member_status',business_id:form.elements.business_id.value,user_id:form.elements.user_id.value,is_blocked:blocked,reason});message.textContent=result.message;message.className='message success';await loadTechnicalMembers(form.elements.business_id.value);await loadBlockRequests();}
-    catch(error){message.textContent=error.message;message.className='message error';}
+    event.preventDefault();
+    const form = event.currentTarget, message = document.querySelector('#memberStatusMessage');
+    const suspended = form.elements.is_blocked.value === 'true';
+    const reason = form.elements.reason.value.trim();
+    if (reason.length < 5) {
+      message.textContent = 'Escribe un motivo de al menos 5 caracteres para dejar constancia en auditoría.';
+      message.className = 'message error';
+      return;
+    }
+    message.textContent = suspended ? 'Suspendiendo acceso y registrando auditoría…' : 'Reactivando acceso y registrando auditoría…';
+    try {
+      const result = await callTechnicalFunction({
+        action: suspended ? 'block_member' : 'unblock_member',
+        membership_id: form.elements.user_id.value,
+        reason
+      });
+      message.textContent = result.message || (suspended ? 'Acceso suspendido.' : 'Acceso reactivado.');
+      message.className = 'message success';
+      await loadTechnicalMembers(form.elements.business_id.value);
+    } catch (error) {
+      message.textContent = error.message || 'No se pudo cambiar el acceso.';
+      message.className = 'message error';
+    }
   }
 
   async function saveSuspension(event) {
     event.preventDefault();
     const form = event.currentTarget, message = document.querySelector('#suspensionMessage');
     const data = Object.fromEntries(new FormData(form).entries());
-    data.action = 'set_business_status'; data.is_active = data.is_active === 'true';
-    if (!data.is_active && String(data.reason || '').trim().length < 5) { message.textContent = 'El motivo debe tener al menos 5 caracteres.'; return; }
+    const active = data.is_active === 'true';
+    data.action = 'set_business_status';
+    data.status = active ? 'active' : 'suspended';
+    delete data.is_active;
+    if (!active && String(data.reason || '').trim().length < 5) { message.textContent = 'El motivo debe tener al menos 5 caracteres.'; return; }
     message.textContent = 'Guardando estado y auditoría…';
-    try { const result = await callTechnicalFunction(data); message.textContent = result.message; message.className = 'message success'; await loadTechnical(); }
+    try { const result = await callTechnicalFunction(data); message.textContent = result.message || 'Estado actualizado.'; message.className = 'message success'; await loadTechnical(); }
     catch (error) { message.textContent = error.message; message.className = 'message error'; }
   }
 
@@ -367,44 +511,283 @@
   }
 
   async function showSupportLink() {
-    const link = document.querySelector('#technicalSupportLink'); if (!link) return;
-    const { data } = await db.from('platform_public_settings').select('support_whatsapp').eq('id', true).maybeSingle();
-    const phone = String(data?.support_whatsapp || '').replace(/[^0-9]/g, '');
-    if (phone) { link.href = `https://wa.me/${phone}?text=${encodeURIComponent('Hola, necesito ayuda con mi acceso a MiEje Market.')}`; link.classList.remove('hidden'); }
-    else { link.href = '#'; link.classList.add('hidden'); const msg = document.querySelector('#technicalSupportMessage'); if (msg) msg.textContent = 'El servicio técnico aún no ha configurado su número de WhatsApp.'; }
+    const link = document.querySelector('#technicalSupportLink');
+    if (!link) return;
+    link.href = '#';
+    link.classList.add('hidden');
+    const message = document.querySelector('#technicalSupportMessage');
+    if (message) message.textContent = 'El número de soporte de la plataforma aún no está configurado en el proyecto independiente.';
   }
 
   async function initBusinessSettings() {
     await showSupportLink();
-    const [settingsResult, contentResult, aiResult, membersResult, applicationsResult] = await Promise.all([
-      db.from('business_store_settings').select('*').eq('business_id', businessId).maybeSingle(),
-      db.from('business_content_pages').select('id,content_type,title,body,is_published,moderation_status,moderation_note,created_at').eq('business_id', businessId).order('created_at', { ascending: false }).limit(50),
-      db.from('business_ai_settings').select('enabled,assistant_name,instructions').eq('business_id', businessId).maybeSingle(),
-      db.from('business_members').select('user_id,role,is_active,is_blocked,is_business_owner,profiles(display_name)').eq('business_id', businessId),
-      db.from('job_applications').select('id,content_page_id,applicant_name,applicant_contact,applicant_message,application_data,status,created_at').eq('business_id', businessId).order('created_at', {ascending:false}).limit(100)
+    const [businessResult, methodsResult] = await Promise.all([
+      db.from('businesses').select('name,category,tagline,description,city,contact_phone,whatsapp_support,logo_url,delivery_fee,minimum_order_amount,opening_hours').eq('id', businessId).single(),
+      db.from('business_payment_methods').select('method_code,display_name,public_instructions,is_enabled,sort_order').eq('business_id', businessId).order('sort_order')
     ]);
-    const sf = document.querySelector('#storeSettingsForm');
-    if (sf && !settingsResult.error && settingsResult.data) { const x=settingsResult.data; sf.elements.whatsapp_number.value=x.whatsapp_number||''; sf.elements.payment_methods.value=(x.payment_methods||[]).map(v=>typeof v==='string'?v:v.label||'').join('\n'); sf.elements.delivery_options.value=(x.delivery_options||[]).map(v=>typeof v==='string'?v:v.label||'').join('\n'); sf.elements.contact_options.value=(x.contact_options?.notes||[]).join('\n'); }
-    const af=document.querySelector('#businessAiForm'); if (af && !aiResult.error && aiResult.data) { af.elements.assistant_name.value=aiResult.data.assistant_name||'Asistente del negocio'; af.elements.instructions.value=aiResult.data.instructions||''; af.elements.enabled.checked=Boolean(aiResult.data.enabled); }
-    const content=document.querySelector('#businessContentList'); if(content) { const rows=contentResult.data||[]; content.innerHTML=rows.length?tableHtml(['Tipo','Título','Estado','Fecha'],rows.map(x=>[x.content_type,x.title,x.moderation_status==='approved'?(x.is_published?'Aprobado y publicado':'Aprobado / oculto'):x.moderation_status==='rejected'?'Rechazado':'Pendiente de revisión',dateTime(x.created_at)])):'<div class="empty">Todavía no hay promociones ni formularios publicados.</div>'; if(contentResult.error) showError(content,contentResult.error); }
-    const blockForm=document.querySelector('#blockRequestForm'); const ownerNote=document.querySelector('#blockRequestOwnerNote'); if(blockForm && !isBusinessOwner){blockForm.classList.add('hidden'); ownerNote?.classList.remove('hidden');} else {blockForm?.classList.remove('hidden'); ownerNote?.classList.add('hidden');}
-    const target=document.querySelector('#blockTargetUser'); if(target) { const rows=(membersResult.data||[]).filter(m=>m.user_id!==currentUser.id && m.is_active); target.innerHTML='<option value="">Selecciona una cuenta</option>'+rows.map(m=>`<option value="${esc(m.user_id)}">${esc(m.profiles?.display_name||shortId(m.user_id))} · ${m.role==='business_admin'?'Administrador':'Empleado'}${m.is_blocked?' · Bloqueado':''}</option>`).join(''); if(membersResult.error) target.innerHTML='<option value="">No se pudieron cargar las cuentas</option>'; }
-    const applications=document.querySelector('#jobApplicationsContainer'); if(applications){ const rows=applicationsResult.data||[]; applications.innerHTML=applicationsResult.error?`<div class="empty">No se pudieron cargar las postulaciones: ${esc(applicationsResult.error.message)}</div>`:rows.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Postulante</th><th>Contacto</th><th>Mensaje</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${rows.map(a=>`<tr><td>${dateTime(a.created_at)}</td><td>${esc(a.applicant_name)}</td><td>${esc(a.applicant_contact)}</td><td>${esc(a.applicant_message||'—')}${a.application_data&&Object.keys(a.application_data).length?`<br><small>Campos adicionales: ${esc(JSON.stringify(a.application_data))}</small>`:''}</td><td>${esc(a.status)}</td><td><select class="field" data-application-status="${esc(a.id)}"><option value="new" ${a.status==='new'?'selected':''}>Nueva</option><option value="reviewing" ${a.status==='reviewing'?'selected':''}>En revisión</option><option value="contacted" ${a.status==='contacted'?'selected':''}>Contactado</option><option value="closed" ${a.status==='closed'?'selected':''}>Cerrada</option></select></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No hay postulaciones recibidas.</div>'; applications.querySelectorAll('[data-application-status]').forEach(select=>select.addEventListener('change',async()=>{const {error}=await db.from('job_applications').update({status:select.value}).eq('id',select.dataset.applicationStatus).eq('business_id',businessId);if(error){alert('No se pudo actualizar el estado: '+error.message);await initBusinessSettings();}})); }
+    const form = document.querySelector('#storeSettingsForm');
+    if (businessResult.error) {
+      const message = document.querySelector('#storeSettingsMessage');
+      if (message) { message.textContent = 'No se pudieron cargar los datos del negocio: ' + businessResult.error.message; message.className = 'message error'; }
+    } else if (form) {
+      const b = businessResult.data;
+      const schedule = b.opening_hours && typeof b.opening_hours === 'object' ? b.opening_hours : {};
+      for (const day of ['monday','tuesday','wednesday','thursday','friday','saturday','sunday']) {
+        const entry = schedule[day] || {};
+        if (form.elements['hours_'+day+'_open_day']) form.elements['hours_'+day+'_open_day'].checked = entry.closed === false || Boolean(entry.open && entry.close);
+        if (form.elements['hours_'+day+'_open']) form.elements['hours_'+day+'_open'].value = entry.open || '08:00';
+        if (form.elements['hours_'+day+'_close']) form.elements['hours_'+day+'_close'].value = entry.close || '18:00';
+      }
+      for (const key of ['name','category','tagline','description','city','contact_phone','whatsapp_support','logo_url','delivery_fee','minimum_order_amount']) {
+        if (form.elements[key]) form.elements[key].value = b[key] ?? (['delivery_fee','minimum_order_amount'].includes(key) ? 0 : '');
+      }
+    }
+    const paymentField = form?.elements.payment_methods;
+    if (paymentField && !methodsResult.error) paymentField.value = (methodsResult.data || []).filter(m => m.is_enabled).sort((a,b) => a.sort_order-b.sort_order).map(m => m.public_instructions ? (m.display_name + ' | ' + m.public_instructions) : m.display_name).join('\n');
+    if (methodsResult.error) {
+      const message = document.querySelector('#storeSettingsMessage');
+      if (message) { message.textContent = 'No se pudieron cargar los métodos de pago: ' + methodsResult.error.message; message.className = 'message error'; }
+    }
+    const pending = [
+      ['ia-negocio', 'IA exclusiva del negocio', 'La configuración de IA por negocio aún no está implementada en la base independiente.'],
+      ['solicitudes-bloqueo', 'Solicitudes de bloqueo', 'Las solicitudes de bloqueo desde el panel del negocio todavía no están implementadas en el servidor.']
+    ];
+    await Promise.all([loadBusinessContent(), loadJobApplications()]);
+    for (const [id, heading, message] of pending) {
+      const section = document.getElementById(id);
+      if (section) section.innerHTML = `<div class="section-heading"><div><h2>${heading}</h2></div></div><div class="empty">${message}</div>`;
+    }
   }
 
   async function saveStoreSettings(event) {
-    event.preventDefault(); const form=event.currentTarget, message=document.querySelector('#storeSettingsMessage');
-    const list = name => form.elements[name].value.split('\n').map(v=>v.trim()).filter(Boolean).map(label=>({label,enabled:true}));
-    const contactNotes=form.elements.contact_options.value.split('\n').map(v=>v.trim()).filter(Boolean).slice(0,30);
-    const payload={business_id:businessId,whatsapp_number:form.elements.whatsapp_number.value.replace(/[^0-9]/g,'').slice(0,18),payment_methods:list('payment_methods'),delivery_options:list('delivery_options'),contact_options:{notes:contactNotes},updated_by:currentUser.id,updated_at:new Date().toISOString()};
-    const {error}=await db.from('business_store_settings').upsert(payload,{onConflict:'business_id'}); message.textContent=error?`No se pudo guardar: ${error.message}`:'Configuración de pago, entrega y contacto guardada.'; message.className=error?'message error':'message success';
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#storeSettingsMessage');
+    const value = name => String(form.elements[name]?.value || '').trim();
+    const name = value('name');
+    const city = value('city');
+    const category = value('category');
+    if (!name || !city || !category) {
+      message.textContent = 'El nombre, la categoría y la ciudad son obligatorios.';
+      message.className = 'message error';
+      return;
+    }
+    const toAmount = name => {
+      const n = Number(form.elements[name]?.value || 0);
+      return Number.isFinite(n) && n >= 0 ? n : null;
+    };
+    const deliveryFee = toAmount('delivery_fee');
+    const minimumOrder = toAmount('minimum_order_amount');
+    if (deliveryFee === null || minimumOrder === null) {
+      message.textContent = 'El costo de domicilio y el pedido mínimo deben ser valores iguales o mayores que cero.';
+      message.className = 'message error';
+      return;
+    }
+    const logoFile = form.elements.logo_file.files?.[0] || null;
+    const externalLogoUrl = value('logo_url');
+    if (externalLogoUrl && !/^https?:\/\//i.test(externalLogoUrl)) {
+      message.textContent = 'La dirección del logo debe comenzar por https:// o http://.';
+      message.className = 'message error';
+      return;
+    }
+    const button = form.querySelector('button[type="submit"]');
+    let uploadedLogo = null;
+    button.disabled = true;
+    message.textContent = logoFile ? 'Subiendo logo y guardando configuración…' : 'Guardando datos del negocio…';
+    message.className = 'message';
+    try {
+      if (logoFile) uploadedLogo = await uploadBusinessImage(logoFile, 'logo');
+      const openingHours = {};
+      const weekdays = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+      for (const day of weekdays) {
+        const enabled = Boolean(form.elements['hours_'+day+'_open_day'] && form.elements['hours_'+day+'_open_day'].checked);
+        const open = String(form.elements['hours_'+day+'_open'] ? form.elements['hours_'+day+'_open'].value : '');
+        const close = String(form.elements['hours_'+day+'_close'] ? form.elements['hours_'+day+'_close'].value : '');
+        if (enabled && (!/^([01]\d|2[0-3]):[0-5]\d$/.test(open) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(close) || close <= open)) {
+          message.textContent = 'Revisa los horarios: el cierre debe ser posterior a la apertura en cada día activo.';
+          message.className = 'message error';
+          return;
+        }
+        openingHours[day] = enabled ? { open: open, close: close, closed: false } : { closed: true };
+      }
+      const businessPayload = {
+        name,
+        category,
+        tagline: value('tagline') || null,
+        description: value('description') || null,
+        city,
+        contact_phone: value('contact_phone') || null,
+        whatsapp_support: value('whatsapp_support').replace(/[^0-9+]/g, '').slice(0, 50) || null,
+        logo_url: uploadedLogo?.publicUrl || externalLogoUrl || null,
+        opening_hours: openingHours,
+        delivery_fee: deliveryFee,
+        minimum_order_amount: minimumOrder,
+      };
+      const { error: businessError } = await db.from('businesses').update(businessPayload).eq('id', businessId);
+      if (businessError) {
+        await removeUploadedBusinessImage(uploadedLogo?.path);
+        throw new Error('No se pudieron guardar los datos del negocio: ' + businessError.message);
+      }
+      try {
+        const entries = value('payment_methods').split('\n').map(line => {
+          const parts = line.split('|');
+          return { displayName: (parts.shift() || '').trim(), publicInstructions: parts.join('|').trim() };
+        }).filter(item => item.displayName.length >= 2 && item.displayName.length <= 100);
+        const methodCodeFor = label => {
+          const normalized = label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+          if (normalized.includes('efectivo') || normalized.includes('contra entrega')) return 'cash';
+          if (normalized.includes('transfer') || normalized.includes('nequi') || normalized.includes('bancolombia') || normalized.includes('daviplata')) return 'transfer';
+          if (normalized.includes('tarjeta') || normalized.includes('card')) return 'card';
+          return 'other';
+        };
+        const methods = entries.map((item, sortOrder) => ({ ...item, methodCode: methodCodeFor(item.displayName), sortOrder }));
+        const { data: existing, error: readError } = await db.from('business_payment_methods')
+          .select('id,method_code,display_name,is_enabled,sort_order')
+          .eq('business_id', businessId);
+        if (readError) throw readError;
+        const byCode = new Map();
+        (existing || []).forEach(row => {
+          if (!byCode.has(row.method_code)) byCode.set(row.method_code, []);
+          byCode.get(row.method_code).push(row);
+        });
+        const retained = new Set();
+        for (const method of methods) {
+          const old = byCode.get(method.methodCode)?.shift();
+          if (old) {
+            const { error } = await db.from('business_payment_methods').update({
+              display_name: method.displayName, public_instructions: method.publicInstructions || null, is_enabled: true, sort_order: method.sortOrder, updated_at: new Date().toISOString()
+            }).eq('id', old.id).eq('business_id', businessId);
+            if (error) throw error;
+            retained.add(old.id);
+          } else {
+            const { error } = await db.from('business_payment_methods').insert({
+              business_id: businessId, method_code: method.methodCode, display_name: method.displayName,
+              public_instructions: method.publicInstructions || null, is_enabled: true, sort_order: method.sortOrder
+            });
+            if (error) throw error;
+          }
+        }
+        for (const old of (existing || [])) {
+          if (!retained.has(old.id) && old.is_enabled) {
+            const { error } = await db.from('business_payment_methods').update({ is_enabled: false, updated_at: new Date().toISOString() }).eq('id', old.id).eq('business_id', businessId);
+            if (error) throw error;
+          }
+        }
+        message.textContent = 'Datos del negocio, métodos de pago y logo guardados correctamente.';
+        message.className = 'message success';
+        businessName = name;
+        const heading = document.querySelector('#businessName'); if (heading) heading.textContent = name;
+        if (form.elements.logo_url) form.elements.logo_url.value = businessPayload.logo_url || '';
+        if (form.elements.logo_file) form.elements.logo_file.value = '';
+      } catch (error) {
+        message.textContent = 'Los datos generales se guardaron, pero hubo un problema al actualizar los métodos de pago: ' + (error.message || 'Error desconocido');
+        message.className = 'message error';
+      }
+    } catch (error) {
+      message.textContent = error.message || 'No se pudo guardar la configuración.';
+      message.className = 'message error';
+    } finally {
+      button.disabled = false;
+    }
   }
 
   async function saveBusinessContent(event) {
-    event.preventDefault(); const form=event.currentTarget, message=document.querySelector('#businessContentMessage');
-    const contentType=form.elements.content_type.value; const fields=form.elements.form_fields.value.split('\n').map(v=>v.trim()).filter(Boolean).slice(0,30);
-    const payload={business_id:businessId,content_type:contentType,title:form.elements.title.value.trim(),body:form.elements.body.value.trim(),content:{form_fields:contentType==='job_form'?fields:[]},is_published:form.elements.is_published.checked,created_by:currentUser.id,updated_by:currentUser.id,updated_at:new Date().toISOString()};
-    const {error}=await db.from('business_content_pages').insert(payload); message.textContent=error?`No se pudo guardar: ${error.message}`:'Contenido guardado y enviado a revisión técnica. No aparecerá públicamente hasta ser aprobado.'; message.className=error?'message error':'message success'; if(!error){form.reset(); await initBusinessSettings();}
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#businessContentMessage');
+    const contentType = form.elements.content_type.value;
+    const title = form.elements.title.value.trim();
+    const body = form.elements.body.value.trim();
+    const fields = form.elements.form_fields.value.split('\n').map(value => value.trim()).filter(Boolean).slice(0, 30);
+    if (!title || !body) {
+      message.textContent = 'Completa el título y la descripción.';
+      message.className = 'message error';
+      return;
+    }
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    message.textContent = 'Guardando y enviando a revisión…';
+    message.className = 'message';
+    try {
+      const payload = {
+        business_id: businessId,
+        content_type: contentType,
+        title,
+        body,
+        content: { form_fields: contentType === 'job_form' ? fields : [] },
+        is_published: form.elements.is_published.checked,
+        created_by: currentUser.id,
+        updated_by: currentUser.id
+      };
+      const { error } = await db.from('business_content_pages').insert(payload);
+      if (error) throw error;
+      form.reset();
+      message.textContent = 'Contenido guardado y enviado a revisión técnica. Solo aparecerá públicamente después de ser aprobado.';
+      message.className = 'message success';
+      await loadBusinessContent();
+    } catch (error) {
+      message.textContent = 'No se pudo guardar: ' + (error.message || 'Error desconocido');
+      message.className = 'message error';
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function loadBusinessContent() {
+    const target = document.querySelector('#businessContentList');
+    if (!target) return;
+    const { data, error } = await db.from('business_content_pages')
+      .select('id,content_type,title,body,is_published,moderation_status,moderation_note,created_at')
+      .eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
+    if (error) { showError(target, error); return; }
+    const rows = data || [];
+    if (!rows.length) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene publicaciones.</div>'; return; }
+    const labels = { promotion: 'Promoción', job_form: 'Empleo', announcement: 'Anuncio', contact: 'Información' };
+    target.innerHTML = tableHtml(
+      ['Tipo', 'Título', 'Estado de revisión', 'Visible', 'Fecha'],
+      rows.map(row => [
+        esc(labels[row.content_type] || row.content_type),
+        '<strong>' + esc(row.title) + '</strong><br><small>' + esc(row.body) + '</small>' + (row.moderation_note ? '<br><small>Nota técnica: ' + esc(row.moderation_note) + '</small>' : ''),
+        esc(row.moderation_status),
+        row.is_published ? 'Sí' : 'No',
+        dateTime(row.created_at)
+      ])
+    );
+  }
+
+  async function loadJobApplications() {
+    const target = document.querySelector('#jobApplicationsContainer');
+    if (!target) return;
+    const { data, error } = await db.from('job_applications')
+      .select('id,content_page_id,applicant_name,applicant_contact,applicant_message,form_responses,status,admin_notes,created_at,resume_path')
+      .eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
+    if (error) { showError(target, error); return; }
+    const rows = data || [];
+    if (!rows.length) { target.innerHTML = '<div class="empty">Todavía no se han recibido postulaciones.</div>'; return; }
+    target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Postulante</th><th>Contacto</th><th>Mensaje y respuestas</th><th>Hoja de vida</th><th>Estado</th><th>Notas internas</th><th>Guardar</th></tr></thead><tbody>' +
+      (await Promise.all(rows.map(async row => {
+        let resumeLink = '<span class="muted">No adjuntó</span>';
+        if (row.resume_path) {
+          const { data: signedFile, error: signedError } = await db.storage.from('job-applications-private').createSignedUrl(row.resume_path, 300, { download: true });
+          resumeLink = signedError || !signedFile?.signedUrl
+            ? '<span class="muted">Archivo no disponible</span>'
+            : '<a href="' + esc(signedFile.signedUrl) + '" target="_blank" rel="noopener">Descargar hoja de vida</a>';
+        }
+        const responseText = Object.entries(row.form_responses || {}).map(([key, value]) => esc(key + ': ' + value)).join('<br>');
+        return '<tr><td>' + dateTime(row.created_at) + '</td><td>' + esc(row.applicant_name) + '</td><td>' + esc(row.applicant_contact) + '</td><td>' + esc(row.applicant_message || '—') + (responseText ? '<br>' + responseText : '') + '</td><td>' + resumeLink + '</td><td><select class="field" data-application-status="' + esc(row.id) + '"><option value="pending"' + (row.status === 'pending' ? ' selected' : '') + '>Pendiente</option><option value="reviewing"' + (row.status === 'reviewing' ? ' selected' : '') + '>En revisión</option><option value="contacted"' + (row.status === 'contacted' ? ' selected' : '') + '>Contactado</option><option value="accepted"' + (row.status === 'accepted' ? ' selected' : '') + '>Aceptado</option><option value="rejected"' + (row.status === 'rejected' ? ' selected' : '') + '>No seleccionado</option></select></td><td><textarea class="field" rows="2" maxlength="3000" data-application-notes="' + esc(row.id) + '">' + esc(row.admin_notes || '') + '</textarea></td><td><button type="button" class="small-button" data-save-application="' + esc(row.id) + '">Guardar</button></td></tr>';
+      }))).join('') + '</tbody></table></div>';
+    target.querySelectorAll('[data-save-application]').forEach(button => button.addEventListener('click', async () => {
+      const id = button.dataset.saveApplication;
+      const status = target.querySelector('[data-application-status="' + id + '"]')?.value;
+      const notes = target.querySelector('[data-application-notes="' + id + '"]')?.value || '';
+      button.disabled = true;
+      const { error: updateError } = await db.from('job_applications').update({
+        status, admin_notes: notes, reviewed_by: currentUser.id, reviewed_at: new Date().toISOString()
+      }).eq('id', id).eq('business_id', businessId);
+      if (updateError) alert('No se pudo actualizar la postulación: ' + updateError.message);
+      else alert('Postulación actualizada.');
+      button.disabled = false;
+    }));
   }
 
   async function saveBusinessAi(event) {
@@ -452,26 +835,27 @@
 
   async function loadAccessEvents(id, selector) {
     const target = document.querySelector(selector);
-    let query = db.from('access_events').select('id,business_id,user_id,panel,event_type,created_at,user_agent');
+    let query = db.from('audit_logs').select('id,business_id,actor_id,action,details,created_at').eq('action', 'panel.login').order('created_at', { ascending: false }).limit(100);
     if (id) query = query.eq('business_id', id);
-    else if (panel !== 'technical') query = query.is('business_id', null);
-    const { data, error } = await query.order('created_at', { ascending: false }).limit(100);
+    const { data, error } = await query;
     if (error) return showError(target, error);
-    const userNames = await getUserNames((data || []).map(e => e.user_id));
-    if (!data?.length) { target.innerHTML = '<div class="empty">No hay registros de acceso para este filtro todavía.</div>'; return; }
-    target.innerHTML = tableHtml(['Fecha y hora','Usuario','Panel','Evento','Navegador'], data.map(e => [dateTime(e.created_at), userNames.get(e.user_id) || shortId(e.user_id), panelLabel(e.panel), e.event_type === 'login_success' ? 'Inicio de sesión' : 'Entrada al panel', e.user_agent || 'No disponible']));
+    const rows = data || [];
+    const names = await getUserNames(rows.map(e => e.actor_id));
+    if (!rows.length) { target.innerHTML = '<div class="empty">No hay registros de acceso para este filtro todavía.</div>'; return; }
+    target.innerHTML = tableHtml(['Fecha y hora','Usuario','Panel','Evento'], rows.map(e => [dateTime(e.created_at), names.get(e.actor_id) || shortId(e.actor_id), esc(e.details?.panel || '—'), 'Inicio de sesión']));
   }
 
   async function loadAuditEvents(id, selector) {
     const target = document.querySelector(selector);
-    let query = db.from('audit_events').select('id,business_id,actor_user_id,action,table_name,record_id,old_data,new_data,created_at');
+    let query = db.from('audit_logs').select('id,business_id,actor_id,action,entity_type,entity_id,details,created_at').order('created_at', { ascending: false }).limit(100);
     if (id) query = query.eq('business_id', id);
-    else if (panel !== 'technical') query = query.is('business_id', null);
-    const { data, error } = await query.order('created_at', { ascending: false }).limit(100);
+    else if (panel !== 'technical') query = query.eq('actor_id', currentUser.id);
+    const { data, error } = await query;
     if (error) return showError(target, error);
-    const userNames = await getUserNames((data || []).map(e => e.actor_user_id));
-    if (!data?.length) { target.innerHTML = '<div class="empty">No hay cambios de auditoría para este filtro todavía.</div>'; return; }
-    target.innerHTML = tableHtml(['Fecha y hora','Usuario','Acción','Tabla','Registro','Resumen'], data.map(e => [dateTime(e.created_at), userNames.get(e.actor_user_id) || shortId(e.actor_user_id), e.action, e.table_name, e.record_id || '—', summarizeChange(e.old_data, e.new_data)]));
+    const rows = data || [];
+    const names = await getUserNames(rows.map(e => e.actor_id));
+    if (!rows.length) { target.innerHTML = '<div class="empty">No hay registros de auditoría para este filtro todavía.</div>'; return; }
+    target.innerHTML = tableHtml(['Fecha y hora','Usuario','Acción','Entidad','Registro','Detalle'], rows.map(e => [dateTime(e.created_at), names.get(e.actor_id) || shortId(e.actor_id), esc(e.action), esc(e.entity_type), e.entity_id || '—', esc(JSON.stringify(e.details || {}))]));
   }
 
   async function getUserNames(ids) {
@@ -488,12 +872,12 @@
     const rows = orders.map(o => {
       const items = Array.isArray(o.items) ? o.items.map(i => `${esc(i.product_name)} × ${esc(i.quantity)}`).join('<br>') : '';
       const action = nextStatus[o.status] ? `<button class="small-button" data-next="${nextStatus[o.status]}" data-order="${esc(o.id)}">Marcar: ${statusLabels[nextStatus[o.status]]}</button>` : '—';
-      const base = [esc(`#${o.order_number}`), esc(o.customer_name || 'Cliente'), esc(o.customer_phone || '—'), esc(o.delivery_address || '—'), items || 'Sin detalle', `<span class="pill ${statusClass[o.status] || ''}">${statusLabels[o.status] || esc(o.status)}</span>`, dateTime(o.created_at)];
+      const base = [esc(`#${o.order_number}`), esc(o.customer_name || 'Cliente'), esc(o.customer_phone || '—'), esc(o.delivery_address || '—') + (o.delivery_notes ? `<br><small>${esc(o.delivery_notes)}</small>` : ''), items || 'Sin detalle', `<span class="pill ${statusClass[o.status] || ''}">${statusLabels[o.status] || esc(o.status)}</span>`, dateTime(o.created_at)];
       if (admin) base.splice(5, 0, `${money(o.total)}<br><small>${esc(o.payment_status || '—')}</small>`);
-      else base.push(action);
+      base.push(action);
       return base;
     });
-    const headers = admin ? ['Pedido','Cliente','Teléfono','Entrega','Productos','Total / pago','Estado','Creado'] : ['Pedido','Cliente','Teléfono','Entrega','Productos','Estado','Creado','Acción'];
+    const headers = admin ? ['Pedido','Cliente','Teléfono','Entrega','Productos','Total / pago','Estado','Creado','Acción'] : ['Pedido','Cliente','Teléfono','Entrega','Productos','Estado','Creado','Acción'];
     target.innerHTML = tableHtml(headers, rows);
     target.querySelectorAll('[data-next][data-order]').forEach(button => button.addEventListener('click', () => changeOrderStatus(button.dataset.order, button.dataset.next, button)));
   }

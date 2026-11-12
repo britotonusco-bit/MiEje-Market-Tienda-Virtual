@@ -13,6 +13,14 @@
     maximumFractionDigits: 0
   }).format(value);
 
+  const formatBusinessHours = schedule => {
+    if (!schedule || typeof schedule !== "object" || !Object.keys(schedule).length) return "Horario por confirmar con el negocio."; 
+    const days = [["monday","Lun"],["tuesday","Mar"],["wednesday","Mié"],["thursday","Jue"],["friday","Vie"],["saturday","Sáb"],["sunday","Dom"]];
+    const openDays = days.filter(([key]) => schedule[key] && schedule[key].closed !== true && schedule[key].open && schedule[key].close);
+    if (!openDays.length) return "Horario no informado."; 
+    return openDays.map(([key,label]) => label + ": " + schedule[key].open + "–" + schedule[key].close).join(" · ");
+  };
+
   const categoryInfo = {
     Comidas: {
       description: "Restaurantes, comidas rápidas y sabores de la región."
@@ -185,40 +193,81 @@
       if (!window.supabase || !window.MIEJE_SUPABASE_URL || !window.MIEJE_SUPABASE_PUBLISHABLE_KEY) return;
       const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
       const { data: rows, error } = await client.from("businesses")
-        .select("id,name,slug,business_type,category,description,tagline,city,contact_phone,opening_hours,logo_url,is_active,suspension_reason,suspension_public_message")
+        .select("id,name,slug,business_type,category,description,tagline,city,contact_phone,whatsapp_support,opening_hours,logo_url,status,suspension_reason,public_suspension_message,delivery_fee,minimum_order_amount")
         .order("created_at", { ascending: false }).limit(200);
-      if (error || !rows?.length) return;
-      const { data: productRows, error: productError } = await client.from("products")
-        .select("id,business_id,name,description,image_url,price,stock_quantity,track_inventory,is_active")
-        .in("business_id", rows.map(row => row.id)).eq("is_active", true).order("created_at", { ascending: false }).limit(1000);
-      const products = productError ? [] : (productRows || []);
-      const [settingsResult, contentResult] = await Promise.all([
-        client.from("business_store_settings").select("business_id,whatsapp_number,payment_methods,delivery_options,contact_options,advertising_enabled").in("business_id", rows.filter(r=>r.is_active).map(row => row.id)),
-        client.from("business_content_pages").select("id,business_id,content_type,title,body,content,created_at").in("business_id", rows.filter(r=>r.is_active).map(row => row.id)).eq("is_published", true).order("created_at", { ascending: false }).limit(300)
-      ]);
-      const settingsByBusiness = new Map((settingsResult.data || []).map(item => [item.business_id, item]));
-      const contentRows = contentResult.data || [];
+      if (error) throw error;
+      if (!rows?.length) return;
+      const activeBusinessIds = rows.filter(row => row.status === "active").map(row => row.id);
+      let products = [];
+      if (activeBusinessIds.length) {
+        const { data: productRows, error: productError } = await client.from("products")
+          .select("id,business_id,name,description,image_url,price,inventory,is_active")
+          .in("business_id", activeBusinessIds).eq("is_active", true).order("created_at", { ascending: false }).limit(1000);
+        if (productError) throw productError;
+        products = productRows || [];
+      }
+      let paymentMethods = [];
+      if (activeBusinessIds.length) {
+        const { data: paymentData, error: paymentError } = await client.functions.invoke("get-public-storefront", { body: { business_ids: activeBusinessIds } });
+        if (paymentError) console.warn("No se pudieron cargar las formas de pago públicas.", paymentError);
+        else paymentMethods = paymentData?.payment_methods || [];
+      }
+      let publicContentPages = [];
+      if (activeBusinessIds.length) {
+        const { data: contentRows, error: contentError } = await client.from('business_content_pages')
+          .select('id,business_id,content_type,title,body,content')
+          .in('business_id', activeBusinessIds)
+          .eq('is_published', true)
+          .eq('moderation_status', 'approved')
+          .order('created_at', { ascending: false })
+          .limit(500);
+        if (contentError) console.warn('No se pudieron cargar las publicaciones públicas.', contentError);
+        else publicContentPages = contentRows || [];
+      }
+      const contentPagesByBusiness = new Map();
+      publicContentPages.forEach(page => {
+        if (!contentPagesByBusiness.has(page.business_id)) contentPagesByBusiness.set(page.business_id, []);
+        contentPagesByBusiness.get(page.business_id).push(page);
+      });
+      const paymentMap = new Map();
+      paymentMethods.forEach(method => {
+        if (!paymentMap.has(method.business_id)) paymentMap.set(method.business_id, []);
+        paymentMap.get(method.business_id).push({
+          id: method.id,
+          code: method.method_code,
+          label: method.display_name,
+          instructions: method.public_instructions || ""
+        });
+      });
       const registered = rows.map(row => ({
         id: row.id,
+        isRegistered: true,
         name: row.name,
         category: row.category || row.business_type || "General",
         tagline: row.tagline || row.description || "Conoce los productos de este negocio local.",
         location: row.city || "Eje Cafetero",
-        hours: row.opening_hours || "Consulta el horario con el negocio.",
+        hours: formatBusinessHours(row.opening_hours),
         phone: row.contact_phone || "",
         rating: "Nuevo",
-        isActive: row.is_active !== false,
+        isActive: row.status === "active",
         suspensionReason: row.suspension_reason || "",
-        publicSuspensionMessage: row.suspension_public_message || "Esta tienda no está disponible temporalmente.",
-        storeSettings: settingsByBusiness.get(row.id) || {},
-        contentPages: contentRows.filter(item => item.business_id === row.id),
+        publicSuspensionMessage: row.public_suspension_message || "Esta tienda no está disponible temporalmente.",
+        storeSettings: {
+          whatsapp_number: row.whatsapp_support || "",
+          payment_methods: paymentMap.get(row.id) || [],
+          delivery_options: row.status === "active" ? [{ code: "delivery", label: "Domicilio" }] : []
+        },
+        contentPages: contentPagesByBusiness.get(row.id) || [],
         image: row.logo_url || "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1000&q=85",
         slug: row.slug,
+        deliveryFee: Number(row.delivery_fee || 0),
+        minimumOrderAmount: Number(row.minimum_order_amount || 0),
         products: products.filter(product => product.business_id === row.id).map(product => ({
           id: product.id,
           name: product.name,
           description: product.description || "Producto disponible en esta tienda.",
           price: Number(product.price || 0),
+          inventory: Number(product.inventory || 0),
           image: product.image_url || "https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=700&q=80"
         }))
       }));
@@ -336,6 +385,8 @@
   }
 
   function productCard(business, product) {
+    const canOrder = business.isRegistered === true && business.isActive !== false && Number(product.inventory || 0) > 0;
+    const buttonText = !business.isRegistered ? "Demostración" : Number(product.inventory || 0) > 0 ? "+ Agregar" : "Agotado";
     return `
       <article class="product-card">
         <img src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}" loading="lazy">
@@ -344,10 +395,10 @@
           <p>${escapeHtml(product.description)}</p>
           <div class="product-bottom">
             <span class="product-price">${money(product.price)}</span>
-            <button type="button" class="add-button"
+            <button type="button" class="add-button" ${canOrder ? "" : "disabled"}
               data-action="add"
-              data-business="${business.id}"
-              data-product="${product.id}">+ Agregar</button>
+              data-business="${escapeHtml(business.id)}"
+              data-product="${escapeHtml(product.id)}">${buttonText}</button>
           </div>
         </div>
       </article>`;
@@ -372,7 +423,9 @@
     }
 
     const settings = business.storeSettings || {};
-    const payments = (settings.payment_methods || []).map(item => typeof item === "string" ? item : item.label).filter(Boolean);
+    const paymentMethods = settings.payment_methods || [];
+    const payments = paymentMethods.map(item => item.label).filter(Boolean);
+    const paymentDetails = paymentMethods.map(item => '<div class="info-line"><span>💳</span><span><strong>' + escapeHtml(item.label) + '</strong>' + (item.instructions ? '<br>' + escapeHtml(item.instructions) : '') + '</span></div>').join("");
     const delivery = (settings.delivery_options || []).map(item => typeof item === "string" ? item : item.label).filter(Boolean);
     const contentPages = business.contentPages || [];
     const publicWhatsapp = String(settings.whatsapp_number || business.phone || "").replace(/[^0-9]/g, "");
@@ -380,7 +433,7 @@
     const contentPagesHtml = contentPages.map(page => {
       const fields = Array.isArray(page.content?.form_fields) ? page.content.form_fields : [];
       const customFields = page.content_type === "job_form" ? fields.map((field, index) => `<label>${escapeHtml(field)}<input name="custom_field_${index}" required maxlength="500"></label>`).join("") : "";
-      return `<section class="info-panel"><h3>${escapeHtml(page.title)}</h3><p>${escapeHtml(page.body)}</p>${page.content_type === "job_form" ? `<form class="job-application-form" data-job-page="${escapeHtml(page.id)}"><label>Nombre completo<input name="applicant_name" required maxlength="120"></label><label>Teléfono o correo<input name="applicant_contact" required maxlength="180"></label>${customFields}<label>Experiencia y mensaje<textarea name="applicant_message" rows="3" maxlength="2000"></textarea></label><label><input type="checkbox" name="privacy_consent" required> Autorizo el tratamiento de mis datos para gestionar esta postulación.</label><button class="button primary" type="submit">Enviar postulación</button></form>` : ""}</section>`;
+      return `<section class="info-panel"><h3>${escapeHtml(page.title)}</h3><p>${escapeHtml(page.body)}</p>${page.content_type === "job_form" ? `<form class="job-application-form" data-job-page="${escapeHtml(page.id)}"><div aria-hidden="true" style="position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden"><label>No completar este campo<input name="website" tabindex="-1" autocomplete="off"></label></div><label>Nombre completo<input name="applicant_name" required maxlength="120"></label><label>Teléfono o correo<input name="applicant_contact" required maxlength="180"></label>${customFields}<label>Experiencia y mensaje<textarea name="applicant_message" rows="3" maxlength="2000"></textarea></label><label>Hoja de vida (PDF, DOC o DOCX; máximo 5 MB)<input type="file" name="resume" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label><label><input type="checkbox" name="privacy_consent" required> Autorizo el tratamiento de mis datos para gestionar esta postulación.</label><button class="button primary" type="submit">Enviar postulación</button></form>` : ""}</section>`;
     }).join("");
 
     $("#storeContent").innerHTML = `
@@ -406,9 +459,10 @@
             <h3>Información de la tienda</h3>
             <div class="info-line"><span>📍</span><span>${escapeHtml(business.location)}</span></div>
             <div class="info-line"><span>🕒</span><span>${escapeHtml(business.hours)}</span></div>
-            <div class="info-line"><span>★</span><span>Calificación de demostración: ${escapeHtml(business.rating)}/5</span></div>
-            ${payments.length ? `<div class="info-line"><span>💳</span><span><strong>Pagos:</strong> ${payments.map(escapeHtml).join(", ")}</span></div>` : ""}
+            <div class="info-line"><span>✓</span><span>Negocio registrado en MiEje Market</span></div>
+            ${paymentDetails}
             ${delivery.length ? `<div class="info-line"><span>🛵</span><span><strong>Entrega:</strong> ${delivery.map(escapeHtml).join(", ")}</span></div>` : ""}
+            <div class="info-line"><span>💰</span><span>Domicilio: ${money(business.deliveryFee || 0)} · Pedido mínimo: ${money(business.minimumOrderAmount || 0)}</span></div>
             ${publicWhatsapp ? `<div class="info-line"><span>☎</span><span><a href="https://wa.me/${publicWhatsapp}" target="_blank" rel="noopener">Contactar por WhatsApp</a></span></div>` : ""}
             ${contactNotes.map(note => `<div class="info-line"><span>ℹ</span><span>${escapeHtml(note)}</span></div>`).join("")}
           </section>
@@ -416,7 +470,7 @@
 
           <section class="assistant-panel">
             <h3>Asistente de ${business.name}</h3>
-            <p>Pregunta por productos, precios, horario o ubicación. Las respuestas usan los datos de demostración de esta tienda.</p>
+            <p>Pregunta por productos, precios, horario o ubicación. Las respuestas se basan en la información visible del negocio y su catálogo.</p>
             <div id="chatMessages" class="chat-messages">
               <div class="chat-bubble">¡Hola! Soy el asistente de ${escapeHtml(business.name)}. ¿Qué deseas saber?</div>
             </div>
@@ -442,49 +496,62 @@
 
   function updateCart() {
     $("#cartCount").textContent = cartCount();
-    $("#cartTotal").textContent = money(cartTotal());
-
     const paymentSelect = $("#checkoutForm select[name=payment]");
     const deliverySelect = $("#checkoutForm select[name=deliveryMethod]");
+    const checkoutButton = $("#checkoutForm button[type=submit]");
+    const instructions = $("#paymentInstructions");
     if (!cart.length) {
-      $("#cartItems").innerHTML =
-        '<div class="cart-empty">Tu carrito está vacío.<br>Explora una tienda y agrega productos.</div>';
+      $("#cartTotal").textContent = money(0);
+      $("#cartItems").innerHTML = '<div class="cart-empty">Tu carrito está vacío.<br>Explora una tienda y agrega productos.</div>';
       $("#cartBusinessNote").textContent = "Agrega productos de una tienda para comenzar.";
-      if (paymentSelect) paymentSelect.innerHTML = '<option value="">Selecciona una opción</option>';
-      if (deliverySelect) deliverySelect.innerHTML = '<option value="">Primero selecciona productos de una tienda</option>';
+      if (paymentSelect) { paymentSelect.innerHTML = '<option value="">Primero selecciona productos</option>'; paymentSelect.disabled = true; }
+      if (deliverySelect) { deliverySelect.innerHTML = '<option value="">Primero selecciona productos</option>'; deliverySelect.disabled = true; }
+      if (checkoutButton) checkoutButton.disabled = true;
+      if (instructions) { instructions.textContent = ""; instructions.hidden = true; }
       return;
     }
-
     const cartBusiness = getBusiness(cart[0].businessId);
     const storeSettings = cartBusiness?.storeSettings || {};
-    const paymentOptions = (storeSettings.payment_methods || []).map(item => typeof item === "string" ? item : item.label).filter(Boolean);
-    const deliveryOptions = (storeSettings.delivery_options || []).map(item => typeof item === "string" ? item : item.label).filter(Boolean);
+    const paymentOptions = storeSettings.payment_methods || [];
+    const deliveryOptions = storeSettings.delivery_options || [{ code: "delivery", label: "Domicilio" }];
+    const deliveryFee = Number(cartBusiness?.deliveryFee || 0);
+    const minimumOrder = Number(cartBusiness?.minimumOrderAmount || 0);
+    $("#cartTotal").textContent = money(cartTotal() + deliveryFee);
     if (paymentSelect) {
       const current = paymentSelect.value;
-      const choices = paymentOptions.length ? paymentOptions : ["Efectivo al recibir", "Transferencia por coordinar", "Pago en el local"];
-      paymentSelect.innerHTML = '<option value="">Selecciona una opción</option>' + choices.map(item => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join("");
-      if (choices.includes(current)) paymentSelect.value = current;
+      paymentSelect.innerHTML = paymentOptions.length
+        ? '<option value="">Selecciona una forma de pago</option>' + paymentOptions.map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`).join("")
+        : '<option value="">Este negocio aún no habilita pagos</option>';
+      paymentSelect.disabled = !paymentOptions.length;
+      if (paymentOptions.some(item => item.id === current)) paymentSelect.value = current;
+      if (!paymentSelect.dataset.instructionsBound) {
+        paymentSelect.addEventListener("change", updateCart);
+        paymentSelect.dataset.instructionsBound = "true";
+      }
+      const selectedMethod = paymentOptions.find(item => item.id === paymentSelect.value);
+      if (instructions) {
+        instructions.textContent = selectedMethod?.instructions || "";
+        instructions.hidden = !selectedMethod?.instructions;
+      }
     }
     if (deliverySelect) {
       const current = deliverySelect.value;
-      const choices = deliveryOptions.length ? deliveryOptions : ["Domicilio por coordinar", "Recoger en tienda"];
-      deliverySelect.innerHTML = '<option value="">Selecciona una opción</option>' + choices.map(item => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join("");
-      if (choices.includes(current)) deliverySelect.value = current;
+      deliverySelect.innerHTML = '<option value="">Selecciona una entrega</option>' + deliveryOptions.map(item => `<option value="${escapeHtml(item.code)}">${escapeHtml(item.label)}</option>`).join("");
+      deliverySelect.disabled = !deliveryOptions.length;
+      if (deliveryOptions.some(item => item.code === current)) deliverySelect.value = current;
     }
-
-    $("#cartBusinessNote").textContent =
-      `Tu pedido es de ${cart[0].businessName}. Cada pedido de demostración corresponde a una sola tienda.`;
-
+    if (checkoutButton) checkoutButton.disabled = !paymentOptions.length || !deliveryOptions.length;
+    $("#cartBusinessNote").textContent = `Pedido para ${cartBusiness?.name || cart[0].businessName}. Subtotal: ${money(cartTotal())}. Domicilio: ${money(deliveryFee)}. Pedido mínimo: ${money(minimumOrder)}.`;
     $("#cartItems").innerHTML = cart.map(item => `
       <div class="cart-item">
         <div>
-          <strong>${item.name}</strong>
-          <small>${item.businessName} · ${money(item.price)} c/u</small>
+          <strong>${escapeHtml(item.name)}</strong>
+          <small>${escapeHtml(item.businessName)} · ${money(item.price)} c/u</small>
           <div class="quantity-controls">
-            <button type="button" data-action="quantity" data-key="${item.key}" data-delta="-1">−</button>
+            <button type="button" data-action="quantity" data-key="${escapeHtml(item.key)}" data-delta="-1">−</button>
             <span>${item.quantity}</span>
-            <button type="button" data-action="quantity" data-key="${item.key}" data-delta="1">+</button>
-            <button type="button" data-action="remove" data-key="${item.key}">✕</button>
+            <button type="button" data-action="quantity" data-key="${escapeHtml(item.key)}" data-delta="1" ${item.quantity >= item.inventory ? "disabled" : ""}>+</button>
+            <button type="button" data-action="remove" data-key="${escapeHtml(item.key)}">✕</button>
           </div>
         </div>
         <span class="cart-item-price">${money(item.price * item.quantity)}</span>
@@ -495,38 +562,25 @@
   function addToCart(businessId, productId) {
     const business = getBusiness(businessId);
     const product = getProduct(business, productId);
-
-    if (!business || !product) {
-      showToast("No se pudo agregar el producto.");
+    if (!business || !product || business.isRegistered !== true || business.isActive === false) {
+      showToast("Esta tienda es una vista de demostración o no está disponible para pedidos.");
       return;
     }
-
+    const stock = Number(product.inventory || 0);
+    if (stock < 1) { showToast("Este producto está agotado."); return; }
     if (cart.length && cart[0].businessId !== businessId) {
-      const confirmed = window.confirm(
-        `Tu carrito tiene productos de ${cart[0].businessName}. ¿Quieres vaciarlo y empezar un pedido en ${business.name}?`
-      );
-
+      const confirmed = window.confirm(`Tu carrito tiene productos de ${cart[0].businessName}. ¿Quieres vaciarlo y empezar un pedido en ${business.name}?`);
       if (!confirmed) return;
       cart = [];
     }
-
     const key = `${businessId}:${productId}`;
     const existing = cart.find(item => item.key === key);
-
     if (existing) {
+      if (existing.quantity >= stock) { showToast("No hay más existencias disponibles de este producto."); return; }
       existing.quantity++;
     } else {
-      cart.push({
-        key,
-        businessId,
-        businessName: business.name,
-        productId,
-        name: product.name,
-        price: product.price,
-        quantity: 1
-      });
+      cart.push({ key, businessId, businessName: business.name, productId, name: product.name, price: product.price, inventory: stock, quantity: 1 });
     }
-
     updateCart();
     showToast(`${product.name} agregado al carrito.`);
   }
@@ -765,12 +819,13 @@
         const item = cart.find(entry => entry.key === actionButton.dataset.key);
 
         if (item) {
-          item.quantity += Number(actionButton.dataset.delta);
-
-          if (item.quantity <= 0) {
-            cart = cart.filter(entry => entry.key !== item.key);
+          const delta = Number(actionButton.dataset.delta);
+          if (delta > 0 && item.quantity >= item.inventory) {
+            showToast("No hay más existencias disponibles de este producto.");
+            return;
           }
-
+          item.quantity += delta;
+          if (item.quantity <= 0) cart = cart.filter(entry => entry.key !== item.key);
           updateCart();
         }
       }
@@ -818,9 +873,63 @@
       const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
       const formData = new FormData(jobForm);
       const applicationData = Object.fromEntries([...formData.entries()].filter(([key]) => key.startsWith("custom_field_")).map(([key, value]) => [key, String(value).trim()]));
-      const { error } = await client.from("job_applications").insert({ business_id: business.id, content_page_id: jobForm.dataset.jobPage, applicant_name: String(formData.get("applicant_name")||"").trim(), applicant_contact: String(formData.get("applicant_contact")||"").trim(), applicant_message: String(formData.get("applicant_message")||"").trim(), application_data: applicationData });
-      if (error) { showToast("No se pudo guardar la postulación. Intenta más tarde."); console.warn("job application submit failed", error); return; }
-      jobForm.reset(); showToast("Postulación enviada correctamente."); return;
+      const resumeFile = formData.get("resume");
+      const submitButton = jobForm.querySelector('button[type="submit"]');
+      submitButton.disabled = true;
+      submitButton.textContent = "Enviando postulación…";
+      try {
+        let applicationId = null;
+        let resumePath = null;
+        if (resumeFile instanceof File && resumeFile.size > 0) {
+          const { data: uploadRequest, error: requestError } = await client.functions.invoke("create-job-application", {
+            body: {
+              action: "request_upload",
+              website: String(formData.get("website") || ""),
+              business_id: business.id,
+              content_page_id: jobForm.dataset.jobPage,
+              file_name: resumeFile.name,
+              content_type: resumeFile.type,
+              file_size: resumeFile.size
+            }
+          });
+          if (requestError || !uploadRequest?.ok) throw requestError || new Error("No se pudo preparar la hoja de vida.");
+          const { error: uploadError } = await client.storage.from("job-applications-private").uploadToSignedUrl(
+            uploadRequest.resume_path,
+            uploadRequest.upload_token,
+            resumeFile,
+            { contentType: resumeFile.type, upsert: false }
+          );
+          if (uploadError) throw uploadError;
+          applicationId = uploadRequest.application_id;
+          resumePath = uploadRequest.resume_path;
+        }
+
+        const { data: submitted, error: submitError } = await client.functions.invoke("create-job-application", {
+          body: {
+            action: "submit",
+            website: String(formData.get("website") || ""),
+            business_id: business.id,
+            content_page_id: jobForm.dataset.jobPage,
+            application_id: applicationId,
+            resume_path: resumePath,
+            applicant_name: String(formData.get("applicant_name") || "").trim(),
+            applicant_contact: String(formData.get("applicant_contact") || "").trim(),
+            applicant_message: String(formData.get("applicant_message") || "").trim(),
+            form_responses: applicationData,
+            privacy_consent: formData.get("privacy_consent") === "on"
+          }
+        });
+        if (submitError || !submitted?.ok) throw submitError || new Error("No se pudo registrar la postulación.");
+        jobForm.reset();
+        showToast("Postulación enviada correctamente.");
+      } catch (error) {
+        showToast("No se pudo enviar la postulación. Revisa el archivo y vuelve a intentarlo.");
+        console.warn("job application submit failed", error);
+      } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = "Enviar postulación";
+      }
+      return;
     }
     if (event.target.id !== "chatForm") return;
 
@@ -837,33 +946,86 @@
     addChatBubble(assistantReply(question, business));
   });
 
-  $("#checkoutForm").addEventListener("submit", event => {
+  $("#checkoutForm").addEventListener("submit", async event => {
     event.preventDefault();
-
-    if (!cart.length) {
-      showToast("Primero agrega productos al carrito.");
+    if (!cart.length) { showToast("Primero agrega productos al carrito."); return; }
+    const business = getBusiness(cart[0].businessId);
+    if (!business?.isRegistered || business.isActive === false) { showToast("Esta tienda no está habilitada para recibir pedidos."); return; }
+    if (cartTotal() < Number(business.minimumOrderAmount || 0)) {
+      showToast(`El pedido mínimo de esta tienda es ${money(business.minimumOrderAmount)}.`);
       return;
     }
-
     const form = new FormData(event.currentTarget);
+    const paymentMethodId = String(form.get("payment") || "");
+    const deliveryMethod = String(form.get("deliveryMethod") || "");
+    const address = String(form.get("address") || "").trim();
+    const customerName = String(form.get("customerName") || "").trim();
+    const customerPhone = String(form.get("phone") || "").trim();
+    if (!paymentMethodId || !deliveryMethod || !address || !customerName || !customerPhone) {
+      showToast("Completa tus datos, la dirección y la forma de pago.");
+      return;
+    }
+    if (!window.supabase || !window.MIEJE_SUPABASE_URL || !window.MIEJE_SUPABASE_PUBLISHABLE_KEY) {
+      showToast("El servicio de pedidos no está disponible en este momento.");
+      return;
+    }
+    const button = event.currentTarget.querySelector('button[type="submit"]');
+    button.disabled = true;
+    button.textContent = "Registrando pedido…";
+    try {
+      const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
+      const { data, error } = await client.functions.invoke("create-public-order", {
+        body: {
+          business_id: business.id,
+          customer_name: customerName,
+          customer_phone: customerPhone,
+          delivery_address: address,
+          delivery_notes: `Método de entrega: ${deliveryMethod === "delivery" ? "Domicilio" : deliveryMethod}`,
+          payment_method_id: paymentMethodId,
+          items: cart.map(item => ({ product_id: item.productId, quantity: item.quantity }))
+        }
+      });
+      if (error) throw new Error(error.message || "No se pudo registrar el pedido.");
+      if (!data?.ok || !data.order) throw new Error(data?.error || "El servidor no confirmó el registro del pedido.");
+      const order = data.order;
+      const tracking = order.public_tracking_token ? `\nCódigo privado de seguimiento: ${order.public_tracking_token}` : "";
+      window.alert(`Pedido registrado correctamente.\nNúmero de pedido: #${order.order_number}\nTotal: ${money(order.total)}${tracking}\n\nGuarda el código de seguimiento para consultar el estado de tu pedido.`);
+      cart = [];
+      event.currentTarget.reset();
+      updateCart();
+      closeCart();
+      showToast(`Pedido #${order.order_number} registrado para que el negocio lo gestione.`);
+    } catch (error) {
+      console.warn("No se pudo registrar el pedido público.", error);
+      showToast(error.message || "No se pudo registrar el pedido. Intenta nuevamente.");
+    } finally {
+      button.disabled = false;
+      button.textContent = "Confirmar pedido";
+      updateCart();
+    }
+  });
 
-    const summary = cart.map(item =>
-      `${item.quantity} × ${item.name} — ${money(item.price * item.quantity)}`
-    ).join("\n");
-
-    window.alert(
-      `PEDIDO DE DEMOSTRACIÓN\n\n` +
-      `Tienda: ${cart[0].businessName}\n\n${summary}\n\n` +
-      `Total estimado: ${money(cartTotal())}\n` +
-      `Nombre: ${form.get("customerName")}\n` +
-      `Teléfono: ${form.get("phone")}\n` +
-      `Entrega: ${form.get("deliveryMethod")}\n` +
-      `Dirección: ${form.get("address")}\n` +
-      `Pago: ${form.get("payment")}\n\n` +
-      `Este pedido no se ha guardado ni enviado.`
-    );
-
-    showToast("Vista previa lista. El pedido no se envió ni se guardó.");
+  $("#trackingForm")?.addEventListener("submit", async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const result = $("#trackingResult");
+    const button = form.querySelector('button[type="submit"]');
+    const token = String(new FormData(form).get("token") || "").trim();
+    result.textContent = "Consultando pedido…";
+    button.disabled = true;
+    try {
+      const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
+      const { data, error } = await client.functions.invoke("track-public-order", { body: { token } });
+      if (error || !data?.order) throw new Error(data?.error || error?.message || "No se encontró el pedido.");
+      const order = data.order;
+      const labels = { pending: "Recibido", confirmed: "Confirmado", preparing: "En preparación", ready: "Listo", out_for_delivery: "En camino", delivered: "Entregado", cancelled: "Cancelado" };
+      const created = order.created_at ? new Intl.DateTimeFormat("es-CO", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Bogota" }).format(new Date(order.created_at)) : "—";
+      result.innerHTML = `<div class="info-panel"><strong>Pedido #${escapeHtml(order.order_number)}</strong><p>Negocio: ${escapeHtml(order.business_name || "—")}</p><p>Estado: <strong>${escapeHtml(labels[order.status] || order.status)}</strong></p><p>Fecha: ${escapeHtml(created)}</p><p>Total: ${money(order.total)}</p>${order.delivery_tracking ? `<p>Seguimiento: ${escapeHtml(order.delivery_tracking)}</p>` : ""}</div>`;
+    } catch (error) {
+      result.textContent = error.message || "No se pudo consultar el pedido.";
+    } finally {
+      button.disabled = false;
+    }
   });
 
   document.addEventListener("keydown", event => {

@@ -176,12 +176,22 @@
             <option>Pago en el local</option>
           </select>
         </label>
+        <p id="paymentInstructions" class="muted" hidden></p>
         <label class="consent-line"><input name="privacyConsent" type="checkbox" required>
-          <span>He leído la <button class="inline-policy" type="button" data-policy="privacidad">Política de privacidad</button> y autorizo el tratamiento de mis datos para esta demostración.</span>
+          <span>He leído la <button class="inline-policy" type="button" data-policy="privacidad">Política de privacidad</button> y autorizo el tratamiento de mis datos para gestionar este pedido.</span>
         </label>
-        <button class="btn lime full" type="submit">Revisar pedido →</button>
-        <small>Prototipo demostrativo: los datos del formulario solo se muestran en una vista previa; el pedido no se guarda ni se envía.</small>
+        <button class="btn lime full" type="submit">Confirmar pedido</button>
+        <small>Al confirmar, el pedido se registra en MiEje Market para que el negocio lo gestione. El cobro se coordina según la forma de pago seleccionada.</small>
       </form>
+      <section class="tracking-panel" aria-labelledby="trackingTitle">
+        <h3 id="trackingTitle">Consultar un pedido</h3>
+        <p class="muted">Ingresa el código privado que recibiste al confirmar tu compra.</p>
+        <form id="trackingForm" class="checkout-form">
+          <label>Código de seguimiento<input name="token" required inputmode="text" autocomplete="off" maxlength="36" pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></label>
+          <button class="btn secondary full" type="submit">Consultar estado</button>
+        </form>
+        <div id="trackingResult" class="muted" role="status" aria-live="polite"></div>
+      </section>
     </div>
   </aside>
 
