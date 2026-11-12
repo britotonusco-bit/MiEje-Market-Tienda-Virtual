@@ -81,3 +81,147 @@ USING (
   private.has_business_role(business_id, ARRAY['business_admin']::text[])
   AND private.business_is_active(business_id)
 );
+
+
+-- El técnico superior administra negocios y accesos desde la Edge Function.
+-- No consulta pedidos, productos, clientes ni datos financieros mediante el Data API.
+-- Los administradores y empleados solo ven datos operativos de su negocio activo.
+
+DROP POLICY IF EXISTS businesses_public_directory_authenticated ON public.businesses;
+CREATE POLICY businesses_public_directory_authenticated
+ON public.businesses
+FOR SELECT
+TO authenticated
+USING (
+  status = ANY (ARRAY['active','suspended']::text[])
+  OR private.has_business_role(id, ARRAY['business_admin','employee']::text[])
+);
+
+DROP POLICY IF EXISTS memberships_select_self_admin_owner ON public.business_memberships;
+CREATE POLICY memberships_select_self_admin_owner
+ON public.business_memberships
+FOR SELECT
+TO authenticated
+USING (
+  user_id = (SELECT auth.uid())
+  OR private.has_business_role(business_id, ARRAY['business_admin']::text[])
+);
+
+DROP POLICY IF EXISTS products_authenticated_select ON public.products;
+CREATE POLICY products_authenticated_select
+ON public.products
+FOR SELECT
+TO authenticated
+USING (
+  (is_active = true AND private.business_is_active(business_id))
+  OR (
+    private.has_business_role(business_id, ARRAY['business_admin','employee']::text[])
+    AND private.business_is_active(business_id)
+  )
+);
+
+DROP POLICY IF EXISTS orders_members_select ON public.orders;
+CREATE POLICY orders_members_select
+ON public.orders
+FOR SELECT
+TO authenticated
+USING (
+  private.has_business_role(business_id, ARRAY['business_admin','employee']::text[])
+  AND private.business_is_active(business_id)
+);
+
+DROP POLICY IF EXISTS orders_members_update_status ON public.orders;
+CREATE POLICY orders_members_update_status
+ON public.orders
+FOR UPDATE
+TO authenticated
+USING (
+  private.has_business_role(business_id, ARRAY['business_admin','employee']::text[])
+  AND private.business_is_active(business_id)
+)
+WITH CHECK (
+  private.has_business_role(business_id, ARRAY['business_admin','employee']::text[])
+  AND private.business_is_active(business_id)
+);
+
+DROP POLICY IF EXISTS order_items_members_select ON public.order_items;
+CREATE POLICY order_items_members_select
+ON public.order_items
+FOR SELECT
+TO authenticated
+USING (
+  EXISTS (
+    SELECT 1
+    FROM public.orders o
+    WHERE o.id = order_items.order_id
+      AND private.has_business_role(o.business_id, ARRAY['business_admin','employee']::text[])
+      AND private.business_is_active(o.business_id)
+  )
+);
+
+-- El trigger también bloquea cambios de estado cuando el negocio está suspendido
+-- y elimina el bypass del propietario técnico.
+CREATE OR REPLACE FUNCTION private.enforce_order_status_transition()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $function$
+DECLARE
+  v_actor_id uuid := auth.uid();
+  v_has_approved_cancellation boolean;
+BEGIN
+  IF OLD.status IS NOT DISTINCT FROM NEW.status THEN
+    RETURN NEW;
+  END IF;
+
+  IF v_actor_id IS NULL THEN
+    RAISE EXCEPTION 'Se requiere un usuario autenticado para cambiar el estado.'
+      USING ERRCODE = '42501';
+  END IF;
+
+  IF NOT private.business_is_active(OLD.business_id)
+     OR NOT private.has_business_role(
+       OLD.business_id,
+       ARRAY['business_admin','employee']::text[]
+     ) THEN
+    RAISE EXCEPTION 'No tienes permisos para modificar pedidos de este negocio.'
+      USING ERRCODE = '42501';
+  END IF;
+
+  IF NEW.status = 'cancelled' THEN
+    SELECT EXISTS (
+      SELECT 1
+      FROM public.order_cancellation_requests r
+      WHERE r.business_id = OLD.business_id
+        AND r.order_id = OLD.id
+        AND r.status = 'approved'
+        AND r.decided_by = v_actor_id
+    ) INTO v_has_approved_cancellation;
+
+    IF NOT v_has_approved_cancellation THEN
+      RAISE EXCEPTION 'No se puede cancelar el pedido sin una solicitud aprobada por este usuario.'
+        USING ERRCODE = '23514';
+    END IF;
+
+    IF OLD.status IN ('delivered','cancelled') THEN
+      RAISE EXCEPTION 'No se puede cancelar un pedido que ya terminó.'
+        USING ERRCODE = '23514';
+    END IF;
+
+    RETURN NEW;
+  END IF;
+
+  IF NOT (
+    (OLD.status = 'pending' AND NEW.status = 'confirmed') OR
+    (OLD.status = 'confirmed' AND NEW.status = 'preparing') OR
+    (OLD.status = 'preparing' AND NEW.status = 'ready') OR
+    (OLD.status = 'ready' AND NEW.status = 'out_for_delivery') OR
+    (OLD.status = 'out_for_delivery' AND NEW.status = 'delivered')
+  ) THEN
+    RAISE EXCEPTION 'Cambio de estado no permitido: % -> %.', OLD.status, NEW.status
+      USING ERRCODE = '23514';
+  END IF;
+
+  RETURN NEW;
+END;
+$function$;
