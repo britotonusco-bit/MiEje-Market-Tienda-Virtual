@@ -18,6 +18,7 @@ REVOKE ALL ON TABLE private.checkout_idempotency FROM PUBLIC, anon, authenticate
 CREATE OR REPLACE FUNCTION public.get_public_order_idempotent(
   p_idempotency_key uuid,
   p_business_id uuid,
+  p_payment_method_id uuid,
   p_customer_name text,
   p_customer_phone text,
   p_customer_email text,
@@ -42,6 +43,7 @@ BEGIN
 
   v_request_hash := md5(jsonb_build_object(
     'business_id', p_business_id,
+    'payment_method_id', p_payment_method_id,
     'customer_name', p_customer_name,
     'customer_phone', p_customer_phone,
     'customer_email', p_customer_email,
@@ -69,15 +71,16 @@ END;
 $function$;
 
 REVOKE ALL ON FUNCTION public.get_public_order_idempotent(
-  uuid, uuid, text, text, text, text, text, text, jsonb
+  uuid, uuid, uuid, text, text, text, text, text, text, jsonb
 ) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_public_order_idempotent(
-  uuid, uuid, text, text, text, text, text, text, jsonb
+  uuid, uuid, uuid, text, text, text, text, text, text, jsonb
 ) TO service_role;
 
 CREATE OR REPLACE FUNCTION public.create_public_order_idempotent(
   p_idempotency_key uuid,
   p_business_id uuid,
+  p_payment_method_id uuid,
   p_customer_name text,
   p_customer_phone text,
   p_customer_email text,
@@ -103,6 +106,7 @@ BEGIN
 
   v_request_hash := md5(jsonb_build_object(
     'business_id', p_business_id,
+    'payment_method_id', p_payment_method_id,
     'customer_name', p_customer_name,
     'customer_phone', p_customer_phone,
     'customer_email', p_customer_email,
@@ -150,10 +154,10 @@ END;
 $function$;
 
 REVOKE ALL ON FUNCTION public.create_public_order_idempotent(
-  uuid, uuid, text, text, text, text, text, text, jsonb
+  uuid, uuid, uuid, text, text, text, text, text, text, jsonb
 ) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.create_public_order_idempotent(
-  uuid, uuid, text, text, text, text, text, text, jsonb
+  uuid, uuid, uuid, text, text, text, text, text, text, jsonb
 ) TO service_role;
 
 -- Pruebas posteriores en staging:
