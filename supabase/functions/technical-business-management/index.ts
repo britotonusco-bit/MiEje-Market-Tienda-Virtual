@@ -153,6 +153,17 @@ Deno.serve(async (req: Request) => {
       return reply(200, { ok: true, audit_logs: data ?? [] });
     }
 
+    if (action === "list_content_moderation") {
+      const limitValue = Number(body.limit ?? 100);
+      const limit = Number.isInteger(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 100;
+      const { data, error } = await admin.from("business_content_pages")
+        .select("id,business_id,content_type,title,body,is_published,moderation_status,created_at,businesses(name)")
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (error) throw error;
+      return reply(200, { ok: true, contents: data ?? [] });
+    }
+
     if (action === "list_business_members") {
       const businessId = textValue(body.business_id, 80);
       if (!businessId) return reply(400, { error: "Falta el identificador del negocio." });
