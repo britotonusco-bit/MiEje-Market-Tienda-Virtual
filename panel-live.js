@@ -543,10 +543,10 @@
       if (message) { message.textContent = 'No se pudieron cargar los métodos de pago: ' + methodsResult.error.message; message.className = 'message error'; }
     }
     const pending = [
-      ['contenido-tienda', 'Promociones y formularios de empleo', 'Las tablas de promociones, páginas de contenido y postulaciones todavía no existen en el esquema independiente. Esta sección queda pendiente para evitar guardar datos en una tabla inexistente.'],
       ['ia-negocio', 'IA exclusiva del negocio', 'La configuración de IA por negocio aún no está implementada en la base independiente.'],
       ['solicitudes-bloqueo', 'Solicitudes de bloqueo', 'Las solicitudes de bloqueo desde el panel del negocio todavía no están implementadas en el servidor.']
     ];
+    await Promise.all([loadBusinessContent(), loadJobApplications()]);
     for (const [id, heading, message] of pending) {
       const section = document.getElementById(id);
       if (section) section.innerHTML = `<div class="section-heading"><div><h2>${heading}</h2></div></div><div class="empty">${message}</div>`;
@@ -686,10 +686,95 @@
   }
 
   async function saveBusinessContent(event) {
-    event.preventDefault(); const form=event.currentTarget, message=document.querySelector('#businessContentMessage');
-    const contentType=form.elements.content_type.value; const fields=form.elements.form_fields.value.split('\n').map(v=>v.trim()).filter(Boolean).slice(0,30);
-    const payload={business_id:businessId,content_type:contentType,title:form.elements.title.value.trim(),body:form.elements.body.value.trim(),content:{form_fields:contentType==='job_form'?fields:[]},is_published:form.elements.is_published.checked,created_by:currentUser.id,updated_by:currentUser.id,updated_at:new Date().toISOString()};
-    const {error}=await db.from('business_content_pages').insert(payload); message.textContent=error?`No se pudo guardar: ${error.message}`:'Contenido guardado y enviado a revisión técnica. No aparecerá públicamente hasta ser aprobado.'; message.className=error?'message error':'message success'; if(!error){form.reset(); await initBusinessSettings();}
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#businessContentMessage');
+    const contentType = form.elements.content_type.value;
+    const title = form.elements.title.value.trim();
+    const body = form.elements.body.value.trim();
+    const fields = form.elements.form_fields.value.split('\n').map(value => value.trim()).filter(Boolean).slice(0, 30);
+    if (!title || !body) {
+      message.textContent = 'Completa el título y la descripción.';
+      message.className = 'message error';
+      return;
+    }
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    message.textContent = 'Guardando y enviando a revisión…';
+    message.className = 'message';
+    try {
+      const payload = {
+        business_id: businessId,
+        content_type: contentType,
+        title,
+        body,
+        content: { form_fields: contentType === 'job_form' ? fields : [] },
+        is_published: form.elements.is_published.checked,
+        created_by: currentUser.id,
+        updated_by: currentUser.id
+      };
+      const { error } = await db.from('business_content_pages').insert(payload);
+      if (error) throw error;
+      form.reset();
+      message.textContent = 'Contenido guardado y enviado a revisión técnica. Solo aparecerá públicamente después de ser aprobado.';
+      message.className = 'message success';
+      await loadBusinessContent();
+    } catch (error) {
+      message.textContent = 'No se pudo guardar: ' + (error.message || 'Error desconocido');
+      message.className = 'message error';
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function loadBusinessContent() {
+    const target = document.querySelector('#businessContentList');
+    if (!target) return;
+    const { data, error } = await db.from('business_content_pages')
+      .select('id,content_type,title,body,is_published,moderation_status,moderation_note,created_at')
+      .eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
+    if (error) { showError(target, error); return; }
+    const rows = data || [];
+    if (!rows.length) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene publicaciones.</div>'; return; }
+    const labels = { promotion: 'Promoción', job_form: 'Empleo', announcement: 'Anuncio', contact: 'Información' };
+    target.innerHTML = tableHtml(
+      ['Tipo', 'Título', 'Estado de revisión', 'Visible', 'Fecha'],
+      rows.map(row => [
+        esc(labels[row.content_type] || row.content_type),
+        '<strong>' + esc(row.title) + '</strong><br><small>' + esc(row.body) + '</small>' + (row.moderation_note ? '<br><small>Nota técnica: ' + esc(row.moderation_note) + '</small>' : ''),
+        esc(row.moderation_status),
+        row.is_published ? 'Sí' : 'No',
+        dateTime(row.created_at)
+      ])
+    );
+  }
+
+  async function loadJobApplications() {
+    const target = document.querySelector('#jobApplicationsContainer');
+    if (!target) return;
+    const { data, error } = await db.from('job_applications')
+      .select('id,content_page_id,applicant_name,applicant_contact,applicant_message,form_responses,status,admin_notes,created_at')
+      .eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
+    if (error) { showError(target, error); return; }
+    const rows = data || [];
+    if (!rows.length) { target.innerHTML = '<div class="empty">Todavía no se han recibido postulaciones.</div>'; return; }
+    target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Postulante</th><th>Contacto</th><th>Mensaje y respuestas</th><th>Estado</th><th>Notas internas</th><th>Guardar</th></tr></thead><tbody>' +
+      rows.map(row => {
+        const responseText = Object.entries(row.form_responses || {}).map(([key, value]) => esc(key + ': ' + value)).join('<br>');
+        return '<tr><td>' + dateTime(row.created_at) + '</td><td>' + esc(row.applicant_name) + '</td><td>' + esc(row.applicant_contact) + '</td><td>' + esc(row.applicant_message || '—') + (responseText ? '<br>' + responseText : '') + '</td><td><select class="field" data-application-status="' + esc(row.id) + '"><option value="pending"' + (row.status === 'pending' ? ' selected' : '') + '>Pendiente</option><option value="reviewing"' + (row.status === 'reviewing' ? ' selected' : '') + '>En revisión</option><option value="contacted"' + (row.status === 'contacted' ? ' selected' : '') + '>Contactado</option><option value="accepted"' + (row.status === 'accepted' ? ' selected' : '') + '>Aceptado</option><option value="rejected"' + (row.status === 'rejected' ? ' selected' : '') + '>No seleccionado</option></select></td><td><textarea class="field" rows="2" maxlength="3000" data-application-notes="' + esc(row.id) + '">' + esc(row.admin_notes || '') + '</textarea></td><td><button type="button" class="small-button" data-save-application="' + esc(row.id) + '">Guardar</button></td></tr>';
+      }).join('') + '</tbody></table></div>';
+    target.querySelectorAll('[data-save-application]').forEach(button => button.addEventListener('click', async () => {
+      const id = button.dataset.saveApplication;
+      const status = target.querySelector('[data-application-status="' + id + '"]')?.value;
+      const notes = target.querySelector('[data-application-notes="' + id + '"]')?.value || '';
+      button.disabled = true;
+      const { error: updateError } = await db.from('job_applications').update({
+        status, admin_notes: notes, reviewed_by: currentUser.id, reviewed_at: new Date().toISOString()
+      }).eq('id', id).eq('business_id', businessId);
+      if (updateError) alert('No se pudo actualizar la postulación: ' + updateError.message);
+      else alert('Postulación actualizada.');
+      button.disabled = false;
+    }));
   }
 
   async function saveBusinessAi(event) {
