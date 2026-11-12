@@ -321,3 +321,29 @@ La revisión de `cuenta.js` detectó una condición de carrera: si una consulta 
 - Actualizar la vista de acceso al completar el cierre de sesión.
 
 Prueba pendiente en navegador: iniciar sesión como A, provocar una carga lenta del historial, cerrar sesión e iniciar sesión como B; la interfaz de B no debe mostrar datos de A ni siquiera momentáneamente. Repetir al cerrar sesión sin iniciar otra cuenta y verificar que el historial/favoritos queden vacíos.
+
+## Auditoría de registro, recuperación e historial de clientes
+
+Se revisó el código de `cuenta.html`, `cuenta.js`, `recuperar-clave.html`, `recuperar-clave.js`, `actualizar-clave.html`, `actualizar-clave.js` y `login.js`, además del borrador SQL y el esquema live del proyecto independiente.
+
+### Hallazgos confirmados
+- El trigger live `private.handle_new_auth_user()` crea un perfil básico al registrarse y toma `display_name` de los metadatos. No asigna rol administrativo automáticamente.
+- La base live todavía no tiene `orders.customer_user_id` ni la tabla `customer_favorites`; por eso el historial asociado a una cuenta y los favoritos no pueden funcionar hasta aplicar el borrador de clientes.
+- La migración draft añade políticas de lectura de pedidos por `customer_user_id = auth.uid()`, y de líneas de pedido solo cuando el pedido pertenece a esa misma cuenta. Favoritos permiten SELECT/INSERT/DELETE únicamente para el propietario del registro.
+- La migración draft también concede lectura limitada de `businesses(id,name)` para que el historial pueda mostrar el nombre del negocio, sin abrir el resto de sus datos.
+- En el esquema live siguen existiendo políticas que dan bypass al propietario técnico en pedidos, productos, líneas de pedido y perfiles. El borrador `business-admin-boundaries.sql` debe revisarse y aplicarse coordinadamente con la migración de clientes para que la separación prevista sea efectiva.
+- El registro dirige el correo de confirmación a `cuenta.html`; la recuperación dirige a `actualizar-clave.html`. El código usa URLs absolutas calculadas desde la página actual.
+- La URL de recuperación ya se había agregado a Redirect URLs de Supabase. La URL pública `https://britotonusco-bit.github.io/MiEje-Market-Tienda-Virtual/cuenta.html` sigue pendiente de agregarse a esa lista. Hasta entonces, la confirmación de registro puede redirigir al Site URL configurado (actualmente localhost) en lugar del portal publicado.
+- La recuperación exige el evento Auth `PASSWORD_RECOVERY` antes de habilitar el cambio de contraseña; una sesión normal guardada no basta.
+- El login privado usa `resolve-my-access` y separa el acceso de clientes del acceso a paneles. No hay registro público desde `login.html`.
+
+### Pendientes de configuración y pruebas
+1. Agregar a Supabase Auth > URL Configuration la Redirect URL exacta `https://britotonusco-bit.github.io/MiEje-Market-Tienda-Virtual/cuenta.html`. Mantener las URLs de localhost necesarias para desarrollo; no cambiar Site URL sin coordinar el flujo.
+2. Confirmar que las plantillas de confirmación y recuperación enlacen correctamente con `{{ .ConfirmationURL }}` o el flujo de token que corresponda al tipo de sesión configurado. No se pudo leer la configuración privada de plantillas desde la conexión disponible.
+3. Confirmar SMTP personalizado y entrega real de mensajes antes de producción. No se pudo verificar la configuración SMTP ni hacer envíos reales desde esta auditoría.
+4. Aplicar las migraciones solo en staging y probar alta, confirmación, login, logout, recuperación, enlace vencido y cambio de contraseña.
+5. Crear dos cuentas de prueba y verificar que cada una solo vea sus pedidos y favoritos; comprobar también el acceso de admin/empleado de negocio y técnico después de aplicar la matriz RLS.
+6. Probar que el trigger de perfil no eleva a un cliente a `platform_owner`, `business_admin` ni `employee`.
+7. Verificar en navegador el cambio de sesión A→B y el cierre de sesión, para confirmar que no se muestran resultados atrasados de otra cuenta.
+
+No se ejecutó ninguna migración, no se cambió la configuración Auth, no se enviaron correos de prueba y no se crearon usuarios de prueba.
