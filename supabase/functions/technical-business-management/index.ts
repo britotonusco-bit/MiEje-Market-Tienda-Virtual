@@ -176,20 +176,15 @@ Deno.serve(async (req: Request) => {
         return reply(400, { error: "Nombre, categoría y slug válido son obligatorios." });
       }
 
+      // El panel técnico crea únicamente el registro base del negocio.
+      // La descripción, horarios, logo, contacto, pagos y demás datos comerciales
+      // se configuran después desde el panel de su administrador.
       const { data: business, error: createError } = await admin.from("businesses").insert({
         name,
         category,
         slug,
-        description: textValue(body.description, 3000) || null,
-        tagline: textValue(body.tagline, 250) || null,
-        city: textValue(body.city, 160) || "Pereira, Risaralda",
-        contact_phone: textValue(body.contact_phone, 50) || null,
-        whatsapp_support: textValue(body.whatsapp_support, 50) || null,
-        opening_hours: body.opening_hours && typeof body.opening_hours === "object" ? body.opening_hours : {},
-        business_type: textValue(body.business_type, 60) || "store",
-        logo_url: textValue(body.logo_url, 1000) || null,
         created_by: user.id,
-      }).select("id, name, slug, status, created_at").single();
+      }).select("id, name, slug, category, status, created_at").single();
 
       if (createError) {
         if (createError.code === "23505") return reply(409, { error: "Ya existe un negocio con ese slug." });
