@@ -433,7 +433,7 @@
     const contentPagesHtml = contentPages.map(page => {
       const fields = Array.isArray(page.content?.form_fields) ? page.content.form_fields : [];
       const customFields = page.content_type === "job_form" ? fields.map((field, index) => `<label>${escapeHtml(field)}<input name="custom_field_${index}" required maxlength="500"></label>`).join("") : "";
-      return `<section class="info-panel"><h3>${escapeHtml(page.title)}</h3><p>${escapeHtml(page.body)}</p>${page.content_type === "job_form" ? `<form class="job-application-form" data-job-page="${escapeHtml(page.id)}"><label>Nombre completo<input name="applicant_name" required maxlength="120"></label><label>Teléfono o correo<input name="applicant_contact" required maxlength="180"></label>${customFields}<label>Experiencia y mensaje<textarea name="applicant_message" rows="3" maxlength="2000"></textarea></label><label><input type="checkbox" name="privacy_consent" required> Autorizo el tratamiento de mis datos para gestionar esta postulación.</label><button class="button primary" type="submit">Enviar postulación</button></form>` : ""}</section>`;
+      return `<section class="info-panel"><h3>${escapeHtml(page.title)}</h3><p>${escapeHtml(page.body)}</p>${page.content_type === "job_form" ? `<form class="job-application-form" data-job-page="${escapeHtml(page.id)}"><label>Nombre completo<input name="applicant_name" required maxlength="120"></label><label>Teléfono o correo<input name="applicant_contact" required maxlength="180"></label>${customFields}<label>Experiencia y mensaje<textarea name="applicant_message" rows="3" maxlength="2000"></textarea></label><label>Hoja de vida (PDF, DOC o DOCX; máximo 5 MB)<input type="file" name="resume" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label><label><input type="checkbox" name="privacy_consent" required> Autorizo el tratamiento de mis datos para gestionar esta postulación.</label><button class="button primary" type="submit">Enviar postulación</button></form>` : ""}</section>`;
     }).join("");
 
     $("#storeContent").innerHTML = `
@@ -873,26 +873,59 @@
       const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
       const formData = new FormData(jobForm);
       const applicationData = Object.fromEntries([...formData.entries()].filter(([key]) => key.startsWith("custom_field_")).map(([key, value]) => [key, String(value).trim()]));
+      const resumeFile = formData.get("resume");
       const submitButton = jobForm.querySelector('button[type="submit"]');
       submitButton.disabled = true;
+      submitButton.textContent = "Enviando postulación…";
       try {
-        const { error } = await client.from("job_applications").insert({
-          business_id: business.id,
-          content_page_id: jobForm.dataset.jobPage,
-          applicant_name: String(formData.get("applicant_name") || "").trim(),
-          applicant_contact: String(formData.get("applicant_contact") || "").trim(),
-          applicant_message: String(formData.get("applicant_message") || "").trim(),
-          form_responses: applicationData,
-          privacy_consent: formData.get("privacy_consent") === "on"
+        let applicationId = null;
+        let resumePath = null;
+        if (resumeFile instanceof File && resumeFile.size > 0) {
+          const { data: uploadRequest, error: requestError } = await client.functions.invoke("create-job-application", {
+            body: {
+              action: "request_upload",
+              business_id: business.id,
+              content_page_id: jobForm.dataset.jobPage,
+              file_name: resumeFile.name,
+              content_type: resumeFile.type,
+              file_size: resumeFile.size
+            }
+          });
+          if (requestError || !uploadRequest?.ok) throw requestError || new Error("No se pudo preparar la hoja de vida.");
+          const { error: uploadError } = await client.storage.from("job-applications-private").uploadToSignedUrl(
+            uploadRequest.resume_path,
+            uploadRequest.upload_token,
+            resumeFile,
+            { contentType: resumeFile.type, upsert: false }
+          );
+          if (uploadError) throw uploadError;
+          applicationId = uploadRequest.application_id;
+          resumePath = uploadRequest.resume_path;
+        }
+
+        const { data: submitted, error: submitError } = await client.functions.invoke("create-job-application", {
+          body: {
+            action: "submit",
+            business_id: business.id,
+            content_page_id: jobForm.dataset.jobPage,
+            application_id: applicationId,
+            resume_path: resumePath,
+            applicant_name: String(formData.get("applicant_name") || "").trim(),
+            applicant_contact: String(formData.get("applicant_contact") || "").trim(),
+            applicant_message: String(formData.get("applicant_message") || "").trim(),
+            form_responses: applicationData,
+            privacy_consent: formData.get("privacy_consent") === "on"
+          }
         });
-        if (error) throw error;
+        if (submitError || !submitted?.ok) throw submitError || new Error("No se pudo registrar la postulación.");
         jobForm.reset();
         showToast("Postulación enviada correctamente.");
       } catch (error) {
-        showToast("No se pudo guardar la postulación. Intenta más tarde.");
+        showToast("No se pudo enviar la postulación. Revisa el archivo y vuelve a intentarlo.");
         console.warn("job application submit failed", error);
       } finally {
         submitButton.disabled = false;
+        submitButton.textContent = "Enviar postulación";
       }
       return;
     }
