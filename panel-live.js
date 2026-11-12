@@ -516,7 +516,7 @@
   async function initBusinessSettings() {
     await showSupportLink();
     const [businessResult, methodsResult] = await Promise.all([
-      db.from('businesses').select('name,category,tagline,description,city,contact_phone,whatsapp_support,logo_url,delivery_fee,minimum_order_amount').eq('id', businessId).single(),
+      db.from('businesses').select('name,category,tagline,description,city,contact_phone,whatsapp_support,logo_url,delivery_fee,minimum_order_amount,opening_hours').eq('id', businessId).single(),
       db.from('business_payment_methods').select('method_code,display_name,public_instructions,is_enabled,sort_order').eq('business_id', businessId).order('sort_order')
     ]);
     const form = document.querySelector('#storeSettingsForm');
@@ -525,6 +525,13 @@
       if (message) { message.textContent = 'No se pudieron cargar los datos del negocio: ' + businessResult.error.message; message.className = 'message error'; }
     } else if (form) {
       const b = businessResult.data;
+      const schedule = b.opening_hours && typeof b.opening_hours === 'object' ? b.opening_hours : {};
+      for (const day of ['monday','tuesday','wednesday','thursday','friday','saturday','sunday']) {
+        const entry = schedule[day] || {};
+        if (form.elements['hours_'+day+'_open_day']) form.elements['hours_'+day+'_open_day'].checked = entry.closed === false || Boolean(entry.open && entry.close);
+        if (form.elements['hours_'+day+'_open']) form.elements['hours_'+day+'_open'].value = entry.open || '08:00';
+        if (form.elements['hours_'+day+'_close']) form.elements['hours_'+day+'_close'].value = entry.close || '18:00';
+      }
       for (const key of ['name','category','tagline','description','city','contact_phone','whatsapp_support','logo_url','delivery_fee','minimum_order_amount']) {
         if (form.elements[key]) form.elements[key].value = b[key] ?? (['delivery_fee','minimum_order_amount'].includes(key) ? 0 : '');
       }
@@ -584,6 +591,19 @@
     message.className = 'message';
     try {
       if (logoFile) uploadedLogo = await uploadBusinessImage(logoFile, 'logo');
+      const openingHours = {};
+      const weekdays = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+      for (const day of weekdays) {
+        const enabled = Boolean(form.elements['hours_'+day+'_open_day'] && form.elements['hours_'+day+'_open_day'].checked);
+        const open = String(form.elements['hours_'+day+'_open'] ? form.elements['hours_'+day+'_open'].value : '');
+        const close = String(form.elements['hours_'+day+'_close'] ? form.elements['hours_'+day+'_close'].value : '');
+        if (enabled && (!/^([01]\\d|2[0-3]):[0-5]\\d$/.test(open) || !/^([01]\\d|2[0-3]):[0-5]\\d$/.test(close) || close <= open)) {
+          message.textContent = 'Revisa los horarios: el cierre debe ser posterior a la apertura en cada día activo.';
+          message.className = 'message error';
+          return;
+        }
+        openingHours[day] = enabled ? { open: open, close: close, closed: false } : { closed: true };
+      }
       const businessPayload = {
         name,
         category,
@@ -593,6 +613,7 @@
         contact_phone: value('contact_phone') || null,
         whatsapp_support: value('whatsapp_support').replace(/[^0-9+]/g, '').slice(0, 50) || null,
         logo_url: uploadedLogo?.publicUrl || externalLogoUrl || null,
+        opening_hours: openingHours,
         delivery_fee: deliveryFee,
         minimum_order_amount: minimumOrder,
       };
