@@ -229,3 +229,66 @@ BEGIN
   RETURN NEW;
 END;
 $function$;
+
+
+-- Garantía transaccional: nunca dejar un negocio sin administrador activo
+-- por dos suspensiones/cambios concurrentes. El bloqueo de la fila del negocio
+-- serializa estas operaciones antes de contar administradores restantes.
+CREATE OR REPLACE FUNCTION private.guard_last_active_business_admin()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_business_id uuid;
+  v_remaining_admins integer;
+  v_removing_active_admin boolean := false;
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    v_business_id := OLD.business_id;
+    v_removing_active_admin := OLD.role = 'business_admin' AND OLD.status = 'active';
+  ELSE
+    v_business_id := OLD.business_id;
+    v_removing_active_admin :=
+      OLD.role = 'business_admin'
+      AND OLD.status = 'active'
+      AND NOT (NEW.role = 'business_admin' AND NEW.status = 'active');
+  END IF;
+
+  IF NOT v_removing_active_admin THEN
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+  END IF;
+
+  PERFORM 1
+  FROM public.businesses
+  WHERE id = v_business_id
+  FOR UPDATE;
+
+  SELECT count(*)::integer
+  INTO v_remaining_admins
+  FROM public.business_memberships
+  WHERE business_id = v_business_id
+    AND role = 'business_admin'
+    AND status = 'active'
+    AND id <> OLD.id;
+
+  IF v_remaining_admins = 0 THEN
+    RAISE EXCEPTION 'No se puede retirar el último administrador activo del negocio.'
+      USING ERRCODE = '23514';
+  END IF;
+
+  IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$function$;
+
+DROP TRIGGER IF EXISTS guard_last_active_business_admin
+ON public.business_memberships;
+
+CREATE TRIGGER guard_last_active_business_admin
+BEFORE UPDATE OF role, status OR DELETE
+ON public.business_memberships
+FOR EACH ROW
+EXECUTE FUNCTION private.guard_last_active_business_admin();
+
+REVOKE ALL ON FUNCTION private.guard_last_active_business_admin() FROM PUBLIC, anon, authenticated;
