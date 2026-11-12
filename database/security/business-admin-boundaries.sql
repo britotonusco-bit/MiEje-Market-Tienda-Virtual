@@ -12,11 +12,12 @@ ON public.businesses
 FOR UPDATE
 TO authenticated
 USING (
-  status <> 'closed'
+  private.business_is_active(id)
   AND private.has_business_role(id, ARRAY['business_admin']::text[])
 )
 WITH CHECK (
-  private.has_business_role(id, ARRAY['business_admin']::text[])
+  private.business_is_active(id)
+  AND private.has_business_role(id, ARRAY['business_admin']::text[])
 );
 
 DROP POLICY IF EXISTS payment_methods_admin_insert ON public.business_payment_methods;
@@ -104,7 +105,10 @@ FOR SELECT
 TO authenticated
 USING (
   user_id = (SELECT auth.uid())
-  OR private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  OR (
+    private.business_is_active(business_id)
+    AND private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  )
 );
 
 DROP POLICY IF EXISTS products_authenticated_select ON public.products;
