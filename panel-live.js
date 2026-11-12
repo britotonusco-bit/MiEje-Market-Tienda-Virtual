@@ -477,7 +477,7 @@
     await showSupportLink();
     const [businessResult, methodsResult] = await Promise.all([
       db.from('businesses').select('name,category,tagline,description,city,contact_phone,whatsapp_support,logo_url,delivery_fee,minimum_order_amount').eq('id', businessId).single(),
-      db.from('business_payment_methods').select('method_code,display_name,is_enabled,sort_order').eq('business_id', businessId).order('sort_order')
+      db.from('business_payment_methods').select('method_code,display_name,public_instructions,is_enabled,sort_order').eq('business_id', businessId).order('sort_order')
     ]);
     const form = document.querySelector('#storeSettingsForm');
     if (businessResult.error) {
@@ -490,7 +490,7 @@
       }
     }
     const paymentField = form?.elements.payment_methods;
-    if (paymentField && !methodsResult.error) paymentField.value = (methodsResult.data || []).filter(m => m.is_enabled).sort((a,b) => a.sort_order-b.sort_order).map(m => m.display_name).join('\n');
+    if (paymentField && !methodsResult.error) paymentField.value = (methodsResult.data || []).filter(m => m.is_enabled).sort((a,b) => a.sort_order-b.sort_order).map(m => m.public_instructions ? (m.display_name + ' | ' + m.public_instructions) : m.display_name).join('\n');
     if (methodsResult.error) {
       const message = document.querySelector('#storeSettingsMessage');
       if (message) { message.textContent = 'No se pudieron cargar los métodos de pago: ' + methodsResult.error.message; message.className = 'message error'; }
@@ -557,7 +557,10 @@
       return;
     }
     try {
-      const labels = [...new Set(value('payment_methods').split('\n').map(v => v.trim()).filter(v => v.length >= 2 && v.length <= 100))];
+      const entries = value('payment_methods').split('\n').map(line => {
+        const parts = line.split('|');
+        return { displayName: (parts.shift() || '').trim(), publicInstructions: parts.join('|').trim() };
+      }).filter(item => item.displayName.length >= 2 && item.displayName.length <= 100);
       const methodCodeFor = label => {
         const normalized = label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
         if (normalized.includes('efectivo') || normalized.includes('contra entrega')) return 'cash';
@@ -565,7 +568,7 @@
         if (normalized.includes('tarjeta') || normalized.includes('card')) return 'card';
         return 'other';
       };
-      const methods = labels.map((displayName, sortOrder) => ({ displayName, methodCode: methodCodeFor(displayName), sortOrder }));
+      const methods = entries.map((item, sortOrder) => ({ ...item, methodCode: methodCodeFor(item.displayName), sortOrder }));
       const { data: existing, error: readError } = await db.from('business_payment_methods')
         .select('id,method_code,display_name,is_enabled,sort_order')
         .eq('business_id', businessId);
@@ -580,14 +583,14 @@
         const old = byCode.get(method.methodCode)?.shift();
         if (old) {
           const { error } = await db.from('business_payment_methods').update({
-            display_name: method.displayName, is_enabled: true, sort_order: method.sortOrder, updated_at: new Date().toISOString()
+            display_name: method.displayName, public_instructions: method.publicInstructions || null, is_enabled: true, sort_order: method.sortOrder, updated_at: new Date().toISOString()
           }).eq('id', old.id).eq('business_id', businessId);
           if (error) throw error;
           retained.add(old.id);
         } else {
           const { error } = await db.from('business_payment_methods').insert({
             business_id: businessId, method_code: method.methodCode, display_name: method.displayName,
-            is_enabled: true, sort_order: method.sortOrder
+            public_instructions: method.publicInstructions || null, is_enabled: true, sort_order: method.sortOrder
           });
           if (error) throw error;
         }
