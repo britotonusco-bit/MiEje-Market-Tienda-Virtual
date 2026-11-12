@@ -371,20 +371,15 @@
 
   async function initBusinessSettings() {
     await showSupportLink();
-    const [settingsResult, contentResult, aiResult, membersResult, applicationsResult] = await Promise.all([
-      db.from('business_store_settings').select('*').eq('business_id', businessId).maybeSingle(),
-      db.from('business_content_pages').select('id,content_type,title,body,is_published,moderation_status,moderation_note,created_at').eq('business_id', businessId).order('created_at', { ascending: false }).limit(50),
-      db.from('business_ai_settings').select('enabled,assistant_name,instructions').eq('business_id', businessId).maybeSingle(),
-      db.from('business_members').select('user_id,role,is_active,is_blocked,is_business_owner,profiles(display_name)').eq('business_id', businessId),
-      db.from('job_applications').select('id,content_page_id,applicant_name,applicant_contact,applicant_message,application_data,status,created_at').eq('business_id', businessId).order('created_at', {ascending:false}).limit(100)
-    ]);
-    const sf = document.querySelector('#storeSettingsForm');
-    if (sf && !settingsResult.error && settingsResult.data) { const x=settingsResult.data; sf.elements.whatsapp_number.value=x.whatsapp_number||''; sf.elements.payment_methods.value=(x.payment_methods||[]).map(v=>typeof v==='string'?v:v.label||'').join('\n'); sf.elements.delivery_options.value=(x.delivery_options||[]).map(v=>typeof v==='string'?v:v.label||'').join('\n'); sf.elements.contact_options.value=(x.contact_options?.notes||[]).join('\n'); }
-    const af=document.querySelector('#businessAiForm'); if (af && !aiResult.error && aiResult.data) { af.elements.assistant_name.value=aiResult.data.assistant_name||'Asistente del negocio'; af.elements.instructions.value=aiResult.data.instructions||''; af.elements.enabled.checked=Boolean(aiResult.data.enabled); }
-    const content=document.querySelector('#businessContentList'); if(content) { const rows=contentResult.data||[]; content.innerHTML=rows.length?tableHtml(['Tipo','Título','Estado','Fecha'],rows.map(x=>[x.content_type,x.title,x.moderation_status==='approved'?(x.is_published?'Aprobado y publicado':'Aprobado / oculto'):x.moderation_status==='rejected'?'Rechazado':'Pendiente de revisión',dateTime(x.created_at)])):'<div class="empty">Todavía no hay promociones ni formularios publicados.</div>'; if(contentResult.error) showError(content,contentResult.error); }
-    const blockForm=document.querySelector('#blockRequestForm'); const ownerNote=document.querySelector('#blockRequestOwnerNote'); if(blockForm && !isBusinessOwner){blockForm.classList.add('hidden'); ownerNote?.classList.remove('hidden');} else {blockForm?.classList.remove('hidden'); ownerNote?.classList.add('hidden');}
-    const target=document.querySelector('#blockTargetUser'); if(target) { const rows=(membersResult.data||[]).filter(m=>m.user_id!==currentUser.id && m.is_active); target.innerHTML='<option value="">Selecciona una cuenta</option>'+rows.map(m=>`<option value="${esc(m.user_id)}">${esc(m.profiles?.display_name||shortId(m.user_id))} · ${m.role==='business_admin'?'Administrador':'Empleado'}${m.is_blocked?' · Bloqueado':''}</option>`).join(''); if(membersResult.error) target.innerHTML='<option value="">No se pudieron cargar las cuentas</option>'; }
-    const applications=document.querySelector('#jobApplicationsContainer'); if(applications){ const rows=applicationsResult.data||[]; applications.innerHTML=applicationsResult.error?`<div class="empty">No se pudieron cargar las postulaciones: ${esc(applicationsResult.error.message)}</div>`:rows.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Postulante</th><th>Contacto</th><th>Mensaje</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${rows.map(a=>`<tr><td>${dateTime(a.created_at)}</td><td>${esc(a.applicant_name)}</td><td>${esc(a.applicant_contact)}</td><td>${esc(a.applicant_message||'—')}${a.application_data&&Object.keys(a.application_data).length?`<br><small>Campos adicionales: ${esc(JSON.stringify(a.application_data))}</small>`:''}</td><td>${esc(a.status)}</td><td><select class="field" data-application-status="${esc(a.id)}"><option value="new" ${a.status==='new'?'selected':''}>Nueva</option><option value="reviewing" ${a.status==='reviewing'?'selected':''}>En revisión</option><option value="contacted" ${a.status==='contacted'?'selected':''}>Contactado</option><option value="closed" ${a.status==='closed'?'selected':''}>Cerrada</option></select></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No hay postulaciones recibidas.</div>'; applications.querySelectorAll('[data-application-status]').forEach(select=>select.addEventListener('change',async()=>{const {error}=await db.from('job_applications').update({status:select.value}).eq('id',select.dataset.applicationStatus).eq('business_id',businessId);if(error){alert('No se pudo actualizar el estado: '+error.message);await initBusinessSettings();}})); }
+    const pending = [
+      ['configuracion-tienda', 'Configuración de la tienda', 'La base independiente ya tiene los datos principales del negocio y una tabla separada para métodos de pago. Falta conectar este formulario con esos campos y sus permisos. No guardes información aquí todavía.'],
+      ['contenido-tienda', 'Promociones y formularios de empleo', 'Las tablas de promociones, páginas de contenido y postulaciones todavía no existen en el esquema independiente. Esta sección queda pendiente para evitar guardar datos en una tabla inexistente.'],
+      ['ia-negocio', 'IA exclusiva del negocio', 'La configuración de IA por negocio aún no está implementada en la base independiente.']
+    ];
+    for (const [id, heading, message] of pending) {
+      const section = document.getElementById(id);
+      if (section) section.innerHTML = `<div class="section-heading"><div><h2>${heading}</h2></div></div><div class="empty">${message}</div>`;
+    }
   }
 
   async function saveStoreSettings(event) {
