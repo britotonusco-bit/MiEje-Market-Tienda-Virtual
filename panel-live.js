@@ -753,16 +753,23 @@
     const target = document.querySelector('#jobApplicationsContainer');
     if (!target) return;
     const { data, error } = await db.from('job_applications')
-      .select('id,content_page_id,applicant_name,applicant_contact,applicant_message,form_responses,status,admin_notes,created_at')
+      .select('id,content_page_id,applicant_name,applicant_contact,applicant_message,form_responses,status,admin_notes,created_at,resume_path')
       .eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
     if (error) { showError(target, error); return; }
     const rows = data || [];
     if (!rows.length) { target.innerHTML = '<div class="empty">Todavía no se han recibido postulaciones.</div>'; return; }
     target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Postulante</th><th>Contacto</th><th>Mensaje y respuestas</th><th>Estado</th><th>Notas internas</th><th>Guardar</th></tr></thead><tbody>' +
-      rows.map(row => {
+      (await Promise.all(rows.map(async row => {
+        let resumeLink = '<span class="muted">No adjuntó</span>';
+        if (row.resume_path) {
+          const { data: signedFile, error: signedError } = await db.storage.from('job-applications-private').createSignedUrl(row.resume_path, 300, { download: true });
+          resumeLink = signedError || !signedFile?.signedUrl
+            ? '<span class="muted">Archivo no disponible</span>'
+            : '<a href="' + esc(signedFile.signedUrl) + '" target="_blank" rel="noopener">Descargar hoja de vida</a>';
+        }
         const responseText = Object.entries(row.form_responses || {}).map(([key, value]) => esc(key + ': ' + value)).join('<br>');
-        return '<tr><td>' + dateTime(row.created_at) + '</td><td>' + esc(row.applicant_name) + '</td><td>' + esc(row.applicant_contact) + '</td><td>' + esc(row.applicant_message || '—') + (responseText ? '<br>' + responseText : '') + '</td><td><select class="field" data-application-status="' + esc(row.id) + '"><option value="pending"' + (row.status === 'pending' ? ' selected' : '') + '>Pendiente</option><option value="reviewing"' + (row.status === 'reviewing' ? ' selected' : '') + '>En revisión</option><option value="contacted"' + (row.status === 'contacted' ? ' selected' : '') + '>Contactado</option><option value="accepted"' + (row.status === 'accepted' ? ' selected' : '') + '>Aceptado</option><option value="rejected"' + (row.status === 'rejected' ? ' selected' : '') + '>No seleccionado</option></select></td><td><textarea class="field" rows="2" maxlength="3000" data-application-notes="' + esc(row.id) + '">' + esc(row.admin_notes || '') + '</textarea></td><td><button type="button" class="small-button" data-save-application="' + esc(row.id) + '">Guardar</button></td></tr>';
-      }).join('') + '</tbody></table></div>';
+        return '<tr><td>' + dateTime(row.created_at) + '</td><td>' + esc(row.applicant_name) + '</td><td>' + esc(row.applicant_contact) + '</td><td>' + esc(row.applicant_message || '—') + (responseText ? '<br>' + responseText : '') + '</td><td>' + resumeLink + '</td><td><select class="field" data-application-status="' + esc(row.id) + '"><option value="pending"' + (row.status === 'pending' ? ' selected' : '') + '>Pendiente</option><option value="reviewing"' + (row.status === 'reviewing' ? ' selected' : '') + '>En revisión</option><option value="contacted"' + (row.status === 'contacted' ? ' selected' : '') + '>Contactado</option><option value="accepted"' + (row.status === 'accepted' ? ' selected' : '') + '>Aceptado</option><option value="rejected"' + (row.status === 'rejected' ? ' selected' : '') + '>No seleccionado</option></select></td><td><textarea class="field" rows="2" maxlength="3000" data-application-notes="' + esc(row.id) + '">' + esc(row.admin_notes || '') + '</textarea></td><td><button type="button" class="small-button" data-save-application="' + esc(row.id) + '">Guardar</button></td></tr>';
+      }))).join('') + '</tbody></table></div>';
     target.querySelectorAll('[data-save-application]').forEach(button => button.addEventListener('click', async () => {
       const id = button.dataset.saveApplication;
       const status = target.querySelector('[data-application-status="' + id + '"]')?.value;
