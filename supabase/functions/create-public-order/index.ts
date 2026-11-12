@@ -110,6 +110,30 @@ Deno.serve(async (req: Request) => {
 
     // Recuperar primero un pedido ya confirmado: los reintentos no consumen
     // nuevamente el límite de solicitudes por IP.
+    let customerUserId: string | null = null;
+    const authorization = req.headers.get("authorization") || "";
+    const bearer = authorization.match(/^Bearer\\s+(.+)$/i)?.[1];
+    if (bearer) {
+      const { data: authData, error: authError } = await admin.auth.getUser(bearer);
+      if (authError || !authData.user) {
+        return reply(401, { error: "La sesión del cliente no es válida. Inicia sesión nuevamente." });
+      }
+      const { data: profile, error: profileError } = await admin.from("profiles")
+        .select("is_blocked")
+        .eq("id", authData.user.id)
+        .maybeSingle();
+      if (profileError) {
+        console.error("Customer profile validation failed:", profileError);
+        return reply(503, { error: "No fue posible validar la cuenta del cliente." });
+      }
+      if (profile?.is_blocked === true) {
+        return reply(403, { error: "Esta cuenta no puede realizar pedidos. Contacta al soporte de MiEje Market." });
+      }
+      customerUserId = authData.user.id;
+    }
+
+    requestArgs.p_customer_user_id = customerUserId;
+
     const { data: previousOrder, error: lookupError } = await admin.rpc(
       "get_public_order_idempotent",
       requestArgs
