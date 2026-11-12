@@ -198,8 +198,24 @@
         if (productError) throw productError;
         products = productRows || [];
       }
+      let paymentMethods = [];
+      if (activeBusinessIds.length) {
+        const { data: paymentData, error: paymentError } = await client.functions.invoke("get-public-storefront", { body: { business_ids: activeBusinessIds } });
+        if (paymentError) console.warn("No se pudieron cargar las formas de pago públicas.", paymentError);
+        else paymentMethods = paymentData?.payment_methods || [];
+      }
+      const paymentMap = new Map();
+      paymentMethods.forEach(method => {
+        if (!paymentMap.has(method.business_id)) paymentMap.set(method.business_id, []);
+        paymentMap.get(method.business_id).push({
+          code: method.method_code,
+          label: method.display_name,
+          instructions: method.public_instructions || ""
+        });
+      });
       const registered = rows.map(row => ({
         id: row.id,
+        isRegistered: true,
         name: row.name,
         category: row.category || row.business_type || "General",
         tagline: row.tagline || row.description || "Conoce los productos de este negocio local.",
@@ -210,7 +226,11 @@
         isActive: row.status === "active",
         suspensionReason: row.suspension_reason || "",
         publicSuspensionMessage: row.public_suspension_message || "Esta tienda no está disponible temporalmente.",
-        storeSettings: { whatsapp_number: row.whatsapp_support || "", payment_methods: [], delivery_options: [] },
+        storeSettings: {
+          whatsapp_number: row.whatsapp_support || "",
+          payment_methods: paymentMap.get(row.id) || [],
+          delivery_options: row.status === "active" ? [{ code: "delivery", label: "Domicilio" }] : []
+        },
         contentPages: [],
         image: row.logo_url || "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1000&q=85",
         slug: row.slug,
@@ -339,6 +359,8 @@
   }
 
   function productCard(business, product) {
+    const canOrder = business.isRegistered === true && business.isActive !== false && Number(product.inventory || 0) > 0;
+    const buttonText = !business.isRegistered ? "Demostración" : Number(product.inventory || 0) > 0 ? "+ Agregar" : "Agotado";
     return `
       <article class="product-card">
         <img src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}" loading="lazy">
@@ -347,10 +369,10 @@
           <p>${escapeHtml(product.description)}</p>
           <div class="product-bottom">
             <span class="product-price">${money(product.price)}</span>
-            <button type="button" class="add-button"
+            <button type="button" class="add-button" ${canOrder ? "" : "disabled"}
               data-action="add"
-              data-business="${business.id}"
-              data-product="${product.id}">+ Agregar</button>
+              data-business="${escapeHtml(business.id)}"
+              data-product="${escapeHtml(product.id)}">${buttonText}</button>
           </div>
         </div>
       </article>`;
@@ -445,49 +467,51 @@
 
   function updateCart() {
     $("#cartCount").textContent = cartCount();
-    $("#cartTotal").textContent = money(cartTotal());
-
     const paymentSelect = $("#checkoutForm select[name=payment]");
     const deliverySelect = $("#checkoutForm select[name=deliveryMethod]");
+    const checkoutButton = $("#checkoutForm button[type=submit]");
     if (!cart.length) {
-      $("#cartItems").innerHTML =
-        '<div class="cart-empty">Tu carrito está vacío.<br>Explora una tienda y agrega productos.</div>';
+      $("#cartTotal").textContent = money(0);
+      $("#cartItems").innerHTML = '<div class="cart-empty">Tu carrito está vacío.<br>Explora una tienda y agrega productos.</div>';
       $("#cartBusinessNote").textContent = "Agrega productos de una tienda para comenzar.";
-      if (paymentSelect) paymentSelect.innerHTML = '<option value="">Selecciona una opción</option>';
-      if (deliverySelect) deliverySelect.innerHTML = '<option value="">Primero selecciona productos de una tienda</option>';
+      if (paymentSelect) { paymentSelect.innerHTML = '<option value="">Primero selecciona productos</option>'; paymentSelect.disabled = true; }
+      if (deliverySelect) { deliverySelect.innerHTML = '<option value="">Primero selecciona productos</option>'; deliverySelect.disabled = true; }
+      if (checkoutButton) checkoutButton.disabled = true;
       return;
     }
-
     const cartBusiness = getBusiness(cart[0].businessId);
     const storeSettings = cartBusiness?.storeSettings || {};
-    const paymentOptions = (storeSettings.payment_methods || []).map(item => typeof item === "string" ? item : item.label).filter(Boolean);
-    const deliveryOptions = (storeSettings.delivery_options || []).map(item => typeof item === "string" ? item : item.label).filter(Boolean);
+    const paymentOptions = storeSettings.payment_methods || [];
+    const deliveryOptions = storeSettings.delivery_options || [{ code: "delivery", label: "Domicilio" }];
+    const deliveryFee = Number(cartBusiness?.deliveryFee || 0);
+    const minimumOrder = Number(cartBusiness?.minimumOrderAmount || 0);
+    $("#cartTotal").textContent = money(cartTotal() + deliveryFee);
     if (paymentSelect) {
       const current = paymentSelect.value;
-      const choices = paymentOptions.length ? paymentOptions : ["Efectivo al recibir", "Transferencia por coordinar", "Pago en el local"];
-      paymentSelect.innerHTML = '<option value="">Selecciona una opción</option>' + choices.map(item => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join("");
-      if (choices.includes(current)) paymentSelect.value = current;
+      paymentSelect.innerHTML = paymentOptions.length
+        ? '<option value="">Selecciona una forma de pago</option>' + paymentOptions.map(item => `<option value="${escapeHtml(item.code)}" data-instructions="${escapeHtml(item.instructions || "")}">${escapeHtml(item.label)}</option>`).join("")
+        : '<option value="">Este negocio aún no habilita pagos</option>';
+      paymentSelect.disabled = !paymentOptions.length;
+      if (paymentOptions.some(item => item.code === current)) paymentSelect.value = current;
     }
     if (deliverySelect) {
       const current = deliverySelect.value;
-      const choices = deliveryOptions.length ? deliveryOptions : ["Domicilio por coordinar", "Recoger en tienda"];
-      deliverySelect.innerHTML = '<option value="">Selecciona una opción</option>' + choices.map(item => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join("");
-      if (choices.includes(current)) deliverySelect.value = current;
+      deliverySelect.innerHTML = '<option value="">Selecciona una entrega</option>' + deliveryOptions.map(item => `<option value="${escapeHtml(item.code)}">${escapeHtml(item.label)}</option>`).join("");
+      deliverySelect.disabled = !deliveryOptions.length;
+      if (deliveryOptions.some(item => item.code === current)) deliverySelect.value = current;
     }
-
-    $("#cartBusinessNote").textContent =
-      `Tu pedido es de ${cart[0].businessName}. Cada pedido de demostración corresponde a una sola tienda.`;
-
+    if (checkoutButton) checkoutButton.disabled = !paymentOptions.length || !deliveryOptions.length;
+    $("#cartBusinessNote").textContent = `Pedido para ${cartBusiness?.name || cart[0].businessName}. Subtotal: ${money(cartTotal())}. Domicilio: ${money(deliveryFee)}. Pedido mínimo: ${money(minimumOrder)}.`;
     $("#cartItems").innerHTML = cart.map(item => `
       <div class="cart-item">
         <div>
-          <strong>${item.name}</strong>
-          <small>${item.businessName} · ${money(item.price)} c/u</small>
+          <strong>${escapeHtml(item.name)}</strong>
+          <small>${escapeHtml(item.businessName)} · ${money(item.price)} c/u</small>
           <div class="quantity-controls">
-            <button type="button" data-action="quantity" data-key="${item.key}" data-delta="-1">−</button>
+            <button type="button" data-action="quantity" data-key="${escapeHtml(item.key)}" data-delta="-1">−</button>
             <span>${item.quantity}</span>
-            <button type="button" data-action="quantity" data-key="${item.key}" data-delta="1">+</button>
-            <button type="button" data-action="remove" data-key="${item.key}">✕</button>
+            <button type="button" data-action="quantity" data-key="${escapeHtml(item.key)}" data-delta="1" ${item.quantity >= item.inventory ? "disabled" : ""}>+</button>
+            <button type="button" data-action="remove" data-key="${escapeHtml(item.key)}">✕</button>
           </div>
         </div>
         <span class="cart-item-price">${money(item.price * item.quantity)}</span>
@@ -498,38 +522,25 @@
   function addToCart(businessId, productId) {
     const business = getBusiness(businessId);
     const product = getProduct(business, productId);
-
-    if (!business || !product) {
-      showToast("No se pudo agregar el producto.");
+    if (!business || !product || business.isRegistered !== true || business.isActive === false) {
+      showToast("Esta tienda es una vista de demostración o no está disponible para pedidos.");
       return;
     }
-
+    const stock = Number(product.inventory || 0);
+    if (stock < 1) { showToast("Este producto está agotado."); return; }
     if (cart.length && cart[0].businessId !== businessId) {
-      const confirmed = window.confirm(
-        `Tu carrito tiene productos de ${cart[0].businessName}. ¿Quieres vaciarlo y empezar un pedido en ${business.name}?`
-      );
-
+      const confirmed = window.confirm(`Tu carrito tiene productos de ${cart[0].businessName}. ¿Quieres vaciarlo y empezar un pedido en ${business.name}?`);
       if (!confirmed) return;
       cart = [];
     }
-
     const key = `${businessId}:${productId}`;
     const existing = cart.find(item => item.key === key);
-
     if (existing) {
+      if (existing.quantity >= stock) { showToast("No hay más existencias disponibles de este producto."); return; }
       existing.quantity++;
     } else {
-      cart.push({
-        key,
-        businessId,
-        businessName: business.name,
-        productId,
-        name: product.name,
-        price: product.price,
-        quantity: 1
-      });
+      cart.push({ key, businessId, businessName: business.name, productId, name: product.name, price: product.price, inventory: stock, quantity: 1 });
     }
-
     updateCart();
     showToast(`${product.name} agregado al carrito.`);
   }
@@ -768,12 +779,13 @@
         const item = cart.find(entry => entry.key === actionButton.dataset.key);
 
         if (item) {
-          item.quantity += Number(actionButton.dataset.delta);
-
-          if (item.quantity <= 0) {
-            cart = cart.filter(entry => entry.key !== item.key);
+          const delta = Number(actionButton.dataset.delta);
+          if (delta > 0 && item.quantity >= item.inventory) {
+            showToast("No hay más existencias disponibles de este producto.");
+            return;
           }
-
+          item.quantity += delta;
+          if (item.quantity <= 0) cart = cart.filter(entry => entry.key !== item.key);
           updateCart();
         }
       }
@@ -840,33 +852,63 @@
     addChatBubble(assistantReply(question, business));
   });
 
-  $("#checkoutForm").addEventListener("submit", event => {
+  $("#checkoutForm").addEventListener("submit", async event => {
     event.preventDefault();
-
-    if (!cart.length) {
-      showToast("Primero agrega productos al carrito.");
+    if (!cart.length) { showToast("Primero agrega productos al carrito."); return; }
+    const business = getBusiness(cart[0].businessId);
+    if (!business?.isRegistered || business.isActive === false) { showToast("Esta tienda no está habilitada para recibir pedidos."); return; }
+    if (cartTotal() < Number(business.minimumOrderAmount || 0)) {
+      showToast(`El pedido mínimo de esta tienda es ${money(business.minimumOrderAmount)}.`);
       return;
     }
-
     const form = new FormData(event.currentTarget);
-
-    const summary = cart.map(item =>
-      `${item.quantity} × ${item.name} — ${money(item.price * item.quantity)}`
-    ).join("\n");
-
-    window.alert(
-      `PEDIDO DE DEMOSTRACIÓN\n\n` +
-      `Tienda: ${cart[0].businessName}\n\n${summary}\n\n` +
-      `Total estimado: ${money(cartTotal())}\n` +
-      `Nombre: ${form.get("customerName")}\n` +
-      `Teléfono: ${form.get("phone")}\n` +
-      `Entrega: ${form.get("deliveryMethod")}\n` +
-      `Dirección: ${form.get("address")}\n` +
-      `Pago: ${form.get("payment")}\n\n` +
-      `Este pedido no se ha guardado ni enviado.`
-    );
-
-    showToast("Vista previa lista. El pedido no se envió ni se guardó.");
+    const paymentMethod = String(form.get("payment") || "");
+    const deliveryMethod = String(form.get("deliveryMethod") || "");
+    const address = String(form.get("address") || "").trim();
+    const customerName = String(form.get("customerName") || "").trim();
+    const customerPhone = String(form.get("phone") || "").trim();
+    if (!paymentMethod || !deliveryMethod || !address || !customerName || !customerPhone) {
+      showToast("Completa tus datos, la dirección y la forma de pago.");
+      return;
+    }
+    if (!window.supabase || !window.MIEJE_SUPABASE_URL || !window.MIEJE_SUPABASE_PUBLISHABLE_KEY) {
+      showToast("El servicio de pedidos no está disponible en este momento.");
+      return;
+    }
+    const button = event.currentTarget.querySelector('button[type="submit"]');
+    button.disabled = true;
+    button.textContent = "Registrando pedido…";
+    try {
+      const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
+      const { data, error } = await client.functions.invoke("create-public-order", {
+        body: {
+          business_id: business.id,
+          customer_name: customerName,
+          customer_phone: customerPhone,
+          delivery_address: address,
+          delivery_notes: `Método de entrega: ${deliveryMethod === "delivery" ? "Domicilio" : deliveryMethod}`,
+          payment_method: paymentMethod,
+          items: cart.map(item => ({ product_id: item.productId, quantity: item.quantity }))
+        }
+      });
+      if (error) throw new Error(error.message || "No se pudo registrar el pedido.");
+      if (!data?.ok || !data.order) throw new Error(data?.error || "El servidor no confirmó el registro del pedido.");
+      const order = data.order;
+      const tracking = order.public_tracking_token ? `\nCódigo privado de seguimiento: ${order.public_tracking_token}` : "";
+      window.alert(`Pedido registrado correctamente.\nNúmero de pedido: #${order.order_number}\nTotal: ${money(order.total)}${tracking}\n\nGuarda el código de seguimiento para consultar el estado de tu pedido.`);
+      cart = [];
+      event.currentTarget.reset();
+      updateCart();
+      closeCart();
+      showToast(`Pedido #${order.order_number} enviado al negocio.`);
+    } catch (error) {
+      console.warn("No se pudo registrar el pedido público.", error);
+      showToast(error.message || "No se pudo registrar el pedido. Intenta nuevamente.");
+    } finally {
+      button.disabled = false;
+      button.textContent = "Confirmar pedido";
+      updateCart();
+    }
   });
 
   document.addEventListener("keydown", event => {
