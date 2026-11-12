@@ -114,7 +114,7 @@
         verifyBtn.textContent = 'Verificar código';
       }
     };
-    return new Promise(() => {});
+    return;
   }
 
   form.addEventListener('submit', async event => {
