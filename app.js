@@ -473,6 +473,7 @@
     const paymentSelect = $("#checkoutForm select[name=payment]");
     const deliverySelect = $("#checkoutForm select[name=deliveryMethod]");
     const checkoutButton = $("#checkoutForm button[type=submit]");
+    const instructions = $("#paymentInstructions");
     if (!cart.length) {
       $("#cartTotal").textContent = money(0);
       $("#cartItems").innerHTML = '<div class="cart-empty">Tu carrito está vacío.<br>Explora una tienda y agrega productos.</div>';
@@ -480,6 +481,7 @@
       if (paymentSelect) { paymentSelect.innerHTML = '<option value="">Primero selecciona productos</option>'; paymentSelect.disabled = true; }
       if (deliverySelect) { deliverySelect.innerHTML = '<option value="">Primero selecciona productos</option>'; deliverySelect.disabled = true; }
       if (checkoutButton) checkoutButton.disabled = true;
+      if (instructions) { instructions.textContent = ""; instructions.hidden = true; }
       return;
     }
     const cartBusiness = getBusiness(cart[0].businessId);
@@ -492,10 +494,19 @@
     if (paymentSelect) {
       const current = paymentSelect.value;
       paymentSelect.innerHTML = paymentOptions.length
-        ? '<option value="">Selecciona una forma de pago</option>' + paymentOptions.map(item => `<option value="${escapeHtml(item.code)}" data-instructions="${escapeHtml(item.instructions || "")}">${escapeHtml(item.label)}</option>`).join("")
+        ? '<option value="">Selecciona una forma de pago</option>' + paymentOptions.map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`).join("")
         : '<option value="">Este negocio aún no habilita pagos</option>';
       paymentSelect.disabled = !paymentOptions.length;
-      if (paymentOptions.some(item => item.code === current)) paymentSelect.value = current;
+      if (paymentOptions.some(item => item.id === current)) paymentSelect.value = current;
+      if (!paymentSelect.dataset.instructionsBound) {
+        paymentSelect.addEventListener("change", updateCart);
+        paymentSelect.dataset.instructionsBound = "true";
+      }
+      const selectedMethod = paymentOptions.find(item => item.id === paymentSelect.value);
+      if (instructions) {
+        instructions.textContent = selectedMethod?.instructions || "";
+        instructions.hidden = !selectedMethod?.instructions;
+      }
     }
     if (deliverySelect) {
       const current = deliverySelect.value;
@@ -865,12 +876,12 @@
       return;
     }
     const form = new FormData(event.currentTarget);
-    const paymentMethod = String(form.get("payment") || "");
+    const paymentMethodId = String(form.get("payment") || "");
     const deliveryMethod = String(form.get("deliveryMethod") || "");
     const address = String(form.get("address") || "").trim();
     const customerName = String(form.get("customerName") || "").trim();
     const customerPhone = String(form.get("phone") || "").trim();
-    if (!paymentMethod || !deliveryMethod || !address || !customerName || !customerPhone) {
+    if (!paymentMethodId || !deliveryMethod || !address || !customerName || !customerPhone) {
       showToast("Completa tus datos, la dirección y la forma de pago.");
       return;
     }
@@ -890,7 +901,7 @@
           customer_phone: customerPhone,
           delivery_address: address,
           delivery_notes: `Método de entrega: ${deliveryMethod === "delivery" ? "Domicilio" : deliveryMethod}`,
-          payment_method: paymentMethod,
+          payment_method_id: paymentMethodId,
           items: cart.map(item => ({ product_id: item.productId, quantity: item.quantity }))
         }
       });
@@ -903,7 +914,7 @@
       event.currentTarget.reset();
       updateCart();
       closeCart();
-      showToast(`Pedido #${order.order_number} enviado al negocio.`);
+      showToast(`Pedido #${order.order_number} registrado para que el negocio lo gestione.`);
     } catch (error) {
       console.warn("No se pudo registrar el pedido público.", error);
       showToast(error.message || "No se pudo registrar el pedido. Intenta nuevamente.");
