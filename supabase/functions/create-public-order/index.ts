@@ -132,6 +132,7 @@ Deno.serve(async (req: Request) => {
     const { data, error } = await admin.rpc("create_public_order_idempotent", {
       p_idempotency_key: idempotencyKey,
       p_business_id: businessId,
+      p_payment_method_id: paymentMethodId,
       p_customer_name: customerName,
       p_customer_phone: customerPhone,
       p_customer_email: customerEmail || null,
