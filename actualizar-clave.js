@@ -43,7 +43,7 @@
       new Promise(resolve => window.setTimeout(() => resolve(null), 10000))
     ]);
 
-    if (!recoverySession || !data.session && !recoverySession) {
+    if (!recoverySession) {
       say('El enlace no es válido, ya venció o no corresponde a una recuperación de contraseña. Solicita uno nuevo.', 'error');
       button.disabled = true;
       return;
@@ -77,7 +77,10 @@
       const { error } = await client.auth.updateUser({ password });
       if (error) throw error;
 
-      await client.auth.signOut();
+      const { error: signOutError } = await client.auth.signOut();
+      if (signOutError) {
+        console.warn('La contraseña se actualizó, pero no se pudo cerrar la sesión automáticamente.', signOutError);
+      }
       say('Contraseña actualizada. Ya puedes iniciar sesión con tu nueva contraseña.', 'success');
       form.reset();
       recoverySessionReady = false;
