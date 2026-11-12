@@ -127,3 +127,10 @@ Estas correcciones se prepararon en la rama de trabajo. Aún requieren pruebas d
 4. Si RLS o el trigger rechazan el cambio, la interfaz debe mostrar el error y no presentar el cambio como exitoso.
 5. Si el pedido no existe o no pertenece al negocio activo, la actualización no debe devolver un falso éxito.
 6. Confirmar que la transición a delivered impide nuevas solicitudes de cancelación y que la cancelación solo se realiza mediante la solicitud aprobada por el administrador.
+
+## Pruebas de configuración de métodos de pago
+
+1. Guardar la tienda con al menos un método de pago válido: debe actualizar la ficha comercial y conservar los métodos habilitados.
+2. Intentar guardar sin ningún método de pago válido: debe detenerse antes de modificar la ficha comercial y explicar que el checkout necesita al menos una opción.
+3. Si falla la actualización de un método existente o la desactivación de uno anterior, la interfaz debe reportar el resultado parcial con claridad y no afirmar que todo quedó guardado.
+4. Confirmar que Nequi, Bancolombia y Daviplata se clasifican como transferencia, sin perder su nombre e instrucciones particulares para el cliente.
