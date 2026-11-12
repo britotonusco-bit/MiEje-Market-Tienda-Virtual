@@ -13,6 +13,14 @@
     maximumFractionDigits: 0
   }).format(value);
 
+  const formatBusinessHours = schedule => {
+    if (!schedule || typeof schedule !== "object" || !Object.keys(schedule).length) return "Horario por confirmar con el negocio."; 
+    const days = [["monday","Lun"],["tuesday","Mar"],["wednesday","Mié"],["thursday","Jue"],["friday","Vie"],["saturday","Sáb"],["sunday","Dom"]];
+    const openDays = days.filter(([key]) => schedule[key] && schedule[key].closed !== true && schedule[key].open && schedule[key].close);
+    if (!openDays.length) return "Horario no informado."; 
+    return openDays.map(([key,label]) => label + ": " + schedule[key].open + "–" + schedule[key].close).join(" · ");
+  };
+
   const categoryInfo = {
     Comidas: {
       description: "Restaurantes, comidas rápidas y sabores de la región."
@@ -221,7 +229,7 @@
         category: row.category || row.business_type || "General",
         tagline: row.tagline || row.description || "Conoce los productos de este negocio local.",
         location: row.city || "Eje Cafetero",
-        hours: "Consulta el horario con el negocio.",
+        hours: formatBusinessHours(row.opening_hours),
         phone: row.contact_phone || "",
         rating: "Nuevo",
         isActive: row.status === "active",
@@ -400,6 +408,7 @@
     const settings = business.storeSettings || {};
     const paymentMethods = settings.payment_methods || [];
     const payments = paymentMethods.map(item => item.label).filter(Boolean);
+    const businessHoursHtml = '<div class="info-line"><span>🕒</span><span><strong>Horario de atención</strong><br>' + escapeHtml(business.hours || "Horario por confirmar con el negocio.") + '</span></div>';
     const paymentDetails = paymentMethods.map(item => '<div class="info-line"><span>💳</span><span><strong>' + escapeHtml(item.label) + '</strong>' + (item.instructions ? '<br>' + escapeHtml(item.instructions) : '') + '</span></div>').join("");
     const delivery = (settings.delivery_options || []).map(item => typeof item === "string" ? item : item.label).filter(Boolean);
     const contentPages = business.contentPages || [];
@@ -435,7 +444,7 @@
             <div class="info-line"><span>📍</span><span>${escapeHtml(business.location)}</span></div>
             <div class="info-line"><span>🕒</span><span>${escapeHtml(business.hours)}</span></div>
             <div class="info-line"><span>✓</span><span>Negocio registrado en MiEje Market</span></div>
-            ${paymentDetails}
+            ${businessHoursHtml}${paymentDetails}
             ${delivery.length ? `<div class="info-line"><span>🛵</span><span><strong>Entrega:</strong> ${delivery.map(escapeHtml).join(", ")}</span></div>` : ""}
             <div class="info-line"><span>💰</span><span>Domicilio: ${money(business.deliveryFee || 0)} · Pedido mínimo: ${money(business.minimumOrderAmount || 0)}</span></div>
             ${publicWhatsapp ? `<div class="info-line"><span>☎</span><span><a href="https://wa.me/${publicWhatsapp}" target="_blank" rel="noopener">Contactar por WhatsApp</a></span></div>` : ""}
