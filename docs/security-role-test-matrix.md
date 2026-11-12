@@ -142,8 +142,17 @@ Estas correcciones se prepararon en la rama de trabajo. Aún requieren pruebas d
 3. Enviar simultáneamente dos solicitudes con la misma clave: debe existir un solo pedido.
 4. Reutilizar la misma clave con un carrito, dirección, cliente o forma de pago diferente: debe responder conflicto y no crear un segundo pedido.
 5. Simular pérdida de respuesta después de que el servidor confirmó la transacción: el reintento con la misma clave debe recuperar el pedido original.
-6. Verificar que los reintentos idempotentes no consuman nuevos cupos del límite por IP.
+6. Verificar que un reintento secuencial idempotente ya registrado no consuma nuevos cupos del límite por IP.
 7. Una clave nueva debe consumir el límite normal de 10 solicitudes por IP en 10 minutos.
+8. Dos solicitudes simultáneas con la misma clave pueden contabilizar dos intentos en el límite por IP, pero deben producir un solo pedido; comprobar que esto no genere falsos errores de recuperación.
 8. Si falla el inventario o la creación del pedido, la transacción no debe conservar una clave exitosa ni dejar descuentos parciales.
 9. Confirmar que solo service_role puede ejecutar la función idempotente y que anon/authenticated no pueden consultar la tabla privada de claves.
 10. Verificar que el endpoint público siga funcionando con verify_jwt=false y valide la clave UUID en el servidor.
+
+## Observaciones del diseño idempotente
+
+- La clave se conserva en el navegador mientras el usuario reintenta exactamente el mismo contenido del checkout.
+- Si cambian los datos del cliente, dirección, método de pago o productos/cantidades, se genera una clave nueva.
+- El servidor comprueba que una clave existente corresponda al mismo contenido antes de devolver el pedido guardado.
+- La consulta de recuperación ocurre antes del límite por IP, para que una compra confirmada cuya respuesta se perdió pueda recuperarse sin duplicarla.
+- La creación del pedido y el registro de su respuesta idempotente se ejecutan en la misma transacción PostgreSQL.
