@@ -242,3 +242,17 @@ Permisos de empleados revisados en el estado activo y en el borrador:
 - El empleado puede registrar una solicitud de cancelación mediante la función controlada; no puede aprobarla ni registrar reembolsos.
 
 Pendiente de staging: probar con cuentas separadas de administrador A, empleado A, administrador B y técnico. Confirmar que el empleado A pueda consultar y avanzar pedidos de A, pero no modificar productos, inventario, precios, métodos de pago, gastos ni datos financieros; confirmar también que no pueda consultar pedidos de B. La migración sigue sin ejecutarse y estas reglas todavía no están activas en producción.
+
+
+## Corrección adicional del flujo concurrente de cancelaciones
+
+La función `decide_order_cancellation` ahora establece explícitamente un orden de bloqueo consistente: primero obtiene y bloquea la fila del pedido, y después bloquea la solicitud de cancelación. La función `request_order_cancellation` ya bloquea primero el pedido. Esto evita que ambos flujos intenten adquirir los mismos bloqueos en orden inverso.
+
+Pruebas pendientes en staging:
+1. Dos empleados intentan crear simultáneamente una solicitud para el mismo pedido: debe quedar una sola solicitud pendiente.
+2. Un empleado solicita cancelación mientras el administrador decide una solicitud existente: las operaciones deben serializarse sin duplicar inventario ni dejar solicitudes inconsistentes.
+3. Dos administradores (o dos sesiones del administrador) intentan decidir la misma solicitud simultáneamente: solo una decisión debe completarse.
+4. Tras aprobar, el pedido debe quedar cancelado y cada producto debe recuperar exactamente las unidades compradas una sola vez.
+5. Tras rechazar, el pedido y el inventario deben permanecer sin cambios.
+
+Se consultó el esquema live y se confirmó que los estados permitidos por la restricción CHECK de `orders.status` son `pending`, `confirmed`, `preparing`, `ready`, `out_for_delivery`, `delivered` y `cancelled`. Coinciden con los estados utilizados por el panel y el trigger propuesto. Esta consulta fue de solo lectura; no se modificó la base de datos.
