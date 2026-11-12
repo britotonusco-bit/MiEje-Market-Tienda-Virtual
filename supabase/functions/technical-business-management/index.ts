@@ -310,13 +310,36 @@ Deno.serve(async (req: Request) => {
       const reason = textValue(body.reason, 2000);
       if (!membershipId || !reason) return reply(400, { error: "La membresía y el motivo son obligatorios." });
 
+      const { data: before, error: readError } = await admin.from("business_memberships")
+        .select("id,business_id,user_id,role,status")
+        .eq("id", membershipId)
+        .maybeSingle();
+      if (readError) throw readError;
+      if (!before) return reply(404, { error: "No se encontró esa asignación de usuario." });
+      if (before.status === "suspended") {
+        return reply(200, { ok: true, membership: before, message: "La cuenta ya estaba suspendida en este negocio." });
+      }
+
+      if (before.role === "business_admin") {
+        const { count, error: adminsError } = await admin.from("business_memberships")
+          .select("id", { count: "exact", head: true })
+          .eq("business_id", before.business_id)
+          .eq("role", "business_admin")
+          .eq("status", "active");
+        if (adminsError) throw adminsError;
+        if ((count ?? 0) <= 1) {
+          return reply(409, { error: "No se puede suspender al último administrador activo del negocio. Asigna primero otro administrador." });
+        }
+      }
+
       const { data: membership, error: updateError } = await admin.from("business_memberships").update({
         status: "suspended",
         blocked_reason: reason,
-      }).eq("id", membershipId).select("id, business_id, user_id, role, status").maybeSingle();
+      }).eq("id", membershipId).eq("status", "active")
+        .select("id, business_id, user_id, role, status").maybeSingle();
 
       if (updateError) throw updateError;
-      if (!membership) return reply(404, { error: "No se encontró esa asignación de usuario." });
+      if (!membership) return reply(409, { error: "El acceso cambió mientras se procesaba la solicitud. Actualiza la lista e inténtalo de nuevo." });
 
       const { error: auditError } = await admin.from("audit_logs").insert({
         business_id: membership.business_id,
