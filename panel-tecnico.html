@@ -3,12 +3,8 @@
 <div class="split">
 <label>Nombre del negocio<input class="field" name="name" required maxlength="120" placeholder="Ej. ¡Qué Rico!"></label>
 <label>Categoría<select class="field" name="category"><option>Comidas</option><option>Restaurantes</option><option>Moda</option><option>Tecnología</option><option>Mercado</option><option>Hogar</option><option>General</option></select></label>
-<label>Descripción corta<input class="field" name="tagline" maxlength="180" placeholder="Qué ofrece el negocio"></label>
-<label>Ciudad<input class="field" name="city" maxlength="120" value="Pereira, Risaralda"></label>
-<label>Teléfono de contacto (opcional)<input class="field" name="contact_phone" maxlength="40"></label>
-<label>Horario (opcional)<input class="field" name="opening_hours" maxlength="180" placeholder="Lunes a sábado"></label>
 </div>
-<label style="display:block;margin-top:12px">Descripción<input class="field" name="description" maxlength="2000" placeholder="Información que podrán ver los clientes"></label>
+<p class="inline-note">Este paso registra el negocio en la plataforma. Su administrador configurará después la descripción, horarios, logo, contacto, métodos de pago y demás información comercial desde su propio panel.</p>
 <button class="button primary" type="submit" style="margin-top:12px">Crear negocio</button><p id="createBusinessMessage" class="message" aria-live="polite"></p>
 </form>
 <div class="section-heading"><div><h2>Crear usuarios para un negocio</h2><p>Se enviará una invitación al correo; el usuario creará su propia contraseña desde el enlace.</p></div></div>
@@ -17,7 +13,7 @@
 <label>Negocio<select id="inviteBusinessSelect" class="field" name="business_id" required><option value="">Primero crea o selecciona un negocio</option></select></label>
 <label>Rol<select class="field" name="role" required><option value="business_admin">Administrador del negocio</option><option value="employee">Empleado / personal</option></select></label>
 <label>Nombre de la persona<input class="field" name="display_name" maxlength="120" placeholder="Nombre completo"></label>
-<label>Correo electrónico<input class="field" name="email" type="email" required autocomplete="email" placeholder="persona@correo.com"></label><label><span><input type="checkbox" name="is_business_owner"> Esta cuenta será la propietaria del negocio</span></label>
+<label>Correo electrónico<input class="field" name="email" type="email" required autocomplete="email" placeholder="persona@correo.com"></label>
 </div>
 <button class="button primary" type="submit" style="margin-top:12px">Enviar invitación y asignar usuario</button><p id="inviteMemberMessage" class="message" aria-live="polite"></p>
 </form>
