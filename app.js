@@ -875,18 +875,26 @@
       const applicationData = Object.fromEntries([...formData.entries()].filter(([key]) => key.startsWith("custom_field_")).map(([key, value]) => [key, String(value).trim()]));
       const submitButton = jobForm.querySelector('button[type="submit"]');
       submitButton.disabled = true;
-      const { error } = await client.from("job_applications").insert({
-        business_id: business.id,
-        content_page_id: jobForm.dataset.jobPage,
-        applicant_name: String(formData.get("applicant_name") || "").trim(),
-        applicant_contact: String(formData.get("applicant_contact") || "").trim(),
-        applicant_message: String(formData.get("applicant_message") || "").trim(),
-        form_responses: applicationData,
-        privacy_consent: formData.get("privacy_consent") === "on"
-      });
-      submitButton.disabled = false;
-      if (error) { showToast("No se pudo guardar la postulación. Intenta más tarde."); console.warn("job application submit failed", error); return; }
-      jobForm.reset(); showToast("Postulación enviada correctamente."); return;
+      try {
+        const { error } = await client.from("job_applications").insert({
+          business_id: business.id,
+          content_page_id: jobForm.dataset.jobPage,
+          applicant_name: String(formData.get("applicant_name") || "").trim(),
+          applicant_contact: String(formData.get("applicant_contact") || "").trim(),
+          applicant_message: String(formData.get("applicant_message") || "").trim(),
+          form_responses: applicationData,
+          privacy_consent: formData.get("privacy_consent") === "on"
+        });
+        if (error) throw error;
+        jobForm.reset();
+        showToast("Postulación enviada correctamente.");
+      } catch (error) {
+        showToast("No se pudo guardar la postulación. Intenta más tarde.");
+        console.warn("job application submit failed", error);
+      } finally {
+        submitButton.disabled = false;
+      }
+      return;
     }
     if (event.target.id !== "chatForm") return;
 
