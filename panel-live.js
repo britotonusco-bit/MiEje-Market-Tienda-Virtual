@@ -185,11 +185,11 @@
         updated_at: new Date().toISOString()
       };
       const result = id
-        ? await db.from('products').update(payload).eq('id', id).eq('business_id', businessId)
-        : await db.from('products').insert({ ...payload, business_id: businessId });
-      if (result.error) {
+        ? await db.from('products').update(payload).eq('id', id).eq('business_id', businessId).select('id').maybeSingle()
+        : await db.from('products').insert({ ...payload, business_id: businessId }).select('id').single();
+      if (result.error || !result.data) {
         await removeUploadedBusinessImage(uploadedImage?.path);
-        throw new Error(result.error.message);
+        throw new Error(result.error?.message || 'No se guardó ningún producto. Comprueba que tienes permisos sobre este negocio.');
       }
       form.reset();
       form.elements.id.value = '';
@@ -229,9 +229,9 @@
     const action = product.is_active ? 'desactivar' : 'activar';
     if (!window.confirm(`¿Deseas ${action} el producto "${product.name}"? No se eliminará del historial de pedidos.`)) return;
     button.disabled = true;
-    const { error } = await db.from('products').update({ is_active: !product.is_active, updated_at: new Date().toISOString() }).eq('id', id).eq('business_id', businessId);
-    if (error) {
-      alert('No se pudo cambiar el estado del producto: ' + error.message);
+    const { data: updated, error } = await db.from('products').update({ is_active: !product.is_active, updated_at: new Date().toISOString() }).eq('id', id).eq('business_id', businessId).select('id').maybeSingle();
+    if (error || !updated) {
+      alert('No se pudo cambiar el estado del producto: ' + (error?.message || 'No se encontró el producto o no tienes permiso.'));
       button.disabled = false;
       return;
     }
@@ -593,7 +593,6 @@
     message.textContent = logoFile ? 'Subiendo logo y guardando configuración…' : 'Guardando datos del negocio…';
     message.className = 'message';
     try {
-      if (logoFile) uploadedLogo = await uploadBusinessImage(logoFile, 'logo');
       const openingHours = {};
       const weekdays = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
       for (const day of weekdays) {
@@ -607,6 +606,9 @@
         }
         openingHours[day] = enabled ? { open: open, close: close, closed: false } : { closed: true };
       }
+      // Subir el archivo solo después de validar todos los horarios para no
+      // dejar objetos huérfanos cuando el formulario tenga datos inválidos.
+      if (logoFile) uploadedLogo = await uploadBusinessImage(logoFile, 'logo');
       const businessPayload = {
         name,
         category,
@@ -620,10 +622,11 @@
         delivery_fee: deliveryFee,
         minimum_order_amount: minimumOrder,
       };
-      const { error: businessError } = await db.from('businesses').update(businessPayload).eq('id', businessId);
-      if (businessError) {
+      const { data: updatedBusiness, error: businessError } = await db.from('businesses')
+        .update(businessPayload).eq('id', businessId).select('id').maybeSingle();
+      if (businessError || !updatedBusiness) {
         await removeUploadedBusinessImage(uploadedLogo?.path);
-        throw new Error('No se pudieron guardar los datos del negocio: ' + businessError.message);
+        throw new Error('No se pudieron guardar los datos del negocio: ' + (businessError?.message || 'No se encontró el negocio o no tienes permiso para modificarlo.'));
       }
       try {
         const entries = value('payment_methods').split('\n').map(line => {
@@ -651,10 +654,10 @@
         for (const method of methods) {
           const old = byCode.get(method.methodCode)?.shift();
           if (old) {
-            const { error } = await db.from('business_payment_methods').update({
+            const { data: updatedMethod, error } = await db.from('business_payment_methods').update({
               display_name: method.displayName, public_instructions: method.publicInstructions || null, is_enabled: true, sort_order: method.sortOrder, updated_at: new Date().toISOString()
-            }).eq('id', old.id).eq('business_id', businessId);
-            if (error) throw error;
+            }).eq('id', old.id).eq('business_id', businessId).select('id').maybeSingle();
+            if (error || !updatedMethod) throw new Error(error?.message || 'No se pudo actualizar un método de pago del negocio.');
             retained.add(old.id);
           } else {
             const { error } = await db.from('business_payment_methods').insert({
@@ -666,8 +669,8 @@
         }
         for (const old of (existing || [])) {
           if (!retained.has(old.id) && old.is_enabled) {
-            const { error } = await db.from('business_payment_methods').update({ is_enabled: false, updated_at: new Date().toISOString() }).eq('id', old.id).eq('business_id', businessId);
-            if (error) throw error;
+            const { data: disabledMethod, error } = await db.from('business_payment_methods').update({ is_enabled: false, updated_at: new Date().toISOString() }).eq('id', old.id).eq('business_id', businessId).select('id').maybeSingle();
+            if (error || !disabledMethod) throw new Error(error?.message || 'No se pudo desactivar un método de pago anterior.');
           }
         }
         message.textContent = 'Datos del negocio, métodos de pago y logo guardados correctamente.';
