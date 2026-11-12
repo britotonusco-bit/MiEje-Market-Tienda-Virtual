@@ -160,6 +160,8 @@
     const finance = document.querySelector('#financeContainer'); if (finance) finance.innerHTML = '<div class="empty">El módulo financiero global y nómina aún no está conectado al esquema independiente.</div>';
     const blocks = document.querySelector('#blockRequestsContainer'); if (blocks) blocks.innerHTML = '<div class="empty">Las solicitudes de bloqueo no están disponibles en este proyecto todavía.</div>';
     const moderation = document.querySelector('#contentModerationContainer'); if (moderation) moderation.innerHTML = '<div class="empty">La moderación de publicaciones aún no está conectada al esquema independiente.</div>';
+    const platformAi = document.getElementById('ia-general');
+    if (platformAi) platformAi.innerHTML = '<div class="section-heading"><div><h2>IA general</h2></div></div><div class="empty">La configuración de IA general aún no está conectada al esquema independiente.</div>';
   }
 
   function renderBusinesses() {
