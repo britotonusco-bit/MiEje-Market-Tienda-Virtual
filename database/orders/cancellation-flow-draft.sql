@@ -104,6 +104,7 @@ DECLARE
   v_request record;
   v_response text := NULLIF(pg_catalog.btrim(p_admin_response), '');
   v_restored_products integer := 0;
+  v_expected_products integer := 0;
 BEGIN
   IF v_actor IS NULL THEN
     RAISE EXCEPTION 'Debes iniciar sesión.' USING ERRCODE = '42501';
@@ -160,6 +161,12 @@ BEGIN
       AND business_id = v_request.business_id;
 
     -- Restituir las unidades una sola vez, dentro de la misma transacción.
+    SELECT pg_catalog.count(DISTINCT oi.product_id)::integer
+    INTO v_expected_products
+    FROM public.order_items oi
+    WHERE oi.order_id = v_request.order_id
+      AND oi.product_id IS NOT NULL;
+
     WITH quantities AS (
       SELECT oi.product_id, pg_catalog.sum(oi.quantity)::integer AS quantity
       FROM public.order_items oi
@@ -175,6 +182,10 @@ BEGIN
       AND p.business_id = v_request.business_id;
 
     GET DIAGNOSTICS v_restored_products = ROW_COUNT;
+
+    IF v_restored_products <> v_expected_products THEN
+      RAISE EXCEPTION 'No fue posible restituir el inventario de todos los productos del pedido. La cancelación fue revertida.' USING ERRCODE = '23514';
+    END IF;
   END IF;
 
   INSERT INTO public.audit_logs (
