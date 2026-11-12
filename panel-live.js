@@ -26,9 +26,10 @@
       const { data: auth, error: authError } = await db.auth.getUser();
       if (authError || !auth.user) { window.location.replace('login.html'); return; }
       currentUser = auth.user;
-      const { data: profile, error: profileError } = await db.from('profiles').select('id,display_name,platform_role').eq('id', currentUser.id).single();
-      if (profileError || !profile) throw new Error('No se pudo verificar el perfil. Cierra sesión y vuelve a ingresar.');
-      currentProfile = profile;
+      const { data: access, error: accessError } = await db.functions.invoke('resolve-my-access', { body: {} });
+      if (accessError || !access?.ok || !access.profile) throw new Error(access?.error || 'No se pudo verificar tu acceso. Cierra sesión y vuelve a ingresar.');
+      currentProfile = access.profile;
+      const profile = access.profile;
       document.querySelector('#userName').textContent = profile.display_name || currentUser.email || 'Usuario';
       document.querySelector('#logoutBtn').addEventListener('click', signOut);
       document.querySelector('#refreshTechnicalBtn')?.addEventListener('click', refreshTechnical);
@@ -47,40 +48,21 @@
       document.querySelector('#refreshOrders')?.addEventListener('click', () => panel === 'business_admin' ? loadBusinessOrders() : loadEmployeeOrders());
 
       if (panel === 'technical') {
-        if (profile.platform_role !== 'platform_owner') throw new Error('Esta sección es exclusiva del propietario técnico autorizado.');
+        if (!access.is_platform_owner || profile.platform_role !== 'platform_owner') throw new Error('Esta sección es exclusiva del propietario técnico autorizado.');
         await logPanel(null, 'technical', 'panel_open');
-        notice.textContent = 'Acceso validado. Los registros se consultan desde la base de datos.';
+        notice.textContent = 'Acceso validado. Consultando datos disponibles del proyecto independiente.';
         notice.className = 'notice';
         await loadTechnical();
-        await initPlatformAi();
       } else {
-        const { data: memberships, error: memberError } = await db.from('business_members')
-          .select('business_id,role,is_active,is_blocked,block_reason,is_business_owner,businesses(name,slug,is_active,suspension_reason,suspension_public_message)')
-          .eq('user_id', currentUser.id);
-        if (memberError) throw memberError;
-        const available = (memberships || []).filter(m => m.businesses);
+        const available = access.memberships || [];
         const requested = new URLSearchParams(window.location.search).get('business');
         const match = available.find(m => m.business_id === requested) || (available.length === 1 ? available[0] : null);
-        if (!match) throw new Error('No tienes un negocio asignado a esta cuenta o el negocio no coincide. Vuelve al inicio de sesión.');
-        if (match.is_blocked || !match.is_active) {
-          notice.textContent = `Acceso bloqueado para este usuario. Motivo: ${match.block_reason || 'El acceso fue suspendido por el servicio técnico.'}`;
-          notice.className = 'notice error';
-          await showSupportLink();
-          document.querySelectorAll('.panel-section, #statsGrid').forEach(el => { if (!el.closest('#soporte')) el.classList.add('hidden'); });
-          return;
-        }
-        if (match.businesses.is_active === false) {
-          notice.textContent = `El negocio ${match.businesses.name} está suspendido. Motivo: ${match.businesses.suspension_reason || 'El negocio no está disponible temporalmente.'}`;
-          notice.className = 'notice error';
-          await showSupportLink();
-          document.querySelectorAll('.panel-section, #statsGrid').forEach(el => { if (!el.closest('#soporte')) el.classList.add('hidden'); });
-          return;
-        }
+        if (!match) throw new Error('No tienes un negocio activo asignado a esta cuenta o el negocio no coincide. Vuelve al inicio de sesión.');
         if (panel === 'business_admin' && match.role !== 'business_admin') throw new Error('Tu cuenta no tiene el rol administrativo requerido para este panel.');
-        if (panel === 'employee' && !['employee','business_admin'].includes(match.role)) throw new Error('Tu cuenta no tiene permiso para el panel del personal.');
+        if (panel === 'employee' && match.role !== 'employee') throw new Error('Tu cuenta no tiene permiso para el panel del personal.');
         businessId = match.business_id;
-        businessName = match.businesses.name;
-        isBusinessOwner = match.is_business_owner === true;
+        businessName = match.business.name;
+        isBusinessOwner = match.role === 'business_admin';
         document.querySelector('#businessName').textContent = businessName;
         await logPanel(businessId, panel, 'panel_open');
         notice.textContent = `Acceso validado para ${businessName}. Los permisos se aplican en la base de datos.`;
@@ -96,8 +78,8 @@
   }
 
   async function logPanel(id, panelName, eventType) {
-    const { error } = await db.rpc('log_panel_access', { p_business_id: id, p_panel: panelName, p_event_type: eventType });
-    if (error) throw new Error('No se pudo guardar el registro de acceso. Por seguridad, el panel no se abrirá: ' + error.message);
+    const result = await callTechnicalFunction({ action: 'log_login', business_id: id, panel: panelName });
+    if (!result?.ok) throw new Error('No se pudo registrar el acceso.');
   }
 
   async function signOut() {
@@ -105,13 +87,21 @@
   }
 
   async function loadBusinessAdmin() {
-    const { data: summary, error: summaryError } = await db.rpc('get_business_summary', { p_business_id: businessId });
-    if (summaryError) throw summaryError;
+    const [ordersResult, productsResult] = await Promise.all([
+      db.from('orders').select('id,total,payment_status,status,created_at').eq('business_id', businessId),
+      db.from('products').select('id,inventory,is_active').eq('business_id', businessId)
+    ]);
+    if (ordersResult.error) throw ordersResult.error;
+    if (productsResult.error) throw productsResult.error;
+    const orders = ordersResult.data || [], products = productsResult.data || [];
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+    const todayOrders = orders.filter(o => new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) === today && o.status !== 'cancelled');
+    const received = orders.filter(o => o.payment_status === 'paid').reduce((sum,o) => sum + Number(o.total || 0), 0);
     renderStats([
-      ['Ventas de hoy', money(summary.today_sales), 'Pedidos creados hoy, sin cancelados'],
-      ['Dinero recibido', money(summary.money_received), 'Pedidos marcados como pagados'],
-      ['Pedidos abiertos', number(summary.open_orders), 'Pendientes de completar'],
-      ['Productos con poco stock', number(summary.low_stock_products), 'Cinco unidades o menos']
+      ['Ventas de hoy', money(todayOrders.reduce((sum,o) => sum + Number(o.total || 0), 0)), 'Pedidos creados hoy, sin cancelados'],
+      ['Dinero recibido', money(received), 'Pedidos marcados como pagados'],
+      ['Pedidos abiertos', number(orders.filter(o => !['delivered','cancelled'].includes(o.status)).length), 'Pendientes de completar'],
+      ['Productos con poco stock', number(products.filter(p => p.is_active && Number(p.inventory || 0) <= 5).length), 'Cinco unidades o menos']
     ]);
     await Promise.all([loadBusinessOrders(), loadProducts(), loadAccessEvents(businessId, '#accessContainer'), loadAuditEvents(businessId, '#auditContainer')]);
   }
@@ -119,56 +109,57 @@
   async function loadBusinessOrders() {
     const target = document.querySelector('#ordersContainer');
     target.innerHTML = '<div class="empty">Cargando pedidos…</div>';
-    const { data, error } = await db.rpc('get_business_orders', { p_business_id: businessId, p_panel: 'business_admin' });
+    const { data, error } = await db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,payment_status,status,total,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
     if (error) return showError(target, error);
-    renderOrders(target, data || [], true);
+    renderOrders(target, (data || []).map(o => ({ ...o, items: o.order_items || [] })), true);
   }
 
   async function loadEmployeeOrders() {
     const target = document.querySelector('#ordersContainer');
     target.innerHTML = '<div class="empty">Cargando pedidos…</div>';
-    const { data, error } = await db.rpc('get_business_orders', { p_business_id: businessId, p_panel: 'employee' });
+    const { data, error } = await db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,status,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
     if (error) return showError(target, error);
-    renderOrders(target, data || [], false);
+    renderOrders(target, (data || []).map(o => ({ ...o, items: o.order_items || [] })), false);
   }
 
   async function loadProducts() {
     const target = document.querySelector('#productsContainer');
-    const { data, error } = await db.from('products').select('id,name,price,stock_quantity,track_inventory,is_active').eq('business_id', businessId).order('name').limit(250);
+    const { data, error } = await db.from('products').select('id,name,price,inventory,is_active').eq('business_id', businessId).order('name').limit(250);
     if (error) return showError(target, error);
     if (!data?.length) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene productos registrados.</div>'; return; }
-    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Precio</th><th>Existencias</th><th>Estado</th></tr></thead><tbody>${data.map(p => `<tr><td>${esc(p.name)}</td><td>${money(p.price)}</td><td>${p.track_inventory ? number(p.stock_quantity) : 'No controlado'}</td><td><span class="pill ${p.is_active ? 'green':'red'}">${p.is_active ? 'Activo':'Inactivo'}</span></td></tr>`).join('')}</tbody></table></div>`;
+    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Precio</th><th>Existencias</th><th>Estado</th></tr></thead><tbody>${data.map(p => `<tr><td>${esc(p.name)}</td><td>${money(p.price)}</td><td>${number(p.inventory)}</td><td><span class="pill ${p.is_active ? 'green':'red'}">${p.is_active ? 'Activo':'Inactivo'}</span></td></tr>`).join('')}</tbody></table></div>`;
   }
 
   async function loadTechnical() {
-    const { data: summary, error: summaryError } = await db.rpc('get_platform_summary');
-    if (summaryError) throw summaryError;
-    renderStats([
-      ['Negocios', number(summary.total_businesses), `${number(summary.active_businesses)} activos`],
-      ['Productos', number(summary.total_products), 'En todos los negocios'],
-      ['Pedidos', number(summary.total_orders), `${number(summary.open_orders)} abiertos`],
-      ['Ventas registradas', money(summary.sales_total), `Recibido: ${money(summary.money_received)}`],
-      ['Accesos registrados', number(summary.access_events), 'Historial central'],
-      ['Eventos de auditoría', number(summary.audit_events), 'Cambios importantes'],
-      ['Nómina pagada', money(summary.payroll_paid), 'Registros marcados como pagados']
+    const result = await callTechnicalFunction({ action: 'list_businesses' });
+    cachedBusinesses = result.businesses || [];
+    const [productsResult, ordersResult, auditResult] = await Promise.all([
+      db.from('products').select('id', { count: 'exact', head: true }),
+      db.from('orders').select('id,status,total', { count: 'exact' }),
+      db.from('audit_logs').select('id', { count: 'exact', head: true })
     ]);
-    const { data: businesses, error: businessError } = await db.from('businesses')
-      .select('id,name,slug,business_type,is_active,suspension_reason,suspension_public_message,created_at').order('created_at', { ascending: false });
-    if (businessError) throw businessError;
-    cachedBusinesses = businesses || [];
-    const select = document.querySelector('#businessSelect');
-    select.innerHTML = `<option value="">Todos los negocios</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.is_active ? '' : ' (inactivo)'}</option>`).join('');
-    const memberBusinessSelect = document.querySelector('#memberBusinessSelect');
-    if (memberBusinessSelect) memberBusinessSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
-    const suspensionSelect = document.querySelector('#suspensionBusinessSelect');
-    if (suspensionSelect) suspensionSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.is_active ? '' : ' (suspendido)'}</option>`).join('');
-    const inviteSelect = document.querySelector('#inviteBusinessSelect');
-    if (inviteSelect) inviteSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.filter(b => b.is_active).map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+    if (productsResult.error) throw productsResult.error;
+    if (ordersResult.error) throw ordersResult.error;
+    if (auditResult.error) throw auditResult.error;
+    const activeOrders = ordersResult.data || [];
+    renderStats([
+      ['Negocios', number(cachedBusinesses.length), `${number(cachedBusinesses.filter(b => b.status === 'active').length)} activos`],
+      ['Productos', number(productsResult.count || 0), 'En todos los negocios'],
+      ['Pedidos', number(ordersResult.count || activeOrders.length), `${number(activeOrders.filter(o => !['delivered','cancelled'].includes(o.status)).length)} abiertos`],
+      ['Ventas registradas', money(activeOrders.reduce((sum,o) => sum + Number(o.total || 0), 0)), 'Total de pedidos consultables'],
+      ['Eventos de auditoría', number(auditResult.count || 0), 'Registros en audit_logs']
+    ]);
+    const options = `<option value="">Todos los negocios</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (inactivo)'}</option>`).join('');
+    const select = document.querySelector('#businessSelect'); if (select) select.innerHTML = options;
+    const memberSelect = document.querySelector('#memberBusinessSelect'); if (memberSelect) memberSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+    const suspensionSelect = document.querySelector('#suspensionBusinessSelect'); if (suspensionSelect) suspensionSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (suspendido)'}</option>`).join('');
+    const inviteSelect = document.querySelector('#inviteBusinessSelect'); if (inviteSelect) inviteSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.filter(b => b.status === 'active').map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
     renderBusinesses();
-    await loadFinance();
     await loadSelectedBusiness('');
-    await loadBlockRequests();
-    await loadContentModeration();
+    await loadAuditEvents(null, '#auditContainer');
+    const finance = document.querySelector('#financeContainer'); if (finance) finance.innerHTML = '<div class="empty">El módulo financiero global y nómina aún no está conectado al esquema independiente.</div>';
+    const blocks = document.querySelector('#blockRequestsContainer'); if (blocks) blocks.innerHTML = '<div class="empty">Las solicitudes de bloqueo no están disponibles en este proyecto todavía.</div>';
+    const moderation = document.querySelector('#contentModerationContainer'); if (moderation) moderation.innerHTML = '<div class="empty">La moderación de publicaciones aún no está conectada al esquema independiente.</div>';
   }
 
   function renderBusinesses() {
@@ -301,24 +292,25 @@
   async function loadSelectedBusiness(id) {
     const ordersTarget = document.querySelector('#businessOrdersContainer');
     if (!id) {
-      ordersTarget.innerHTML = '<div class="empty">Selecciona un negocio para consultar sus pedidos. Los accesos y la auditoría muestran todos los negocios.</div>';
-      await Promise.all([loadAccessEvents(null, '#accessContainer'), loadAuditEvents(null, '#auditContainer')]);
+      if (ordersTarget) ordersTarget.innerHTML = '<div class="empty">Selecciona un negocio para consultar sus pedidos.</div>';
       return;
     }
     const business = cachedBusinesses.find(b => b.id === id);
     if (!business) return;
-    const { data: orders, error: ordersError } = await db.rpc('get_business_orders', { p_business_id: id, p_panel: 'business_admin' });
-    if (ordersError) showError(ordersTarget, ordersError);
-    else renderOrders(ordersTarget, orders || [], true);
-    await Promise.all([loadAccessEvents(id, '#accessContainer'), loadAuditEvents(id, '#auditContainer')]);
+    const { data, error } = await db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,payment_status,status,total,created_at,order_items(product_name,quantity)').eq('business_id', id).order('created_at', { ascending: false }).limit(100);
+    if (error) showError(ordersTarget, error);
+    else renderOrders(ordersTarget, (data || []).map(o => ({ ...o, items: o.order_items || [] })), true);
   }
 
   async function loadTechnicalMembers(id) {
-    const target=document.querySelector('#memberTargetSelect'); if(!target) return;
-    target.innerHTML='<option value="">Cargando cuentas…</option>'; if(!id){target.innerHTML='<option value="">Selecciona primero un negocio</option>';return;}
-    const {data,error}=await db.from('business_members').select('user_id,role,is_active,is_blocked,profiles(display_name)').eq('business_id',id).order('created_at',{ascending:false});
-    if(error){target.innerHTML='<option value="">No se pudieron cargar las cuentas</option>';return;}
-    target.innerHTML='<option value="">Selecciona una cuenta</option>'+(data||[]).map(m=>`<option value="${esc(m.user_id)}">${esc(m.profiles?.display_name||shortId(m.user_id))} · ${m.role==='business_admin'?'Administrador':'Empleado'}${m.is_blocked?' · Bloqueado':''}${!m.is_active?' · Inactivo':''}</option>`).join('');
+    const target = document.querySelector('#memberTargetSelect'); if (!target) return;
+    target.innerHTML = '<option value="">Cargando cuentas…</option>';
+    if (!id) { target.innerHTML = '<option value="">Selecciona primero un negocio</option>'; return; }
+    try {
+      const result = await callTechnicalFunction({ action: 'list_business_members', business_id: id });
+      const rows = result.members || [];
+      target.innerHTML = '<option value="">Selecciona una cuenta</option>' + rows.map(m => `<option value="${esc(m.user_id)}">${esc(m.profiles?.display_name || shortId(m.user_id))} · ${m.role === 'business_admin' ? 'Administrador' : 'Empleado'}${m.status !== 'active' ? ' · Suspendido' : ''}</option>`).join('');
+    } catch (error) { target.innerHTML = '<option value="">No se pudieron cargar las cuentas</option>'; }
   }
 
   async function saveMemberStatus(event) {
@@ -452,26 +444,23 @@
 
   async function loadAccessEvents(id, selector) {
     const target = document.querySelector(selector);
-    let query = db.from('access_events').select('id,business_id,user_id,panel,event_type,created_at,user_agent');
+    let query = db.from('audit_logs').select('id,business_id,actor_id,action,details,created_at').eq('action', 'panel.login').order('created_at', { ascending: false }).limit(100);
     if (id) query = query.eq('business_id', id);
-    else if (panel !== 'technical') query = query.is('business_id', null);
-    const { data, error } = await query.order('created_at', { ascending: false }).limit(100);
+    const { data, error } = await query;
     if (error) return showError(target, error);
-    const userNames = await getUserNames((data || []).map(e => e.user_id));
-    if (!data?.length) { target.innerHTML = '<div class="empty">No hay registros de acceso para este filtro todavía.</div>'; return; }
-    target.innerHTML = tableHtml(['Fecha y hora','Usuario','Panel','Evento','Navegador'], data.map(e => [dateTime(e.created_at), userNames.get(e.user_id) || shortId(e.user_id), panelLabel(e.panel), e.event_type === 'login_success' ? 'Inicio de sesión' : 'Entrada al panel', e.user_agent || 'No disponible']));
+    const rows = data || [];
+    const names = await getUserNames(rows.map(e => e.actor_id));
+    if (!rows.length) { target.innerHTML = '<div class="empty">No hay registros de acceso para este filtro todavía.</div>'; return; }
+    target.innerHTML = tableHtml(['Fecha y hora','Usuario','Panel','Evento'], rows.map(e => [dateTime(e.created_at), names.get(e.actor_id) || shortId(e.actor_id), esc(e.details?.panel || '—'), 'Inicio de sesión']));
   }
 
   async function loadAuditEvents(id, selector) {
     const target = document.querySelector(selector);
-    let query = db.from('audit_events').select('id,business_id,actor_user_id,action,table_name,record_id,old_data,new_data,created_at');
-    if (id) query = query.eq('business_id', id);
-    else if (panel !== 'technical') query = query.is('business_id', null);
-    const { data, error } = await query.order('created_at', { ascending: false }).limit(100);
-    if (error) return showError(target, error);
-    const userNames = await getUserNames((data || []).map(e => e.actor_user_id));
-    if (!data?.length) { target.innerHTML = '<div class="empty">No hay cambios de auditoría para este filtro todavía.</div>'; return; }
-    target.innerHTML = tableHtml(['Fecha y hora','Usuario','Acción','Tabla','Registro','Resumen'], data.map(e => [dateTime(e.created_at), userNames.get(e.actor_user_id) || shortId(e.actor_user_id), e.action, e.table_name, e.record_id || '—', summarizeChange(e.old_data, e.new_data)]));
+    const result = await callTechnicalFunction({ action: 'list_audit_logs', business_id: id || '', limit: 100 });
+    const rows = result.audit_logs || [];
+    const names = await getUserNames(rows.map(e => e.actor_id));
+    if (!rows.length) { target.innerHTML = '<div class="empty">No hay registros de auditoría para este filtro todavía.</div>'; return; }
+    target.innerHTML = tableHtml(['Fecha y hora','Usuario','Acción','Entidad','Registro','Detalle'], rows.map(e => [dateTime(e.created_at), names.get(e.actor_id) || shortId(e.actor_id), e.action, e.entity_type, e.entity_id || '—', esc(JSON.stringify(e.details || {}))]));
   }
 
   async function getUserNames(ids) {
