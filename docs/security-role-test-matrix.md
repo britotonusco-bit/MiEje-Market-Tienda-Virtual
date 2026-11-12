@@ -212,3 +212,16 @@ Estas correcciones se prepararon en la rama de trabajo. Aún requieren pruebas d
 10. Intentar registrar dos reembolsos simultáneos para el mismo pedido: solo uno debe completarse.
 11. Verificar que el reembolso registre importe, método, referencia y auditoría, y cambie payment_status a refunded en la misma transacción.
 12. Confirmar que la aplicación no comunica que el dinero fue transferido: el procedimiento solo registra una devolución que el negocio ya realizó por fuera de MiEje.
+
+## Segunda pasada de políticas RLS del propietario técnico
+
+La comparación de todas las políticas activas que contienen `private.is_platform_owner()` encontró tres políticas adicionales que la primera versión de la migración no había sustituido:
+- `business_expenses_select`: permitía lectura global de gastos.
+- `order_item_costs_admin_select`: permitía lectura global de costos asociados a pedidos.
+- `profiles_select_self_or_owner`: permitía leer perfiles de todos los usuarios desde el Data API.
+
+Se añadieron reemplazos al borrador `database/security/business-admin-boundaries.sql`:
+- Gastos y costos asociados a pedidos: solo el administrador del negocio activo.
+- Perfiles: cada usuario solo puede leer su propio perfil mediante Data API. La Edge Function técnica consulta perfiles puntuales con credenciales de servidor después de autenticar al propietario y validar MFA AAL2.
+
+Antes de aplicar esta migración, probar en staging que las vistas de pedidos de administradores/empleados no dependan de leer directamente perfiles de clientes; el helper de nombres de clientes del panel usa actualmente una consulta a `profiles`. Si esa consulta necesita habilitarse para administradores, debe diseñarse una política limitada a clientes con pedidos del mismo negocio y exponer únicamente los campos imprescindibles, no restaurar acceso global.
