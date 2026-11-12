@@ -99,6 +99,7 @@ Deno.serve(async (req: Request) => {
       p_idempotency_key: idempotencyKey,
       p_business_id: businessId,
       p_payment_method_id: paymentMethodId,
+      p_customer_user_id: null as string | null,
       p_customer_name: customerName,
       p_customer_phone: customerPhone,
       p_customer_email: customerEmail || null,
