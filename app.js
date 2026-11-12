@@ -193,7 +193,7 @@
       if (!window.supabase || !window.MIEJE_SUPABASE_URL || !window.MIEJE_SUPABASE_PUBLISHABLE_KEY) return;
       const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
       const { data: rows, error } = await client.from("businesses")
-        .select("id,name,slug,business_type,category,description,tagline,city,contact_phone,whatsapp_support,opening_hours,logo_url,status,suspension_reason,public_suspension_message,delivery_fee,minimum_order_amount")
+        .select("id,name,slug,business_type,category,description,tagline,city,contact_phone,whatsapp_support,opening_hours,logo_url,status,public_suspension_message,delivery_fee,minimum_order_amount")
         .order("created_at", { ascending: false }).limit(200);
       if (error) throw error;
       if (!rows?.length) return;
@@ -250,7 +250,6 @@
         phone: row.contact_phone || "",
         rating: "Nuevo",
         isActive: row.status === "active",
-        suspensionReason: row.suspension_reason || "",
         publicSuspensionMessage: row.public_suspension_message || "Esta tienda no está disponible temporalmente.",
         storeSettings: {
           whatsapp_number: row.whatsapp_support || "",
