@@ -311,3 +311,13 @@ Pruebas pendientes en staging:
 8. Simular un error durante la restitución: el estado del pedido y el inventario deben revertirse juntos.
 
 La corrección de `app.js` está en la rama `correcciones-funcionales`. La migración de checkout idempotente y la migración de cancelaciones siguen siendo borradores; no se ejecutó SQL ni se desplegó ninguna Edge Function. Las pruebas de concurrencia y navegador todavía no se han ejecutado.
+
+## Protección de datos visibles al cambiar de cuenta de cliente
+
+La revisión de `cuenta.js` detectó una condición de carrera: si una consulta de historial o favoritos de la cuenta A seguía pendiente cuando se cerraba sesión y se iniciaba sesión con la cuenta B, la respuesta tardía podía actualizar el DOM con datos de A. Se corrigió el panel de cuenta para:
+- Mantener el identificador de la sesión activa.
+- Ignorar resultados de historial/favoritos si la sesión cambió mientras se ejecutaba la consulta.
+- Limpiar el contenido privado al cerrar sesión.
+- Actualizar la vista de acceso al completar el cierre de sesión.
+
+Prueba pendiente en navegador: iniciar sesión como A, provocar una carga lenta del historial, cerrar sesión e iniciar sesión como B; la interfaz de B no debe mostrar datos de A ni siquiera momentáneamente. Repetir al cerrar sesión sin iniciar otra cuenta y verificar que el historial/favoritos queden vacíos.
