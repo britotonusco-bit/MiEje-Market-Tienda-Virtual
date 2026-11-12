@@ -200,6 +200,7 @@ GRANT EXECUTE ON FUNCTION public.get_public_order_idempotent(
 
 CREATE OR REPLACE FUNCTION public.create_public_order_idempotent(
   p_idempotency_key uuid,
+  p_ip text,
   p_business_id uuid,
   p_payment_method_id uuid,
   p_customer_user_id uuid,
@@ -254,6 +255,14 @@ BEGIN
     RETURN v_existing_response;
   END IF;
 
+  -- El límite se consume solo para claves nuevas y dentro de la misma
+  -- transacción que crea el pedido. Los reintentos no consumen otro intento.
+  IF p_ip IS NULL OR pg_catalog.length(pg_catalog.btrim(p_ip)) < 3
+     OR pg_catalog.length(p_ip) > 100
+     OR NOT public.consume_checkout_rate_limit(p_ip) THEN
+    RAISE EXCEPTION 'Se recibieron demasiadas solicitudes o no fue posible validar el origen.';
+  END IF;
+
   v_response := public.create_public_order_for_customer(
     p_customer_user_id,
     p_business_id,
@@ -278,15 +287,15 @@ END;
 $function$;
 
 REVOKE ALL ON FUNCTION public.create_public_order_idempotent(
-  uuid, uuid, uuid, uuid, text, text, text, text, text, text, jsonb
+  uuid, text, uuid, uuid, uuid, text, text, text, text, text, text, jsonb
 ) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.create_public_order_idempotent(
-  uuid, uuid, uuid, uuid, text, text, text, text, text, text, jsonb
+  uuid, text, uuid, uuid, uuid, text, text, text, text, text, text, jsonb
 ) TO service_role;
 
 -- Pruebas posteriores en staging:
 -- 1) Misma clave + mismo contenido => devuelve el mismo pedido y no descuenta stock otra vez.
 -- 2) Dos llamadas simultáneas con misma clave => solo un pedido.
 -- 3) Misma clave + contenido distinto => conflicto, sin crear otro pedido.
--- 4) Clave nueva => consume límite IP y crea un pedido normal.
+-- 4) Clave nueva => consume exactamente una vez el límite IP dentro de la transacción.
 -- 5) Error de inventario => transacción revertida y clave disponible para corregir/reintentar.
