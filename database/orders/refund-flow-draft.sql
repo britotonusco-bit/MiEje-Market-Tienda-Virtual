@@ -72,6 +72,12 @@ BEGIN
     RAISE EXCEPTION 'El pedido no figura como pagado. No se debe registrar un reembolso.' USING ERRCODE = '23514';
   END IF;
 
+  -- financial_transactions exige amount > 0. Evitar que un pedido gratuito
+  -- llegue al INSERT y falle con una restricción genérica de la tabla.
+  IF v_order.total <= 0 THEN
+    RAISE EXCEPTION 'Este pedido no tiene un importe pagado que pueda reembolsarse.' USING ERRCODE = '23514';
+  END IF;
+
   SELECT r.id INTO v_request_id
   FROM public.order_cancellation_requests r
   WHERE r.business_id = v_order.business_id
