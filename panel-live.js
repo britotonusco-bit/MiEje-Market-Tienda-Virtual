@@ -48,6 +48,7 @@
       document.querySelector('#businessAiForm')?.addEventListener('submit', saveBusinessAi);
       document.querySelector('#blockRequestForm')?.addEventListener('submit', submitBlockRequest);
       document.querySelector('#refreshOrders')?.addEventListener('click', () => panel === 'business_admin' ? loadBusinessOrders() : loadEmployeeOrders());
+      document.querySelector('#refreshCancellations')?.addEventListener('click', loadCancellationRequests);
 
       if (panel === 'technical') {
         if (!access.is_platform_owner || profile.platform_role !== 'platform_owner') throw new Error('Esta sección es exclusiva del propietario técnico autorizado.');
@@ -115,7 +116,7 @@
       ['Pedidos abiertos', number(orders.filter(o => !['delivered','cancelled'].includes(o.status)).length), 'Pendientes de completar'],
       ['Productos con poco stock', number(products.filter(p => p.is_active && Number(p.inventory || 0) <= 5).length), 'Cinco unidades o menos']
     ]);
-    await Promise.all([loadBusinessOrders(), loadProducts(), loadAccessEvents(businessId, '#accessContainer'), loadAuditEvents(businessId, '#auditContainer')]);
+    await Promise.all([loadBusinessOrders(), loadCancellationRequests(), loadProducts(), loadAccessEvents(businessId, '#accessContainer'), loadAuditEvents(businessId, '#auditContainer')]);
   }
 
   async function uploadBusinessImage(file, folder) {
@@ -879,7 +880,7 @@
     if (!orders.length) { target.innerHTML = '<div class="empty">No hay pedidos registrados en este negocio.</div>'; return; }
     const rows = orders.map(o => {
       const items = Array.isArray(o.items) ? o.items.map(i => `${esc(i.product_name)} × ${esc(i.quantity)}`).join('<br>') : '';
-      const action = nextStatus[o.status] ? `<button class="small-button" data-next="${nextStatus[o.status]}" data-order="${esc(o.id)}">Marcar: ${statusLabels[nextStatus[o.status]]}</button>` : '—';
+      const action = `${nextStatus[o.status] ? `<button class="small-button" data-next="${nextStatus[o.status]}" data-order="${esc(o.id)}">Marcar: ${statusLabels[nextStatus[o.status]]}</button>` : ''}${!['delivered','cancelled'].includes(o.status) ? ` <button class="small-button" data-cancel-request="${esc(o.id)}">Solicitar cancelación</button>` : ''}` || '—';
       const base = [esc(`#${o.order_number}`), esc(o.customer_name || 'Cliente'), esc(o.customer_phone || '—'), esc(o.delivery_address || '—') + (o.delivery_notes ? `<br><small>${esc(o.delivery_notes)}</small>` : ''), items || 'Sin detalle', `<span class="pill ${statusClass[o.status] || ''}">${statusLabels[o.status] || esc(o.status)}</span>`, dateTime(o.created_at)];
       if (admin) base.splice(5, 0, `${money(o.total)}<br><small>${esc(o.payment_status || '—')}</small>`);
       base.push(action);
@@ -888,6 +889,93 @@
     const headers = admin ? ['Pedido','Cliente','Teléfono','Entrega','Productos','Total / pago','Estado','Creado','Acción'] : ['Pedido','Cliente','Teléfono','Entrega','Productos','Estado','Creado','Acción'];
     target.innerHTML = tableHtml(headers, rows);
     target.querySelectorAll('[data-next][data-order]').forEach(button => button.addEventListener('click', () => changeOrderStatus(button.dataset.order, button.dataset.next, button)));
+    target.querySelectorAll('[data-cancel-request]').forEach(button => button.addEventListener('click', () => requestCancellation(button.dataset.cancelRequest, button)));
+  }
+
+  async function requestCancellation(orderId, button) {
+    const reason = window.prompt('Escribe el motivo comunicado por el cliente (mínimo 5 caracteres):');
+    if (reason === null) return;
+    if (reason.trim().length < 5 || reason.trim().length > 2000) {
+      alert('El motivo debe tener entre 5 y 2000 caracteres.');
+      return;
+    }
+    button.disabled = true;
+    const { data, error } = await db.rpc('request_order_cancellation', {
+      p_business_id: businessId,
+      p_order_id: orderId,
+      p_customer_reason: reason.trim()
+    });
+    if (error) {
+      alert(`No se pudo registrar la solicitud. Comprueba que la migración de cancelaciones esté desplegada. ${error.message}`);
+      button.disabled = false;
+      return;
+    }
+    alert('La solicitud quedó registrada y pendiente de decisión del administrador.');
+    if (panel === 'business_admin') await Promise.all([loadBusinessOrders(), loadCancellationRequests()]);
+    else await loadEmployeeOrders();
+  }
+
+  async function loadCancellationRequests() {
+    const target = document.querySelector('#cancellationRequestsContainer');
+    if (!target || panel !== 'business_admin') return;
+    target.innerHTML = '<div class="empty">Cargando solicitudes…</div>';
+    const { data, error } = await db.from('order_cancellation_requests')
+      .select('id,order_id,customer_reason,status,forwarded_at,admin_response,orders(order_number,status,total,payment_status)')
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error) return showError(target, error);
+    const requests = data || [];
+    if (!requests.length) {
+      target.innerHTML = '<div class="empty">Todavía no hay solicitudes de cancelación.</div>';
+      return;
+    }
+    const rows = requests.map(r => {
+      const order = Array.isArray(r.orders) ? r.orders[0] : r.orders;
+      const decision = r.status === 'pending'
+        ? `<button class="small-button" data-cancellation-decision="approved" data-request="${esc(r.id)}">Aprobar</button> <button class="small-button" data-cancellation-decision="rejected" data-request="${esc(r.id)}">Rechazar</button>`
+        : esc(r.status === 'approved' ? 'Aprobada' : 'Rechazada');
+      const refundNote = r.status === 'approved' && order?.payment_status === 'paid'
+        ? '<br><small>Pedido pagado: el reembolso de dinero requiere un proceso separado.</small>' : '';
+      return [
+        esc(order?.order_number ? `#${order.order_number}` : r.order_id),
+        esc(r.customer_reason),
+        esc(statusLabels[order?.status] || order?.status || '—'),
+        esc(r.status === 'pending' ? 'Pendiente' : r.status === 'approved' ? 'Aprobada' : 'Rechazada'),
+        dateTime(r.forwarded_at),
+        `${decision}${refundNote}`
+      ];
+    });
+    target.innerHTML = tableHtml(['Pedido','Motivo','Estado del pedido','Solicitud','Fecha','Decisión'], rows);
+    target.querySelectorAll('[data-cancellation-decision][data-request]').forEach(button => {
+      button.addEventListener('click', () => decideCancellation(button.dataset.request, button.dataset.cancellationDecision, button));
+    });
+  }
+
+  async function decideCancellation(requestId, decision, button) {
+    const response = window.prompt(decision === 'approved'
+      ? 'Respuesta para dejar registrada al aprobar (opcional):'
+      : 'Indica el motivo del rechazo:');
+    if (response === null) return;
+    if (decision === 'rejected' && response.trim().length < 5) {
+      alert('Escribe un motivo de rechazo de al menos 5 caracteres.');
+      return;
+    }
+    button.disabled = true;
+    const { data, error } = await db.rpc('decide_order_cancellation', {
+      p_request_id: requestId,
+      p_decision: decision,
+      p_admin_response: response.trim() || null
+    });
+    if (error) {
+      alert(`No se pudo procesar la solicitud. Comprueba que la migración esté desplegada. ${error.message}`);
+      button.disabled = false;
+      return;
+    }
+    alert(decision === 'approved'
+      ? 'Cancelación aprobada. El inventario asociado fue restituido. Si el pedido estaba pagado, el reembolso debe gestionarse por separado.'
+      : 'Solicitud rechazada. El pedido y el inventario no fueron modificados.');
+    await Promise.all([loadCancellationRequests(), loadBusinessOrders(), loadBusinessAdmin()]);
   }
 
   async function changeOrderStatus(orderId, next, button) {
