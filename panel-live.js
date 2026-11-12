@@ -975,7 +975,7 @@
     alert(decision === 'approved'
       ? 'Cancelación aprobada. El inventario asociado fue restituido. Si el pedido estaba pagado, el reembolso debe gestionarse por separado.'
       : 'Solicitud rechazada. El pedido y el inventario no fueron modificados.');
-    await Promise.all([loadCancellationRequests(), loadBusinessOrders(), loadBusinessAdmin()]);
+    await loadBusinessAdmin();
   }
 
   async function changeOrderStatus(orderId, next, button) {
