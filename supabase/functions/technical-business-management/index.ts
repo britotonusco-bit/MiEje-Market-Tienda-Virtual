@@ -199,7 +199,17 @@ Deno.serve(async (req: Request) => {
         entity_id: business.id,
         details: { name: business.name, slug: business.slug },
       });
-      if (auditError) throw auditError;
+      // El negocio ya fue creado. No responder como si la creación hubiera
+      // fallado si únicamente falló el registro de auditoría: eso provocaría
+      // reintentos engañosos y errores de slug duplicado.
+      if (auditError) {
+        console.error("Business created but audit insert failed:", auditError);
+        return reply(201, {
+          ok: true,
+          business,
+          audit_warning: "El negocio se creó, pero no se pudo guardar su evento de auditoría. Revisa los registros del servidor.",
+        });
+      }
       return reply(201, { ok: true, business });
     }
 
@@ -218,6 +228,26 @@ Deno.serve(async (req: Request) => {
       if (business.status !== "active") return reply(409, { error: "No se pueden asignar usuarios a un negocio suspendido o cerrado." });
 
       let targetUser = await findUserByEmail(admin, email);
+
+      // Si el usuario ya existe, comprobar la membresía antes de enviar
+      // cualquier correo o modificar su perfil. Así evitamos invitaciones
+      // duplicadas cuando ya tiene acceso al mismo negocio.
+      if (targetUser?.id) {
+        const { data: existingMembership, error: existingMembershipError } = await admin.from("business_memberships")
+          .select("id, role, status")
+          .eq("business_id", businessId)
+          .eq("user_id", targetUser.id)
+          .maybeSingle();
+        if (existingMembershipError) throw existingMembershipError;
+        if (existingMembership) {
+          return reply(409, {
+            error: existingMembership.status === "active"
+              ? "Ese usuario ya tiene acceso activo a este negocio."
+              : "Ese usuario ya tiene una asignación suspendida. Reactiva su acceso desde la gestión de usuarios.",
+          });
+        }
+      }
+
       let invitationSent = false;
       if (!targetUser) {
         const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
@@ -241,11 +271,6 @@ Deno.serve(async (req: Request) => {
         display_name: displayName || null,
       }, { onConflict: "id", ignoreDuplicates: true });
       if (profileUpsertError) throw profileUpsertError;
-
-      const { data: existingMembership, error: existingMembershipError } = await admin.from("business_memberships")
-        .select("id").eq("business_id", businessId).eq("user_id", targetUser.id).maybeSingle();
-      if (existingMembershipError) throw existingMembershipError;
-      if (existingMembership) return reply(409, { error: "Ese usuario ya tiene acceso asignado a este negocio." });
 
       const { data: membership, error: membershipError } = await admin.from("business_memberships").insert({
         business_id: businessId,
