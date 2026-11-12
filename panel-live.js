@@ -477,7 +477,7 @@
   async function initBusinessSettings() {
     await showSupportLink();
     const [businessResult, methodsResult] = await Promise.all([
-      db.from('businesses').select('name,tagline,description,city,contact_phone,whatsapp_support,logo_url,delivery_fee,minimum_order_amount').eq('id', businessId).single(),
+      db.from('businesses').select('name,category,tagline,description,city,contact_phone,whatsapp_support,logo_url,delivery_fee,minimum_order_amount').eq('id', businessId).single(),
       db.from('business_payment_methods').select('method_code,display_name,is_enabled,sort_order').eq('business_id', businessId).order('sort_order')
     ]);
     const form = document.querySelector('#storeSettingsForm');
@@ -486,7 +486,7 @@
       if (message) { message.textContent = 'No se pudieron cargar los datos del negocio: ' + businessResult.error.message; message.className = 'message error'; }
     } else if (form) {
       const b = businessResult.data;
-      for (const key of ['name','tagline','description','city','contact_phone','whatsapp_support','logo_url','delivery_fee','minimum_order_amount']) {
+      for (const key of ['name','category','tagline','description','city','contact_phone','whatsapp_support','logo_url','delivery_fee','minimum_order_amount']) {
         if (form.elements[key]) form.elements[key].value = b[key] ?? (['delivery_fee','minimum_order_amount'].includes(key) ? 0 : '');
       }
     }
@@ -514,8 +514,9 @@
     const value = name => String(form.elements[name]?.value || '').trim();
     const name = value('name');
     const city = value('city');
-    if (!name || !city) {
-      message.textContent = 'El nombre del negocio y la ciudad son obligatorios.';
+    const category = value('category');
+    if (!name || !city || !category) {
+      message.textContent = 'El nombre, la categoría y la ciudad son obligatorios.';
       message.className = 'message error';
       return;
     }
@@ -538,6 +539,7 @@
     }
     const businessPayload = {
       name,
+      category,
       tagline: value('tagline') || null,
       description: value('description') || null,
       city,
@@ -546,7 +548,6 @@
       logo_url: logoUrl || null,
       delivery_fee: deliveryFee,
       minimum_order_amount: minimumOrder,
-      updated_at: new Date().toISOString()
     };
     message.textContent = 'Guardando datos del negocio…';
     message.className = 'message';
