@@ -58,8 +58,6 @@ Deno.serve(async (req: Request) => {
   const ip = (req.headers.get("cf-connecting-ip")
     ?? req.headers.get("x-forwarded-for")?.split(",")[0]
     ?? "").trim();
-  if (!ip) return reply(400, { error: "No fue posible validar la solicitud. Inténtalo nuevamente." });
-
   const admin = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -158,12 +156,19 @@ Deno.serve(async (req: Request) => {
       return reply(409, { error: "Esta forma de pago ya no está habilitada. Selecciona otra forma de pago." });
     }
 
-    const { data, error } = await admin.rpc("create_public_order_idempotent", requestArgs);
+    if (!ip) {
+      return reply(400, { error: "No fue posible validar el origen de la solicitud. Inténtalo nuevamente." });
+    }
+
+    const { data, error } = await admin.rpc("create_public_order_idempotent", {
+      ...requestArgs,
+      p_ip: ip,
+    });
 
     if (error) {
       console.error("Order creation failed:", error);
       const message = error.message.toLowerCase();
-      if (message.includes("demasiadas solicitudes")) return reply(429, { error: error.message });
+      if (message.includes("demasiadas solicitudes") || message.includes("validar el origen")) return reply(429, { error: error.message });
       if (message.includes("clave de este intento ya fue usada")) return reply(409, { error: error.message });
       if (message.includes("inventario") || message.includes("producto no está disponible") || message.includes("negocio no está disponible")) {
         return reply(409, { error: error.message });
