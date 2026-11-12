@@ -118,3 +118,12 @@ Estas correcciones se prepararon en la rama de trabajo. Aún requieren pruebas d
 8. Introducir horarios inválidos junto con un archivo de logo: no debe subirse ningún archivo ni quedar un objeto huérfano.
 9. Forzar que el UPDATE de la ficha comercial no encuentre una fila o sea rechazado por RLS: la interfaz no debe afirmar que guardó correctamente.
 10. Forzar un fallo al actualizar un método de pago existente o desactivar uno anterior: mostrar que los datos generales pudieron guardarse, pero que los métodos de pago quedaron pendientes de revisión.
+
+## Pruebas de cambios de estado de pedidos desde los paneles
+
+1. Admin A y empleado A pueden avanzar un pedido de su negocio por las transiciones permitidas: pending, confirmed, preparing, ready, out_for_delivery y delivered.
+2. Ningún usuario puede saltar estados, retroceder un pedido ni cambiarlo directamente a cancelled desde el botón de estado.
+3. Admin B y usuarios sin membresía no pueden modificar pedidos del negocio A.
+4. Si RLS o el trigger rechazan el cambio, la interfaz debe mostrar el error y no presentar el cambio como exitoso.
+5. Si el pedido no existe o no pertenece al negocio activo, la actualización no debe devolver un falso éxito.
+6. Confirmar que la transición a delivered impide nuevas solicitudes de cancelación y que la cancelación solo se realiza mediante la solicitud aprobada por el administrador.
