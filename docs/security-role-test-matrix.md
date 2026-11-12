@@ -105,3 +105,16 @@ Estas correcciones se prepararon en la rama de trabajo. Aún requieren pruebas d
 6. Admin A puede actualizar el costo de un producto de A, pero no cambiar la asociación del costo a otro producto o negocio.
 7. Empleado A intenta realizar cualquiera de las operaciones anteriores: debe ser rechazado.
 8. Verificar que las actualizaciones normales de la interfaz sigan funcionando después de retirar los permisos de UPDATE a nivel de tabla y conceder únicamente columnas específicas.
+
+## Pruebas de guardado de catálogo y Storage
+
+1. Crear producto sin imagen y verificar que se inserte en el negocio seleccionado.
+2. Editar producto existente y comprobar que la respuesta incluya el ID actualizado; una actualización bloqueada por RLS no debe mostrarse como exitosa.
+3. Activar y desactivar producto; si no se actualiza ninguna fila, la interfaz debe informar el fallo.
+4. Subir PNG, JPG y WEBP dentro del límite configurado de 5 MB. Rechazar otros MIME types y archivos mayores.
+5. Confirmar que la ruta de imagen sea business_uuid/products/archivo y la ruta del logo business_uuid/logo/archivo.
+6. Admin A no puede subir, reemplazar ni borrar objetos en la carpeta del negocio B. Empleado A no puede administrar imágenes del negocio A.
+7. Verificar que el bucket business-assets siga siendo público para visualizar imágenes del catálogo, pero que las operaciones de escritura estén limitadas al administrador del negocio propietario.
+8. Introducir horarios inválidos junto con un archivo de logo: no debe subirse ningún archivo ni quedar un objeto huérfano.
+9. Forzar que el UPDATE de la ficha comercial no encuentre una fila o sea rechazado por RLS: la interfaz no debe afirmar que guardó correctamente.
+10. Forzar un fallo al actualizar un método de pago existente o desactivar uno anterior: mostrar que los datos generales pudieron guardarse, pero que los métodos de pago quedaron pendientes de revisión.
