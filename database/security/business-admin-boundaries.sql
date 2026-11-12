@@ -521,3 +521,38 @@ GRANT UPDATE (name, category, tagline, description, city, contact_phone,
   whatsapp_support, logo_url, opening_hours, delivery_fee, minimum_order_amount)
 ON TABLE public.businesses TO authenticated;
 
+
+
+-- Segunda pasada de aislamiento: estas políticas conservaban un bypass
+-- del propietario técnico que no había sido sustituido en la primera versión.
+-- La gestión de cuentas y negocios se realiza por la Edge Function técnica;
+-- el Data API no debe dar acceso global a datos personales u operativos.
+
+DROP POLICY IF EXISTS business_expenses_select ON public.business_expenses;
+CREATE POLICY business_expenses_select
+ON public.business_expenses
+FOR SELECT
+TO authenticated
+USING (
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+);
+
+DROP POLICY IF EXISTS order_item_costs_admin_select ON public.order_item_costs;
+CREATE POLICY order_item_costs_admin_select
+ON public.order_item_costs
+FOR SELECT
+TO authenticated
+USING (
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+);
+
+-- El técnico consulta perfiles puntuales mediante la Edge Function con
+-- service_role; por Data API cada usuario solo puede leer su propio perfil.
+DROP POLICY IF EXISTS profiles_select_self_or_owner ON public.profiles;
+CREATE POLICY profiles_select_self_or_owner
+ON public.profiles
+FOR SELECT
+TO authenticated
+USING (id = (SELECT auth.uid()));
