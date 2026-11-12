@@ -108,6 +108,34 @@
     await Promise.all([loadBusinessOrders(), loadProducts(), loadAccessEvents(businessId, '#accessContainer'), loadAuditEvents(businessId, '#auditContainer')]);
   }
 
+  async function uploadBusinessImage(file, folder) {
+    if (!file) return null;
+    const allowedTypes = new Set(['image/png', 'image/jpeg', 'image/webp']);
+    if (!allowedTypes.has(file.type)) throw new Error('El archivo debe ser PNG, JPG o WEBP.');
+    if (file.size > 5 * 1024 * 1024) throw new Error('La imagen no puede superar los 5 MB.');
+    const extension = file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1];
+    const path = `${businessId}/${folder}/${crypto.randomUUID()}.${extension}`;
+    const { data, error } = await db.storage.from('business-assets').upload(path, file, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: file.type
+    });
+    if (error) {
+      if (/bucket.*not found|not found.*bucket/i.test(error.message || '')) {
+        throw new Error('Falta crear el bucket público "business-assets" en Storage de Supabase. La imagen no se ha guardado.');
+      }
+      throw new Error('No se pudo subir la imagen: ' + error.message);
+    }
+    const { data: publicData } = db.storage.from('business-assets').getPublicUrl(data.path);
+    return { path: data.path, publicUrl: publicData.publicUrl };
+  }
+
+  async function removeUploadedBusinessImage(path) {
+    if (!path) return;
+    const { error } = await db.storage.from('business-assets').remove([path]);
+    if (error) console.warn('No se pudo retirar una imagen que quedó sin asociar:', error.message);
+  }
+
   async function saveProduct(event) {
     event.preventDefault();
     const form = event.currentTarget, message = document.querySelector('#productMessage');
@@ -119,39 +147,50 @@
       message.className = 'message error';
       return;
     }
-    const imageUrl = form.elements.image_url.value.trim();
-    if (imageUrl && !/^https?:\/\//i.test(imageUrl)) {
+    const imageFile = form.elements.image_file.files?.[0] || null;
+    const externalImageUrl = form.elements.image_url.value.trim();
+    if (externalImageUrl && !/^https?:\/\//i.test(externalImageUrl)) {
       message.textContent = 'La dirección de la imagen debe comenzar por https:// o http://.';
       message.className = 'message error';
       return;
     }
-    const payload = {
-      business_id: businessId,
-      name,
-      category: form.elements.category.value.trim() || null,
-      description: form.elements.description.value.trim() || null,
-      price,
-      inventory,
-      image_url: imageUrl || null,
-      is_active: form.elements.is_active.checked,
-      updated_at: new Date().toISOString()
-    };
     const id = form.elements.id.value;
-    message.textContent = 'Guardando producto…';
+    const button = form.querySelector('button[type="submit"]');
+    let uploadedImage = null;
+    button.disabled = true;
+    message.textContent = imageFile ? 'Subiendo imagen y guardando producto…' : 'Guardando producto…';
     message.className = 'message';
-    const result = id
-      ? await db.from('products').update(payload).eq('id', id).eq('business_id', businessId)
-      : await db.from('products').insert(payload);
-    if (result.error) {
-      message.textContent = 'No se pudo guardar el producto: ' + result.error.message;
+    try {
+      if (imageFile) uploadedImage = await uploadBusinessImage(imageFile, 'products');
+      const payload = {
+        business_id: businessId,
+        name,
+        category: form.elements.category.value.trim() || null,
+        description: form.elements.description.value.trim() || null,
+        price,
+        inventory,
+        image_url: uploadedImage?.publicUrl || externalImageUrl || null,
+        is_active: form.elements.is_active.checked,
+        updated_at: new Date().toISOString()
+      };
+      const result = id
+        ? await db.from('products').update(payload).eq('id', id).eq('business_id', businessId)
+        : await db.from('products').insert(payload);
+      if (result.error) {
+        await removeUploadedBusinessImage(uploadedImage?.path);
+        throw new Error(result.error.message);
+      }
+      form.reset();
+      form.elements.id.value = '';
+      message.textContent = id ? 'Producto actualizado.' : 'Producto creado.';
+      message.className = 'message success';
+      await loadProducts();
+    } catch (error) {
+      message.textContent = 'No se pudo guardar el producto: ' + (error.message || 'Error desconocido');
       message.className = 'message error';
-      return;
+    } finally {
+      button.disabled = false;
     }
-    form.reset();
-    form.elements.id.value = '';
-    message.textContent = id ? 'Producto actualizado.' : 'Producto creado.';
-    message.className = 'message success';
-    await loadProducts();
   }
 
   function editProduct(id) {
@@ -165,6 +204,7 @@
     form.elements.price.value = product.price ?? 0;
     form.elements.inventory.value = product.inventory ?? 0;
     form.elements.image_url.value = product.image_url || '';
+    if (form.elements.image_file) form.elements.image_file.value = '';
     form.elements.is_active.checked = Boolean(product.is_active);
     const message = document.querySelector('#productMessage');
     message.textContent = 'Editando: ' + product.name;
@@ -209,7 +249,7 @@
     if (error) return showError(target, error);
     cachedProducts = data || [];
     if (!cachedProducts.length) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene productos registrados. Puedes crear el primero en el formulario.</div>'; return; }
-    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Categoría</th><th>Precio</th><th>Existencias</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${cachedProducts.map(p => `<tr><td><strong>${esc(p.name)}</strong>${p.image_url && /^https?:\/\//i.test(p.image_url) ? `<br><a href="${esc(p.image_url)}" target="_blank" rel="noopener">Ver imagen</a>` : ''}<br><small>${esc(p.description || '')}</small></td><td>${esc(p.category || '—')}</td><td>${money(p.price)}</td><td>${number(p.inventory)}</td><td><span class="pill ${p.is_active ? 'green':'red'}">${p.is_active ? 'Activo':'Inactivo'}</span></td><td><button class="small-button" data-edit-product="${esc(p.id)}">Editar</button> <button class="small-button" data-toggle-product="${esc(p.id)}">${p.is_active ? 'Desactivar':'Activar'}</button></td></tr>`).join('')}</tbody></table></div>`;
+    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Categoría</th><th>Precio</th><th>Existencias</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${cachedProducts.map(p => `<tr><td><strong>${esc(p.name)}</strong>${p.image_url && /^https?:\/\//i.test(p.image_url) ? `<br><a href="${esc(p.image_url)}" target="_blank" rel="noopener"><img src="${esc(p.image_url)}" alt="Imagen de ${esc(p.name)}" loading="lazy" style="width:54px;height:54px;object-fit:cover;border-radius:10px;vertical-align:middle"> Ver imagen</a>` : ''}<br><small>${esc(p.description || '')}</small></td><td>${esc(p.category || '—')}</td><td>${money(p.price)}</td><td>${number(p.inventory)}</td><td><span class="pill ${p.is_active ? 'green':'red'}">${p.is_active ? 'Activo':'Inactivo'}</span></td><td><button class="small-button" data-edit-product="${esc(p.id)}">Editar</button> <button class="small-button" data-toggle-product="${esc(p.id)}">${p.is_active ? 'Desactivar':'Activar'}</button></td></tr>`).join('')}</tbody></table></div>`;
     target.querySelectorAll('[data-edit-product]').forEach(button => button.addEventListener('click', () => editProduct(button.dataset.editProduct)));
     target.querySelectorAll('[data-toggle-product]').forEach(button => button.addEventListener('click', () => toggleProductStatus(button.dataset.toggleProduct, button)));
   }
@@ -530,84 +570,97 @@
       message.className = 'message error';
       return;
     }
-    const logoUrl = value('logo_url');
-    if (logoUrl && !/^https?:\/\//i.test(logoUrl)) {
+    const logoFile = form.elements.logo_file.files?.[0] || null;
+    const externalLogoUrl = value('logo_url');
+    if (externalLogoUrl && !/^https?:\/\//i.test(externalLogoUrl)) {
       message.textContent = 'La dirección del logo debe comenzar por https:// o http://.';
       message.className = 'message error';
       return;
     }
-    const businessPayload = {
-      name,
-      category,
-      tagline: value('tagline') || null,
-      description: value('description') || null,
-      city,
-      contact_phone: value('contact_phone') || null,
-      whatsapp_support: value('whatsapp_support').replace(/[^0-9+]/g, '').slice(0, 50) || null,
-      logo_url: logoUrl || null,
-      delivery_fee: deliveryFee,
-      minimum_order_amount: minimumOrder,
-    };
-    message.textContent = 'Guardando datos del negocio…';
+    const button = form.querySelector('button[type="submit"]');
+    let uploadedLogo = null;
+    button.disabled = true;
+    message.textContent = logoFile ? 'Subiendo logo y guardando configuración…' : 'Guardando datos del negocio…';
     message.className = 'message';
-    const { error: businessError } = await db.from('businesses').update(businessPayload).eq('id', businessId);
-    if (businessError) {
-      message.textContent = 'No se pudieron guardar los datos del negocio: ' + businessError.message;
-      message.className = 'message error';
-      return;
-    }
     try {
-      const entries = value('payment_methods').split('\n').map(line => {
-        const parts = line.split('|');
-        return { displayName: (parts.shift() || '').trim(), publicInstructions: parts.join('|').trim() };
-      }).filter(item => item.displayName.length >= 2 && item.displayName.length <= 100);
-      const methodCodeFor = label => {
-        const normalized = label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-        if (normalized.includes('efectivo') || normalized.includes('contra entrega')) return 'cash';
-        if (normalized.includes('transfer') || normalized.includes('nequi') || normalized.includes('bancolombia') || normalized.includes('daviplata')) return 'transfer';
-        if (normalized.includes('tarjeta') || normalized.includes('card')) return 'card';
-        return 'other';
+      if (logoFile) uploadedLogo = await uploadBusinessImage(logoFile, 'logo');
+      const businessPayload = {
+        name,
+        category,
+        tagline: value('tagline') || null,
+        description: value('description') || null,
+        city,
+        contact_phone: value('contact_phone') || null,
+        whatsapp_support: value('whatsapp_support').replace(/[^0-9+]/g, '').slice(0, 50) || null,
+        logo_url: uploadedLogo?.publicUrl || externalLogoUrl || null,
+        delivery_fee: deliveryFee,
+        minimum_order_amount: minimumOrder,
       };
-      const methods = entries.map((item, sortOrder) => ({ ...item, methodCode: methodCodeFor(item.displayName), sortOrder }));
-      const { data: existing, error: readError } = await db.from('business_payment_methods')
-        .select('id,method_code,display_name,is_enabled,sort_order')
-        .eq('business_id', businessId);
-      if (readError) throw readError;
-      const byCode = new Map();
-      (existing || []).forEach(row => {
-        if (!byCode.has(row.method_code)) byCode.set(row.method_code, []);
-        byCode.get(row.method_code).push(row);
-      });
-      const retained = new Set();
-      for (const method of methods) {
-        const old = byCode.get(method.methodCode)?.shift();
-        if (old) {
-          const { error } = await db.from('business_payment_methods').update({
-            display_name: method.displayName, public_instructions: method.publicInstructions || null, is_enabled: true, sort_order: method.sortOrder, updated_at: new Date().toISOString()
-          }).eq('id', old.id).eq('business_id', businessId);
-          if (error) throw error;
-          retained.add(old.id);
-        } else {
-          const { error } = await db.from('business_payment_methods').insert({
-            business_id: businessId, method_code: method.methodCode, display_name: method.displayName,
-            public_instructions: method.publicInstructions || null, is_enabled: true, sort_order: method.sortOrder
-          });
-          if (error) throw error;
-        }
+      const { error: businessError } = await db.from('businesses').update(businessPayload).eq('id', businessId);
+      if (businessError) {
+        await removeUploadedBusinessImage(uploadedLogo?.path);
+        throw new Error('No se pudieron guardar los datos del negocio: ' + businessError.message);
       }
-      for (const old of (existing || [])) {
-        if (!retained.has(old.id) && old.is_enabled) {
-          const { error } = await db.from('business_payment_methods').update({ is_enabled: false, updated_at: new Date().toISOString() }).eq('id', old.id).eq('business_id', businessId);
-          if (error) throw error;
+      try {
+        const entries = value('payment_methods').split('\n').map(line => {
+          const parts = line.split('|');
+          return { displayName: (parts.shift() || '').trim(), publicInstructions: parts.join('|').trim() };
+        }).filter(item => item.displayName.length >= 2 && item.displayName.length <= 100);
+        const methodCodeFor = label => {
+          const normalized = label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+          if (normalized.includes('efectivo') || normalized.includes('contra entrega')) return 'cash';
+          if (normalized.includes('transfer') || normalized.includes('nequi') || normalized.includes('bancolombia') || normalized.includes('daviplata')) return 'transfer';
+          if (normalized.includes('tarjeta') || normalized.includes('card')) return 'card';
+          return 'other';
+        };
+        const methods = entries.map((item, sortOrder) => ({ ...item, methodCode: methodCodeFor(item.displayName), sortOrder }));
+        const { data: existing, error: readError } = await db.from('business_payment_methods')
+          .select('id,method_code,display_name,is_enabled,sort_order')
+          .eq('business_id', businessId);
+        if (readError) throw readError;
+        const byCode = new Map();
+        (existing || []).forEach(row => {
+          if (!byCode.has(row.method_code)) byCode.set(row.method_code, []);
+          byCode.get(row.method_code).push(row);
+        });
+        const retained = new Set();
+        for (const method of methods) {
+          const old = byCode.get(method.methodCode)?.shift();
+          if (old) {
+            const { error } = await db.from('business_payment_methods').update({
+              display_name: method.displayName, public_instructions: method.publicInstructions || null, is_enabled: true, sort_order: method.sortOrder, updated_at: new Date().toISOString()
+            }).eq('id', old.id).eq('business_id', businessId);
+            if (error) throw error;
+            retained.add(old.id);
+          } else {
+            const { error } = await db.from('business_payment_methods').insert({
+              business_id: businessId, method_code: method.methodCode, display_name: method.displayName,
+              public_instructions: method.publicInstructions || null, is_enabled: true, sort_order: method.sortOrder
+            });
+            if (error) throw error;
+          }
         }
+        for (const old of (existing || [])) {
+          if (!retained.has(old.id) && old.is_enabled) {
+            const { error } = await db.from('business_payment_methods').update({ is_enabled: false, updated_at: new Date().toISOString() }).eq('id', old.id).eq('business_id', businessId);
+            if (error) throw error;
+          }
+        }
+        message.textContent = 'Datos del negocio, métodos de pago y logo guardados correctamente.';
+        message.className = 'message success';
+        businessName = name;
+        const heading = document.querySelector('#businessName'); if (heading) heading.textContent = name;
+        if (form.elements.logo_url) form.elements.logo_url.value = businessPayload.logo_url || '';
+        if (form.elements.logo_file) form.elements.logo_file.value = '';
+      } catch (error) {
+        message.textContent = 'Los datos generales se guardaron, pero hubo un problema al actualizar los métodos de pago: ' + (error.message || 'Error desconocido');
+        message.className = 'message error';
       }
-      message.textContent = 'Datos del negocio y métodos de pago guardados correctamente.';
-      message.className = 'message success';
-      businessName = name;
-      const heading = document.querySelector('#businessName'); if (heading) heading.textContent = name;
     } catch (error) {
-      message.textContent = 'Los datos generales se guardaron, pero hubo un problema al actualizar los métodos de pago: ' + (error.message || 'Error desconocido');
+      message.textContent = error.message || 'No se pudo guardar la configuración.';
       message.className = 'message error';
+    } finally {
+      button.disabled = false;
     }
   }
 
