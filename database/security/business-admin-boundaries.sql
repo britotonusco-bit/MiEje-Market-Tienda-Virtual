@@ -387,12 +387,13 @@ USING (
 );
 
 DROP POLICY IF EXISTS cancellation_members_select ON public.order_cancellation_requests;
-CREATE POLICY cancellation_members_select
+DROP POLICY IF EXISTS cancellation_admin_select ON public.order_cancellation_requests;
+CREATE POLICY cancellation_admin_select
 ON public.order_cancellation_requests
 FOR SELECT
 TO authenticated
 USING (
-  private.has_business_role(business_id, ARRAY['business_admin','employee']::text[])
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
   AND private.business_is_active(business_id)
 );
 
