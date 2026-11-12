@@ -194,7 +194,7 @@
       const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
       const { data: rows, error } = await client.from("businesses")
         .select("id,name,slug,business_type,category,description,tagline,city,contact_phone,whatsapp_support,opening_hours,logo_url,status,public_suspension_message,delivery_fee,minimum_order_amount")
-        .order("created_at", { ascending: false }).limit(200);
+        .order("name", { ascending: true }).limit(200);
       if (error) throw error;
       if (!rows?.length) return;
       const activeBusinessIds = rows.filter(row => row.status === "active").map(row => row.id);
