@@ -225,3 +225,20 @@ Se añadieron reemplazos al borrador `database/security/business-admin-boundarie
 - Perfiles: cada usuario solo puede leer su propio perfil mediante Data API. La Edge Function técnica consulta perfiles puntuales con credenciales de servidor después de autenticar al propietario y validar MFA AAL2.
 
 Antes de aplicar esta migración, probar en staging que las vistas de pedidos de administradores/empleados no dependan de leer directamente perfiles de clientes; el helper de nombres de clientes del panel usa actualmente una consulta a `profiles`. Si esa consulta necesita habilitarse para administradores, debe diseñarse una política limitada a clientes con pedidos del mismo negocio y exponer únicamente los campos imprescindibles, no restaurar acceso global.
+
+
+## Resultado de la revisión de consultas de perfiles y permisos de empleados
+
+La revisión del código de `panel-live.js` encontró que los pedidos de administradores y empleados ya muestran los datos de contacto guardados en cada pedido (`customer_name`, `customer_phone`, dirección y notas). Esas vistas no necesitan consultar `profiles` para identificar al comprador.
+
+La función auxiliar `getUserNames` sí consulta `profiles` para mostrar nombres en los registros de acceso, auditoría y solicitudes de bloqueo. Con la política propuesta de lectura del perfil propio, esos nombres pueden quedar sustituidos por identificadores abreviados. Esto no bloquea la consulta ni las acciones de auditoría, pero debe comprobarse visualmente en staging. No se debe ampliar la política de `profiles` para recuperar nombres de forma global.
+
+Permisos de empleados revisados en el estado activo y en el borrador:
+
+- Los empleados no tienen privilegios de tabla para insertar, actualizar o eliminar pedidos; la actualización autorizada se limita a las columnas `status` y `delivery_tracking`.
+- La política propuesta de pedidos limita SELECT y UPDATE al personal del negocio activo, sin bypass del propietario técnico.
+- El trigger propuesto permite únicamente el avance secuencial de estados y exige una solicitud aprobada para cancelar.
+- Las políticas de productos, métodos de pago, costos, gastos, movimientos financieros y postulaciones reservan esas operaciones al administrador del negocio.
+- El empleado puede registrar una solicitud de cancelación mediante la función controlada; no puede aprobarla ni registrar reembolsos.
+
+Pendiente de staging: probar con cuentas separadas de administrador A, empleado A, administrador B y técnico. Confirmar que el empleado A pueda consultar y avanzar pedidos de A, pero no modificar productos, inventario, precios, métodos de pago, gastos ni datos financieros; confirmar también que no pueda consultar pedidos de B. La migración sigue sin ejecutarse y estas reglas todavía no están activas en producción.
