@@ -431,7 +431,7 @@
             <h3>Información de la tienda</h3>
             <div class="info-line"><span>📍</span><span>${escapeHtml(business.location)}</span></div>
             <div class="info-line"><span>🕒</span><span>${escapeHtml(business.hours)}</span></div>
-            <div class="info-line"><span>★</span><span>Calificación de demostración: ${escapeHtml(business.rating)}/5</span></div>
+            <div class="info-line"><span>✓</span><span>Negocio registrado en MiEje Market</span></div>
             ${payments.length ? `<div class="info-line"><span>💳</span><span><strong>Pagos:</strong> ${payments.map(escapeHtml).join(", ")}</span></div>` : ""}
             ${delivery.length ? `<div class="info-line"><span>🛵</span><span><strong>Entrega:</strong> ${delivery.map(escapeHtml).join(", ")}</span></div>` : ""}
             ${publicWhatsapp ? `<div class="info-line"><span>☎</span><span><a href="https://wa.me/${publicWhatsapp}" target="_blank" rel="noopener">Contactar por WhatsApp</a></span></div>` : ""}
@@ -441,7 +441,7 @@
 
           <section class="assistant-panel">
             <h3>Asistente de ${business.name}</h3>
-            <p>Pregunta por productos, precios, horario o ubicación. Las respuestas usan los datos de demostración de esta tienda.</p>
+            <p>Pregunta por productos, precios, horario o ubicación. Las respuestas se basan en la información visible del negocio y su catálogo.</p>
             <div id="chatMessages" class="chat-messages">
               <div class="chat-bubble">¡Hola! Soy el asistente de ${escapeHtml(business.name)}. ¿Qué deseas saber?</div>
             </div>
