@@ -225,14 +225,13 @@ Deno.serve(async (req: Request) => {
           redirectTo: "https://britotonusco-bit.github.io/MiEje-Market-Tienda-Virtual/aceptar-invitacion.html",
         });
         if (inviteError) {
-          targetUser = await findUserByEmail(admin, email);
-          if (!targetUser) {
-            return reply(400, { error: "No fue posible invitar ese correo. Comprueba si ya está registrado y revisa la configuración de correo de Supabase." });
-          }
-        } else {
-          targetUser = inviteData.user;
-          invitationSent = true;
+          console.error("inviteUserByEmail failed:", inviteError);
+          return reply(502, {
+            error: "Supabase no confirmó el envío de la invitación. No se asignó el acceso. Revisa la configuración de correo y el estado del usuario antes de volver a intentarlo."
+          });
         }
+        targetUser = inviteData.user;
+        invitationSent = true;
       }
 
       if (!targetUser?.id) return reply(500, { error: "Supabase no devolvió el usuario de destino." });
@@ -243,8 +242,9 @@ Deno.serve(async (req: Request) => {
       }, { onConflict: "id", ignoreDuplicates: true });
       if (profileUpsertError) throw profileUpsertError;
 
-      const { data: existingMembership } = await admin.from("business_memberships")
+      const { data: existingMembership, error: existingMembershipError } = await admin.from("business_memberships")
         .select("id").eq("business_id", businessId).eq("user_id", targetUser.id).maybeSingle();
+      if (existingMembershipError) throw existingMembershipError;
       if (existingMembership) return reply(409, { error: "Ese usuario ya tiene acceso asignado a este negocio." });
 
       const { data: membership, error: membershipError } = await admin.from("business_memberships").insert({
@@ -254,7 +254,12 @@ Deno.serve(async (req: Request) => {
         status: "active",
         created_by: user.id,
       }).select("id, business_id, user_id, role, status").single();
-      if (membershipError) throw membershipError;
+      if (membershipError) {
+        if (membershipError.code === "23505") {
+          return reply(409, { error: "Ese usuario ya recibió acceso a este negocio. Actualiza la lista de cuentas." });
+        }
+        throw membershipError;
+      }
 
       const { error: auditError } = await admin.from("audit_logs").insert({
         business_id: businessId,
