@@ -7,6 +7,7 @@
   let businessName = '';
   let isBusinessOwner = false;
   let cachedBusinesses = [];
+  let cachedProducts = [];
   const statusLabels = {
     pending: 'Recibido', confirmed: 'Confirmado', preparing: 'En preparación',
     ready: 'Listo', out_for_delivery: 'En camino', delivered: 'Entregado', cancelled: 'Cancelado'
@@ -42,6 +43,7 @@
       document.querySelector('#memberBusinessSelect')?.addEventListener('change', event => loadTechnicalMembers(event.currentTarget.value));
       document.querySelector('#platformAiForm')?.addEventListener('submit', savePlatformAi);
       document.querySelector('#storeSettingsForm')?.addEventListener('submit', saveStoreSettings);
+      document.querySelector('#productForm')?.addEventListener('submit', saveProduct);
       document.querySelector('#businessContentForm')?.addEventListener('submit', saveBusinessContent);
       document.querySelector('#businessAiForm')?.addEventListener('submit', saveBusinessAi);
       document.querySelector('#blockRequestForm')?.addEventListener('submit', submitBlockRequest);
@@ -106,6 +108,79 @@
     await Promise.all([loadBusinessOrders(), loadProducts(), loadAccessEvents(businessId, '#accessContainer'), loadAuditEvents(businessId, '#auditContainer')]);
   }
 
+  async function saveProduct(event) {
+    event.preventDefault();
+    const form = event.currentTarget, message = document.querySelector('#productMessage');
+    const name = form.elements.name.value.trim();
+    const price = Number(form.elements.price.value);
+    const inventory = Number(form.elements.inventory.value);
+    if (!name || !Number.isFinite(price) || price < 0 || !Number.isInteger(inventory) || inventory < 0) {
+      message.textContent = 'Revisa el nombre, el precio y las existencias. El precio debe ser igual o mayor que cero y las existencias un número entero.';
+      message.className = 'message error';
+      return;
+    }
+    const payload = {
+      business_id: businessId,
+      name,
+      category: form.elements.category.value.trim() || null,
+      description: form.elements.description.value.trim() || null,
+      price,
+      inventory,
+      image_url: form.elements.image_url.value.trim() || null,
+      is_active: form.elements.is_active.checked,
+      updated_at: new Date().toISOString()
+    };
+    const id = form.elements.id.value;
+    message.textContent = 'Guardando producto…';
+    message.className = 'message';
+    const result = id
+      ? await db.from('products').update(payload).eq('id', id).eq('business_id', businessId)
+      : await db.from('products').insert(payload);
+    if (result.error) {
+      message.textContent = 'No se pudo guardar el producto: ' + result.error.message;
+      message.className = 'message error';
+      return;
+    }
+    form.reset();
+    form.elements.id.value = '';
+    message.textContent = id ? 'Producto actualizado.' : 'Producto creado.';
+    message.className = 'message success';
+    await loadProducts();
+  }
+
+  function editProduct(id) {
+    const product = cachedProducts.find(item => item.id === id);
+    const form = document.querySelector('#productForm');
+    if (!product || !form) return;
+    form.elements.id.value = product.id;
+    form.elements.name.value = product.name || '';
+    form.elements.category.value = product.category || '';
+    form.elements.description.value = product.description || '';
+    form.elements.price.value = product.price ?? 0;
+    form.elements.inventory.value = product.inventory ?? 0;
+    form.elements.image_url.value = product.image_url || '';
+    form.elements.is_active.checked = Boolean(product.is_active);
+    const message = document.querySelector('#productMessage');
+    message.textContent = 'Editando: ' + product.name;
+    message.className = 'message';
+    form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  async function toggleProductStatus(id, button) {
+    const product = cachedProducts.find(item => item.id === id);
+    if (!product) return;
+    const action = product.is_active ? 'desactivar' : 'activar';
+    if (!window.confirm(`¿Deseas ${action} el producto "${product.name}"? No se eliminará del historial de pedidos.`)) return;
+    button.disabled = true;
+    const { error } = await db.from('products').update({ is_active: !product.is_active, updated_at: new Date().toISOString() }).eq('id', id).eq('business_id', businessId);
+    if (error) {
+      alert('No se pudo cambiar el estado del producto: ' + error.message);
+      button.disabled = false;
+      return;
+    }
+    await loadProducts();
+  }
+
   async function loadBusinessOrders() {
     const target = document.querySelector('#ordersContainer');
     target.innerHTML = '<div class="empty">Cargando pedidos…</div>';
@@ -124,10 +199,13 @@
 
   async function loadProducts() {
     const target = document.querySelector('#productsContainer');
-    const { data, error } = await db.from('products').select('id,name,price,inventory,is_active').eq('business_id', businessId).order('name').limit(250);
+    const { data, error } = await db.from('products').select('id,name,category,description,price,inventory,image_url,is_active').eq('business_id', businessId).order('name').limit(250);
     if (error) return showError(target, error);
-    if (!data?.length) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene productos registrados.</div>'; return; }
-    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Precio</th><th>Existencias</th><th>Estado</th></tr></thead><tbody>${data.map(p => `<tr><td>${esc(p.name)}</td><td>${money(p.price)}</td><td>${number(p.inventory)}</td><td><span class="pill ${p.is_active ? 'green':'red'}">${p.is_active ? 'Activo':'Inactivo'}</span></td></tr>`).join('')}</tbody></table></div>`;
+    cachedProducts = data || [];
+    if (!cachedProducts.length) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene productos registrados. Puedes crear el primero en el formulario.</div>'; return; }
+    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Categoría</th><th>Precio</th><th>Existencias</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${cachedProducts.map(p => `<tr><td><strong>${esc(p.name)}</strong>${p.image_url ? `<br><a href="${esc(p.image_url)}" target="_blank" rel="noopener">Ver imagen</a>` : ''}<br><small>${esc(p.description || '')}</small></td><td>${esc(p.category || '—')}</td><td>${money(p.price)}</td><td>${number(p.inventory)}</td><td><span class="pill ${p.is_active ? 'green':'red'}">${p.is_active ? 'Activo':'Inactivo'}</span></td><td><button class="small-button" data-edit-product="${esc(p.id)}">Editar</button> <button class="small-button" data-toggle-product="${esc(p.id)}">${p.is_active ? 'Desactivar':'Activar'}</button></td></tr>`).join('')}</tbody></table></div>`;
+    target.querySelectorAll('[data-edit-product]').forEach(button => button.addEventListener('click', () => editProduct(button.dataset.editProduct)));
+    target.querySelectorAll('[data-toggle-product]').forEach(button => button.addEventListener('click', () => toggleProductStatus(button.dataset.toggleProduct, button)));
   }
 
   async function loadTechnical() {
