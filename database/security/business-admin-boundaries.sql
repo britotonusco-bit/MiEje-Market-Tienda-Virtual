@@ -447,3 +447,69 @@ BEFORE UPDATE OF business_id, product_id ON public.product_costs
 FOR EACH ROW EXECUTE FUNCTION private.prevent_business_scope_change();
 
 REVOKE ALL ON FUNCTION private.prevent_business_scope_change() FROM PUBLIC, anon, authenticated;
+
+
+-- Eliminar bypass técnico y limitar los campos que el administrador puede
+-- modificar directamente en productos, métodos de pago y costos.
+DROP POLICY IF EXISTS product_costs_admin_insert ON public.product_costs;
+CREATE POLICY product_costs_admin_insert
+ON public.product_costs
+FOR INSERT
+TO authenticated
+WITH CHECK (
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+  AND EXISTS (
+    SELECT 1 FROM public.products p
+    WHERE p.id = product_id
+      AND p.business_id = product_costs.business_id
+  )
+);
+
+DROP POLICY IF EXISTS product_costs_admin_update ON public.product_costs;
+CREATE POLICY product_costs_admin_update
+ON public.product_costs
+FOR UPDATE
+TO authenticated
+USING (
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+)
+WITH CHECK (
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+  AND EXISTS (
+    SELECT 1 FROM public.products p
+    WHERE p.id = product_id
+      AND p.business_id = product_costs.business_id
+  )
+);
+
+-- Evitar que un UPDATE genérico cambie identificadores o la tienda propietaria.
+-- La interfaz actual solo necesita modificar estos campos del producto.
+REVOKE UPDATE ON TABLE public.products FROM authenticated;
+GRANT UPDATE (name, category, description, price, inventory, image_url, is_active, sku, updated_at)
+ON TABLE public.products TO authenticated;
+
+-- Los métodos de pago tampoco deben poder trasladarse ni alterar su identidad.
+REVOKE UPDATE ON TABLE public.business_payment_methods FROM authenticated;
+GRANT UPDATE (method_code, display_name, provider, account_holder, account_type,
+  account_reference, public_instructions, is_enabled, sort_order, updated_at)
+ON TABLE public.business_payment_methods TO authenticated;
+
+-- Los costos conservan su producto y negocio de origen después de crearse.
+REVOKE UPDATE ON TABLE public.product_costs FROM authenticated;
+GRANT UPDATE (cost_price, updated_at)
+ON TABLE public.product_costs TO authenticated;
+
+-- La lectura de postulaciones requiere que el negocio siga activo.
+DROP POLICY IF EXISTS job_applications_business_admin_read ON public.job_applications;
+CREATE POLICY job_applications_business_admin_read
+ON public.job_applications
+FOR SELECT
+TO authenticated
+USING (
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+);
+
