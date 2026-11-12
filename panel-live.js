@@ -175,7 +175,6 @@
     try {
       if (imageFile) uploadedImage = await uploadBusinessImage(imageFile, 'products');
       const payload = {
-        business_id: businessId,
         name,
         category: form.elements.category.value.trim() || null,
         description: form.elements.description.value.trim() || null,
@@ -187,7 +186,7 @@
       };
       const result = id
         ? await db.from('products').update(payload).eq('id', id).eq('business_id', businessId)
-        : await db.from('products').insert(payload);
+        : await db.from('products').insert({ ...payload, business_id: businessId });
       if (result.error) {
         await removeUploadedBusinessImage(uploadedImage?.path);
         throw new Error(result.error.message);
