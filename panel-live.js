@@ -363,11 +363,14 @@
     message.className = 'message';
     message.textContent = 'Creando negocio y guardando auditoría…';
     try {
-      const result = await callTechnicalFunction(payload);
+      const result = await callTechnicalFunction({
+        action: 'create_business',
+        name: String(payload.name || '').trim(),
+        category: String(payload.category || '').trim()
+      });
       message.className = 'message success';
       message.textContent = `Negocio creado: ${result.business.name}. Identificador público: ${result.business.slug}. Ahora puedes invitar a su administrador y empleados.`;
       form.reset();
-      form.elements.city.value = 'Pereira, Risaralda';
       await loadTechnical();
       const memberBusinessSelect = document.querySelector('#memberBusinessSelect');
     if (memberBusinessSelect) memberBusinessSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
@@ -390,7 +393,6 @@
     const message = document.querySelector('#inviteMemberMessage');
     const payload = Object.fromEntries(new FormData(form).entries());
     payload.action = 'invite_member';
-    payload.is_business_owner = form.elements.is_business_owner?.checked === true;
     payload.redirect_to = new URL('aceptar-invitacion.html', window.location.href).href;
     button.disabled = true;
     message.className = 'message';
