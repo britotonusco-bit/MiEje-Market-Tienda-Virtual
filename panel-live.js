@@ -49,6 +49,7 @@
       document.querySelector('#blockRequestForm')?.addEventListener('submit', submitBlockRequest);
       document.querySelector('#refreshOrders')?.addEventListener('click', () => panel === 'business_admin' ? loadBusinessOrders() : loadEmployeeOrders());
       document.querySelector('#refreshCancellations')?.addEventListener('click', loadCancellationRequests);
+      document.querySelector('#refreshRefunds')?.addEventListener('click', loadRefundableOrders);
 
       if (panel === 'technical') {
         if (!access.is_platform_owner || profile.platform_role !== 'platform_owner') throw new Error('Esta sección es exclusiva del propietario técnico autorizado.');
@@ -116,7 +117,7 @@
       ['Pedidos abiertos', number(orders.filter(o => !['delivered','cancelled'].includes(o.status)).length), 'Pendientes de completar'],
       ['Productos con poco stock', number(products.filter(p => p.is_active && Number(p.inventory || 0) <= 5).length), 'Cinco unidades o menos']
     ]);
-    await Promise.all([loadBusinessOrders(), loadCancellationRequests(), loadProducts(), loadAccessEvents(businessId, '#accessContainer'), loadAuditEvents(businessId, '#auditContainer')]);
+    await Promise.all([loadBusinessOrders(), loadCancellationRequests(), loadRefundableOrders(), loadProducts(), loadAccessEvents(businessId, '#accessContainer'), loadAuditEvents(businessId, '#auditContainer')]);
   }
 
   async function uploadBusinessImage(file, folder) {
@@ -890,6 +891,63 @@
     target.innerHTML = tableHtml(headers, rows);
     target.querySelectorAll('[data-next][data-order]').forEach(button => button.addEventListener('click', () => changeOrderStatus(button.dataset.order, button.dataset.next, button)));
     target.querySelectorAll('[data-cancel-request]').forEach(button => button.addEventListener('click', () => requestCancellation(button.dataset.cancelRequest, button)));
+  }
+
+  async function loadRefundableOrders() {
+    const target = document.querySelector('#refundsContainer');
+    if (!target || panel !== 'business_admin') return;
+    target.innerHTML = '<div class="empty">Consultando pedidos pagados y cancelados…</div>';
+    const { data, error } = await db.from('orders')
+      .select('id,order_number,total,created_at')
+      .eq('business_id', businessId)
+      .eq('status', 'cancelled')
+      .eq('payment_status', 'paid')
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error) return showError(target, error);
+    const orders = data || [];
+    if (!orders.length) {
+      target.innerHTML = '<div class="empty">No hay reembolsos pendientes de registrar.</div>';
+      return;
+    }
+    const rows = orders.map(o => [
+      esc(`#${o.order_number}`),
+      money(o.total),
+      dateTime(o.created_at),
+      `<button class="small-button" data-register-refund="${esc(o.id)}">Registrar reembolso realizado</button>`
+    ]);
+    target.innerHTML = tableHtml(['Pedido','Importe a devolver','Fecha del pedido','Acción'], rows);
+    target.querySelectorAll('[data-register-refund]').forEach(button => {
+      button.addEventListener('click', () => registerOrderRefund(button.dataset.registerRefund, button));
+    });
+  }
+
+  async function registerOrderRefund(orderId, button) {
+    const method = window.prompt('Medio utilizado para devolver el dinero (por ejemplo, transferencia o efectivo):');
+    if (method === null) return;
+    if (!method.trim()) { alert('Debes indicar el medio de reembolso.'); return; }
+    const provider = window.prompt('Entidad o proveedor (opcional, por ejemplo, banco o billetera):');
+    if (provider === null) return;
+    const reference = window.prompt('Referencia o número del comprobante del reembolso ya realizado:');
+    if (reference === null) return;
+    if (!reference.trim()) { alert('Debes registrar una referencia o comprobante.'); return; }
+    const notes = window.prompt('Observaciones adicionales (opcional):');
+    if (notes === null) return;
+    button.disabled = true;
+    const { data, error } = await db.rpc('complete_order_refund', {
+      p_order_id: orderId,
+      p_refund_method: method.trim(),
+      p_provider: provider.trim() || null,
+      p_reference: reference.trim(),
+      p_notes: notes.trim() || null
+    });
+    if (error) {
+      alert(`No se pudo registrar el reembolso. Comprueba que el procedimiento de reembolsos esté desplegado y que el dinero ya se haya devuelto. ${error.message}`);
+      button.disabled = false;
+      return;
+    }
+    alert('Reembolso registrado. El pedido ahora figura como reembolsado.');
+    await loadBusinessAdmin();
   }
 
   async function requestCancellation(orderId, button) {
