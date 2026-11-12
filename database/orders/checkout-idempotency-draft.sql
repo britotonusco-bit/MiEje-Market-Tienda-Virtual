@@ -12,9 +12,71 @@ CREATE TABLE IF NOT EXISTS private.checkout_idempotency (
 ALTER TABLE private.checkout_idempotency ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE private.checkout_idempotency FROM PUBLIC, anon, authenticated, service_role;
 
+
+-- Consulta previa para que un reintento ya completado recupere el pedido
+-- original sin consumir nuevamente el límite de solicitudes por IP.
+CREATE OR REPLACE FUNCTION public.get_public_order_idempotent(
+  p_idempotency_key uuid,
+  p_business_id uuid,
+  p_customer_name text,
+  p_customer_phone text,
+  p_customer_email text,
+  p_delivery_address text,
+  p_delivery_notes text,
+  p_payment_method text,
+  p_items jsonb
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_request_hash text;
+  v_existing_hash text;
+  v_existing_response jsonb;
+BEGIN
+  IF p_idempotency_key IS NULL THEN
+    RAISE EXCEPTION 'Se requiere una clave de pedido válida.';
+  END IF;
+
+  v_request_hash := md5(jsonb_build_object(
+    'business_id', p_business_id,
+    'customer_name', p_customer_name,
+    'customer_phone', p_customer_phone,
+    'customer_email', p_customer_email,
+    'delivery_address', p_delivery_address,
+    'delivery_notes', p_delivery_notes,
+    'payment_method', p_payment_method,
+    'items', p_items
+  )::text);
+
+  SELECT request_hash, response
+  INTO v_existing_hash, v_existing_response
+  FROM private.checkout_idempotency
+  WHERE idempotency_key = p_idempotency_key;
+
+  IF NOT FOUND THEN
+    RETURN NULL;
+  END IF;
+
+  IF v_existing_hash <> v_request_hash THEN
+    RAISE EXCEPTION 'La clave de este intento ya fue usada con datos diferentes. Actualiza el checkout e inténtalo nuevamente.';
+  END IF;
+
+  RETURN v_existing_response;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.get_public_order_idempotent(
+  uuid, uuid, text, text, text, text, text, text, jsonb
+) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_public_order_idempotent(
+  uuid, uuid, text, text, text, text, text, text, jsonb
+) TO service_role;
+
 CREATE OR REPLACE FUNCTION public.create_public_order_idempotent(
   p_idempotency_key uuid,
-  p_ip text,
   p_business_id uuid,
   p_customer_name text,
   p_customer_phone text,
@@ -34,7 +96,6 @@ DECLARE
   v_existing_hash text;
   v_existing_response jsonb;
   v_response jsonb;
-  v_allowed boolean;
 BEGIN
   IF p_idempotency_key IS NULL THEN
     RAISE EXCEPTION 'Se requiere una clave de pedido válida.';
@@ -66,12 +127,6 @@ BEGIN
     RETURN v_existing_response;
   END IF;
 
-  -- Solo los intentos nuevos consumen el límite por IP.
-  v_allowed := public.consume_checkout_rate_limit(p_ip);
-  IF v_allowed IS DISTINCT FROM true THEN
-    RAISE EXCEPTION 'Se recibieron demasiadas solicitudes. Espera unos minutos e inténtalo de nuevo.';
-  END IF;
-
   v_response := public.create_public_order(
     p_business_id,
     p_customer_name,
@@ -95,10 +150,10 @@ END;
 $function$;
 
 REVOKE ALL ON FUNCTION public.create_public_order_idempotent(
-  uuid, text, uuid, text, text, text, text, text, text, jsonb
+  uuid, uuid, text, text, text, text, text, text, jsonb
 ) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.create_public_order_idempotent(
-  uuid, text, uuid, text, text, text, text, text, text, jsonb
+  uuid, uuid, text, text, text, text, text, text, jsonb
 ) TO service_role;
 
 -- Pruebas posteriores en staging:
