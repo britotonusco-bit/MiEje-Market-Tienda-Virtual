@@ -347,3 +347,15 @@ Se revisó el código de `cuenta.html`, `cuenta.js`, `recuperar-clave.html`, `re
 7. Verificar en navegador el cambio de sesión A→B y el cierre de sesión, para confirmar que no se muestran resultados atrasados de otra cuenta.
 
 No se ejecutó ninguna migración, no se cambió la configuración Auth, no se enviaron correos de prueba y no se crearon usuarios de prueba.
+
+## Revisión del Security Advisor de Supabase
+
+La revisión de seguridad del proyecto independiente del 12 de noviembre de 2026 muestra:
+- Tres avisos INFO `rls_enabled_no_policy`: `private.checkout_rate_limits`, `public.job_application_rate_limits` y `public.job_application_upload_sessions`.
+- La consulta de privilegios confirmó que las dos tablas públicas no conceden privilegios a `anon` ni `authenticated`; los permisos visibles están reservados a `service_role`. La tabla privada de límites tampoco mostró privilegios para esos roles.
+- Por ahora, estos tres avisos no justifican añadir políticas RLS para usuarios públicos; hacerlo podría exponer tablas internas de control. Se mantienen cerradas al cliente.
+- Sigue activo el aviso WARN `auth_leaked_password_protection`: la protección contra contraseñas comprometidas está deshabilitada. Debe revisarse y habilitarse en Auth > Password Security antes de producción, después de comprobar la política de contraseñas y el flujo de recuperación.
+
+Referencia del aviso de Supabase: https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection
+
+La consulta fue de solo lectura. No se modificaron permisos ni configuración de Auth.
