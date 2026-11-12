@@ -256,3 +256,10 @@ Pruebas pendientes en staging:
 5. Tras rechazar, el pedido y el inventario deben permanecer sin cambios.
 
 Se consultó el esquema live y se confirmó que los estados permitidos por la restricción CHECK de `orders.status` son `pending`, `confirmed`, `preparing`, `ready`, `out_for_delivery`, `delivered` y `cancelled`. Coinciden con los estados utilizados por el panel y el trigger propuesto. Esta consulta fue de solo lectura; no se modificó la base de datos.
+
+
+## Ajuste de visibilidad de solicitudes de cancelación
+
+La inspección de las políticas RLS activas de `order_cancellation_requests` encontró que empleados y administradores podían consultar la bandeja de solicitudes, aunque la matriz funcional reserva esa bandeja al administrador. Se añadió al borrador `business-admin-boundaries.sql` el reemplazo de esa política: solo el administrador del negocio activo puede leer las solicitudes. Los empleados conservan la posibilidad de registrar solicitudes mediante `request_order_cancellation`, pero no pueden consultar la bandeja ni aprobar/rechazar.
+
+La tabla solo concede SELECT a `authenticated`; no concede INSERT, UPDATE ni DELETE a ese rol. La creación y decisión se mantienen detrás de funciones RPC controladas. Esta es una corrección de borrador: no se ha aplicado a Supabase.
