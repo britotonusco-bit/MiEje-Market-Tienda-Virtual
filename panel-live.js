@@ -359,8 +359,10 @@
         name: String(payload.name || '').trim(),
         category: String(payload.category || '').trim()
       });
-      message.className = 'message success';
-      message.textContent = `Negocio creado: ${result.business.name}. Identificador público: ${result.business.slug}. Ahora puedes invitar a su administrador y empleados.`;
+      message.className = result.audit_warning ? 'message error' : 'message success';
+      message.textContent = result.audit_warning
+        ? `Negocio creado: ${result.business.name} (${result.business.slug}), pero falta registrar la auditoría. ${result.audit_warning}`
+        : `Negocio creado: ${result.business.name}. Identificador público: ${result.business.slug}. Ahora puedes invitar a su administrador y empleados.`;
       form.reset();
       await loadTechnical();
       const inviteSelect = document.querySelector('#inviteBusinessSelect');
