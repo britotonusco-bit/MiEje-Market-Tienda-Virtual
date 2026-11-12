@@ -513,3 +513,11 @@ USING (
   AND private.business_is_active(business_id)
 );
 
+
+-- El administrador configura la ficha comercial, pero no puede cambiar
+-- estado de plataforma, slug, propietario técnico ni otros campos internos.
+REVOKE UPDATE ON TABLE public.businesses FROM authenticated;
+GRANT UPDATE (name, category, tagline, description, city, contact_phone,
+  whatsapp_support, logo_url, opening_hours, delivery_fee, minimum_order_amount)
+ON TABLE public.businesses TO authenticated;
+
