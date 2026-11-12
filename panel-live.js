@@ -104,10 +104,14 @@
     const orders = ordersResult.data || [], products = productsResult.data || [];
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
     const todayOrders = orders.filter(o => new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) === today && o.status !== 'cancelled');
-    const received = orders.filter(o => o.payment_status === 'paid').reduce((sum,o) => sum + Number(o.total || 0), 0);
+    const todayPaidSales = todayOrders.filter(o => o.payment_status === 'paid')
+      .reduce((sum, o) => sum + Number(o.total || 0), 0);
+    const received = orders.filter(o => o.payment_status === 'paid')
+      .reduce((sum, o) => sum + Number(o.total || 0), 0);
     renderStats([
-      ['Ventas de hoy', money(todayOrders.reduce((sum,o) => sum + Number(o.total || 0), 0)), 'Pedidos creados hoy, sin cancelados'],
-      ['Dinero recibido', money(received), 'Pedidos marcados como pagados'],
+      ['Pedidos de hoy', number(todayOrders.length), 'Pedidos creados hoy, sin cancelados'],
+      ['Ventas pagadas hoy', money(todayPaidSales), 'Solo pedidos con pago confirmado'],
+      ['Dinero recibido', money(received), 'Total histórico de pedidos pagados'],
       ['Pedidos abiertos', number(orders.filter(o => !['delivered','cancelled'].includes(o.status)).length), 'Pendientes de completar'],
       ['Productos con poco stock', number(products.filter(p => p.is_active && Number(p.inventory || 0) <= 5).length), 'Cinco unidades o menos']
     ]);
@@ -265,18 +269,19 @@
     cachedBusinesses = result.businesses || [];
     const [productsResult, ordersResult, auditResult] = await Promise.all([
       db.from('products').select('id', { count: 'exact', head: true }),
-      db.from('orders').select('id,status,total', { count: 'exact' }),
+      db.from('orders').select('id,status,total,payment_status', { count: 'exact' }),
       db.from('audit_logs').select('id', { count: 'exact', head: true })
     ]);
     if (productsResult.error) throw productsResult.error;
     if (ordersResult.error) throw ordersResult.error;
     if (auditResult.error) throw auditResult.error;
     const activeOrders = ordersResult.data || [];
+    const paidOrders = activeOrders.filter(o => o.payment_status === 'paid');
     renderStats([
       ['Negocios', number(cachedBusinesses.length), `${number(cachedBusinesses.filter(b => b.status === 'active').length)} activos`],
       ['Productos', number(productsResult.count || 0), 'En todos los negocios'],
       ['Pedidos', number(ordersResult.count || activeOrders.length), `${number(activeOrders.filter(o => !['delivered','cancelled'].includes(o.status)).length)} abiertos`],
-      ['Ventas registradas', money(activeOrders.reduce((sum,o) => sum + Number(o.total || 0), 0)), 'Total de pedidos consultables'],
+      ['Ingresos de pedidos pagados', money(paidOrders.reduce((sum,o) => sum + Number(o.total || 0), 0)), `${number(paidOrders.length)} pedidos con pago confirmado`],
       ['Eventos de auditoría', number(auditResult.count || 0), 'Registros en audit_logs']
     ]);
     const options = `<option value="">Todos los negocios</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (inactivo)'}</option>`).join('');
