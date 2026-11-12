@@ -296,3 +296,93 @@ FOR EACH ROW
 EXECUTE FUNCTION private.guard_last_active_business_admin();
 
 REVOKE ALL ON FUNCTION private.guard_last_active_business_admin() FROM PUBLIC, anon, authenticated;
+
+
+-- Separar también el contenido comercial, costos internos y solicitudes
+-- de personal/pedidos del acceso global del propietario técnico.
+-- El técnico conserva la auditoría global y la gestión de cuentas,
+-- pero no consulta operaciones privadas de cada tienda desde el Data API.
+
+DROP POLICY IF EXISTS business_content_pages_admin_read ON public.business_content_pages;
+CREATE POLICY business_content_pages_admin_read
+ON public.business_content_pages
+FOR SELECT
+TO authenticated
+USING (
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+);
+
+DROP POLICY IF EXISTS business_expenses_select ON public.business_expenses;
+CREATE POLICY business_expenses_select
+ON public.business_expenses
+FOR SELECT
+TO authenticated
+USING (
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+);
+
+DROP POLICY IF EXISTS product_costs_admin_select ON public.product_costs;
+CREATE POLICY product_costs_admin_select
+ON public.product_costs
+FOR SELECT
+TO authenticated
+USING (
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+);
+
+DROP POLICY IF EXISTS product_costs_admin_insert ON public.product_costs;
+CREATE POLICY product_costs_admin_insert
+ON public.product_costs
+FOR INSERT
+TO authenticated
+WITH CHECK (
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+);
+
+DROP POLICY IF EXISTS product_costs_admin_update ON public.product_costs;
+CREATE POLICY product_costs_admin_update
+ON public.product_costs
+FOR UPDATE
+TO authenticated
+USING (
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+)
+WITH CHECK (
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+);
+
+DROP POLICY IF EXISTS order_item_costs_admin_select ON public.order_item_costs;
+CREATE POLICY order_item_costs_admin_select
+ON public.order_item_costs
+FOR SELECT
+TO authenticated
+USING (
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+);
+
+DROP POLICY IF EXISTS cancellation_members_select ON public.order_cancellation_requests;
+CREATE POLICY cancellation_members_select
+ON public.order_cancellation_requests
+FOR SELECT
+TO authenticated
+USING (
+  private.has_business_role(business_id, ARRAY['business_admin','employee']::text[])
+  AND private.business_is_active(business_id)
+);
+
+DROP POLICY IF EXISTS job_applications_business_admin_read ON public.job_applications;
+CREATE POLICY job_applications_business_admin_read
+ON public.job_applications
+FOR SELECT
+TO authenticated
+USING (
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+);
