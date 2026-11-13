@@ -53,6 +53,9 @@
       document.querySelector('#businessSelect')?.addEventListener('change', event => loadSelectedBusiness(event.currentTarget.value));
       document.querySelector('#suspensionForm')?.addEventListener('submit', saveSuspension);
       document.querySelector('#memberStatusForm')?.addEventListener('submit', saveMemberStatus);
+      document.querySelector('#assignmentBusinessSelect')?.addEventListener('change', event => loadTechnicalMembers(event.currentTarget.value));
+      document.querySelector('#assignmentMemberSelect')?.addEventListener('change', fillMemberAssignment);
+      document.querySelector('#memberAssignmentForm')?.addEventListener('submit', saveMemberAssignment);
       document.querySelector('#memberBusinessSelect')?.addEventListener('change', event => loadTechnicalMembers(event.currentTarget.value));
       document.querySelector('#platformAiForm')?.addEventListener('submit', savePlatformAi);
       document.querySelector('#storeSettingsForm')?.addEventListener('submit', saveStoreSettings);
@@ -539,13 +542,18 @@
 
   async function initPlatformAi() {
     const form = document.querySelector('#platformAiForm'); if (!form) return;
-    const [aiResult, supportResult] = await Promise.all([
+    const [aiResult, publicResult] = await Promise.all([
       db.from('platform_ai_settings').select('enabled,assistant_name,system_instructions,settings').eq('id', true).maybeSingle(),
-      db.from('platform_public_settings').select('support_whatsapp').eq('id', true).maybeSingle()
+      callTechnicalFunction({ action: 'get_platform_public_settings' })
     ]);
-    if (aiResult.error) { document.querySelector('#platformAiMessage').textContent = 'No se pudo leer la configuración: ' + aiResult.error.message; return; }
+    if (aiResult.error) { document.querySelector('#platformAiMessage').textContent = 'No se pudo leer la configuración de IA: ' + aiResult.error.message; return; }
     const data = aiResult.data;
-    form.elements.support_whatsapp.value = supportResult.data?.support_whatsapp || data?.settings?.support_whatsapp || '';
+    const settings = publicResult?.settings || {};
+    form.elements.site_name.value = settings.site_name || 'MiEje Market';
+    form.elements.site_description.value = settings.site_description || '';
+    form.elements.logo_url.value = settings.logo_url || '';
+    form.elements.hero_image_url.value = settings.hero_image_url || '';
+    form.elements.support_whatsapp.value = settings.support_whatsapp || '';
     form.elements.assistant_name.value = data?.assistant_name || 'Asistente general de MiEje Market';
     form.elements.system_instructions.value = data?.system_instructions || '';
     form.elements.enabled.checked = Boolean(data?.enabled);
@@ -553,13 +561,25 @@
 
   async function savePlatformAi(event) {
     event.preventDefault(); const form = event.currentTarget, message = document.querySelector('#platformAiMessage');
-    const { data: old } = await db.from('platform_ai_settings').select('settings').eq('id', true).maybeSingle();
     const support = form.elements.support_whatsapp.value.replace(/[^0-9]/g, '').slice(0, 18);
-    const payload = { id: true, enabled: form.elements.enabled.checked, assistant_name: form.elements.assistant_name.value.trim(), system_instructions: form.elements.system_instructions.value.trim(), settings: { ...(old?.settings || {}), support_whatsapp: support }, updated_by: currentUser.id, updated_at: new Date().toISOString() };
-    const { error } = await db.from('platform_ai_settings').upsert(payload, { onConflict: 'id' });
-    if (error) { message.textContent = `No se pudo guardar: ${error.message}`; message.className = 'message error'; return; }
-    const { error: supportError } = await db.from('platform_public_settings').upsert({ id: true, support_whatsapp: support, updated_by: currentUser.id, updated_at: new Date().toISOString() }, { onConflict: 'id' });
-    message.textContent = supportError ? `IA guardada, pero falló el número de soporte: ${supportError.message}` : 'Configuración general y WhatsApp de soporte guardados.'; message.className = supportError ? 'message error' : 'message success';
+    try {
+      const publicResult = await callTechnicalFunction({
+        action: 'update_platform_public_settings',
+        site_name: form.elements.site_name.value.trim(),
+        site_description: form.elements.site_description.value.trim(),
+        logo_url: form.elements.logo_url.value.trim(),
+        hero_image_url: form.elements.hero_image_url.value.trim(),
+        support_whatsapp: support
+      });
+      const payload = { id: true, enabled: form.elements.enabled.checked, assistant_name: form.elements.assistant_name.value.trim(), system_instructions: form.elements.system_instructions.value.trim(), updated_by: currentUser.id, updated_at: new Date().toISOString() };
+      const { error } = await db.from('platform_ai_settings').upsert(payload, { onConflict: 'id' });
+      if (error) throw error;
+      message.textContent = publicResult.message || 'Configuración general guardada.';
+      message.className = 'message success';
+    } catch (error) {
+      message.textContent = error.message || 'No se pudo guardar la configuración general.';
+      message.className = 'message error';
+    }
   }
 
   async function showSupportLink() {
