@@ -259,6 +259,35 @@ REVOKE ALL ON FUNCTION public.get_customer_order_history() FROM anon;
 GRANT EXECUTE ON FUNCTION public.get_customer_order_history() TO authenticated;
 
 
+-- La política de order_items no debe exigir que el cliente tenga SELECT
+-- directo sobre orders.customer_user_id. La comprobación de propiedad se hace
+-- mediante una función SECURITY DEFINER y no expone ese identificador interno.
+CREATE OR REPLACE FUNCTION private.customer_owns_order(p_order_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.orders o
+    WHERE o.id = p_order_id
+      AND o.customer_user_id = auth.uid()
+  );
+$function$;
+
+REVOKE ALL ON FUNCTION private.customer_owns_order(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION private.customer_owns_order(uuid) TO authenticated;
+
+DROP POLICY IF EXISTS order_items_customer_select_own ON public.order_items;
+CREATE POLICY order_items_customer_select_own
+ON public.order_items
+FOR SELECT
+TO authenticated
+USING (private.customer_owns_order(order_id));
+
+
 -- Retirar SELECT general y grants por columna anteriores antes de conceder
 -- únicamente los campos operativos que pueden consultar administradores y
 -- empleados. Los importes y el estado del pago quedan detrás de RPCs.
