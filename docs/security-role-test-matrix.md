@@ -651,3 +651,20 @@ La URL de invitación apunta a GitHub Pages, pero Pages en `main` sigue conectad
 Resultado: 18/18 comprobaciones estáticas aprobadas para invitaciones, login, MFA, recuperación y resolución de permisos. No son pruebas end-to-end con correos reales ni usuarios de prueba.
 
 No se enviaron correos, no se cambió Auth, no se desplegaron funciones y no se ejecutó SQL durante esta revisión.
+
+
+## Preparación de migración de clientes y favoritos — 13 de noviembre de 2026
+
+Se creó `database/customers/customer-account-migration.sql` en la rama de trabajo para cubrir el esquema que faltaba:
+- Añade `orders.customer_user_id` como referencia a `auth.users` con `ON DELETE SET NULL`, para conservar pedidos si se elimina una cuenta.
+- Añade índice por cliente y fecha del pedido.
+- Crea `customer_favorites` con unicidad por usuario/producto y claves foráneas.
+- Activa RLS y limita lectura y borrado al dueño; el INSERT solo permite productos activos de negocios activos.
+- No concede UPDATE sobre favoritos ni lectura directa de `customer_user_id`.
+- El historial financiero del cliente continúa detrás del RPC `get_customer_order_history()` del borrador `order-financial-access-draft.sql`.
+
+Se ajustó `cuenta.js` para que los favoritos de productos que ya no están disponibles sigan apareciendo como no disponibles y puedan quitarse de la lista, en lugar de quedar ocultos sin opción de limpieza.
+
+**Orden de dependencias:** primero esta migración de clientes; después `checkout-idempotency-draft.sql` y `order-financial-access-draft.sql`, porque esos borradores usan `orders.customer_user_id`. Todo debe probarse en staging antes de producción.
+
+Resultado de comprobaciones estáticas: **12/12 aprobadas** sobre claves foráneas, índices, unicidad, RLS, políticas de dueño, límites de INSERT/UPDATE y dependencias de checkout/historial. La base live sigue sin la columna ni la tabla; no se ejecutó esta migración ni se modificaron datos.
