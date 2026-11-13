@@ -323,23 +323,37 @@ REVOKE ALL ON FUNCTION private.guard_last_active_business_admin() FROM PUBLIC, a
 -- El técnico conserva la auditoría global y la gestión de cuentas,
 -- pero no consulta operaciones privadas de cada tienda desde el Data API.
 
--- Unificar lectura pública y lectura administrativa en una sola política.
--- Evita políticas SELECT permisivas duplicadas para authenticated: RLS combina
--- políticas permisivas con OR, pero cada política adicional agrega evaluación.
+-- Separar los roles para que anon no tenga que ejecutar helpers privados.
+-- Para authenticated se conserva una sola política que combina catálogo público
+-- y lectura administrativa del negocio propio.
 DROP POLICY IF EXISTS business_content_pages_admin_read ON public.business_content_pages;
 DROP POLICY IF EXISTS business_content_pages_public_read ON public.business_content_pages;
+DROP POLICY IF EXISTS business_content_pages_public_or_admin_read ON public.business_content_pages;
+
+CREATE POLICY business_content_pages_public_read
+ON public.business_content_pages
+FOR SELECT
+TO anon
+USING (
+  is_published = true
+  AND moderation_status = 'approved'
+  AND EXISTS (
+    SELECT 1
+    FROM public.businesses AS b
+    WHERE b.id = business_content_pages.business_id
+      AND b.status = 'active'
+  )
+);
+
 CREATE POLICY business_content_pages_public_or_admin_read
 ON public.business_content_pages
 FOR SELECT
-TO anon, authenticated
+TO authenticated
 USING (
   private.business_is_active(business_id)
   AND (
     (is_published = true AND moderation_status = 'approved')
-    OR (
-      (SELECT auth.uid()) IS NOT NULL
-      AND private.has_business_role(business_id, ARRAY['business_admin']::text[])
-    )
+    OR private.has_business_role(business_id, ARRAY['business_admin']::text[])
   )
 );
 
