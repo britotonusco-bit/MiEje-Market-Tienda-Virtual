@@ -160,6 +160,24 @@ Deno.serve(async (req: Request) => {
       return reply(400, { error: "No fue posible validar el origen de la solicitud. Inténtalo nuevamente." });
     }
 
+    // Reservar el intento en una transacción independiente. De esta forma,
+    // un pedido rechazado por inventario/validación sí cuenta en el límite,
+    // mientras que un reintento con la misma clave y el mismo contenido no.
+    const { data: rateAllowed, error: rateError } = await admin.rpc("reserve_checkout_rate_limit", {
+      ...requestArgs,
+      p_ip: ip,
+    });
+    if (rateError) {
+      console.error("Checkout rate-limit reservation failed:", rateError);
+      if (rateError.message.toLowerCase().includes("clave de este intento")) {
+        return reply(409, { error: rateError.message });
+      }
+      return reply(503, { error: "No fue posible validar el pedido en este momento." });
+    }
+    if (rateAllowed !== true) {
+      return reply(429, { error: "Se recibieron demasiadas solicitudes. Espera unos minutos e inténtalo de nuevo." });
+    }
+
     const { data, error } = await admin.rpc("create_public_order_idempotent", {
       ...requestArgs,
       p_ip: ip,
