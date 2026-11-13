@@ -871,3 +871,18 @@ Durante la preparación se detectó y corrigió un delimitador `DO` mal formado 
 Comprobaciones estáticas del paquete: **50/50 aprobadas** en delimitadores, comentarios, políticas repetibles y separación de permisos de lectura pública/admin. No se ejecutó un parser SQL conectado ni se aplicaron migraciones; el resultado no equivale a ejecución real.
 
 El paquete sigue pendiente de staging. No se ejecutó SQL, no se desplegaron Edge Functions, no se fusionó el PR ni se modificó `main`.
+
+## Hallazgo adicional: lectura anónima del catálogo público
+
+La prueba de solo lectura ejecutada con `SET LOCAL ROLE anon` confirmó que:
+- La consulta pública de `businesses` puede ejecutarse con las columnas comerciales necesarias.
+- La consulta de `products` falla con `permission denied for function private.business_is_active`, porque la política `products_public_active_anon` invoca un helper privado sin permiso de ejecución para `anon`.
+- No se debe solucionar concediendo ejecución de helpers privados al rol anónimo.
+
+Se añadió al borrador `database/security/business-admin-boundaries.sql`:
+- Reemplazo de `products_public_active_anon` por una política que comprueba `is_active` y la existencia de un negocio con `status='active'`.
+- Grants de lectura limitados a las columnas públicas de `businesses`, manteniendo privados `suspension_reason`, `created_by`, `created_at` y `updated_at`.
+- Política explícita `businesses_public_directory_anon` para negocios activos o suspendidos.
+- Verificaciones post-migración para grants, políticas y ausencia de ejecución anónima de helpers privados.
+
+La prueba de catálogo debe repetirse en ensayo después de aplicar la migración. No se modificó el proyecto activo.
