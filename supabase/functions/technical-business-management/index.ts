@@ -115,6 +115,16 @@ Deno.serve(async (req: Request) => {
         if (membershipError || !membership || membership.status !== "active" || membership.role !== expectedRole) {
           return reply(403, { error: "No tienes permiso para entrar a este panel." });
         }
+
+        const { data: business, error: businessError } = await admin
+          .from("businesses")
+          .select("id,status")
+          .eq("id", businessId)
+          .maybeSingle();
+        if (businessError) throw businessError;
+        if (!business || business.status !== "active") {
+          return reply(403, { error: "El negocio no está activo. No se puede registrar un acceso válido al panel." });
+        }
       }
 
       const { error: auditError } = await admin.from("audit_logs").insert({
