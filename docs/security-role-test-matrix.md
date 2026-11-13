@@ -476,3 +476,5 @@ Auditoría de solo lectura del proyecto independiente `cqixlrwbqatbhzmpygiz` y d
 7. Probar que un negocio suspendido o una membresía suspendida no permite abrir el panel, aunque el usuario conserve su cuenta de Auth.
 
 No se ejecutaron cambios en la base de datos ni se desplegaron funciones durante esta auditoría. La rama y el PR continúan siendo borradores.
+
+8. Confirmar en Authentication > URL Configuration que la URL exacta `https://britotonusco-bit.github.io/MiEje-Market-Tienda-Virtual/aceptar-invitacion.html` esté en Redirect URLs. Supabase ignora un `redirectTo` que no esté permitido y usa el Site URL; por eso no basta con que la página exista en GitHub Pages.
