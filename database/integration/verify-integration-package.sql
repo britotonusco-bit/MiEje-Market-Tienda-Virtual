@@ -94,11 +94,32 @@ BEGIN
 
   IF NOT has_function_privilege('service_role',
        'public.get_public_order_idempotent(uuid,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE')
+     OR NOT has_function_privilege('service_role',
+       'public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE')
+     OR NOT has_function_privilege('service_role',
+       'public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE')
      OR has_function_privilege('anon',
        'public.get_public_order_idempotent(uuid,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE')
      OR has_function_privilege('authenticated',
-       'public.get_public_order_idempotent(uuid,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE') THEN
-    RAISE EXCEPTION 'FALLO: permisos incorrectos en RPC de consulta idempotente.';
+       'public.get_public_order_idempotent(uuid,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE')
+     OR has_function_privilege('anon',
+       'public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE')
+     OR has_function_privilege('authenticated',
+       'public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE')
+     OR has_function_privilege('anon',
+       'public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE')
+     OR has_function_privilege('authenticated',
+       'public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: permisos incorrectos en RPCs de idempotencia del checkout.';
+  END IF;
+
+  IF has_table_privilege('anon','private.checkout_idempotency','SELECT')
+     OR has_table_privilege('authenticated','private.checkout_idempotency','SELECT')
+     OR has_table_privilege('service_role','private.checkout_idempotency','SELECT')
+     OR has_table_privilege('anon','private.checkout_rate_limit_reservations','SELECT')
+     OR has_table_privilege('authenticated','private.checkout_rate_limit_reservations','SELECT')
+     OR has_table_privilege('service_role','private.checkout_rate_limit_reservations','SELECT') THEN
+    RAISE EXCEPTION 'FALLO: tablas internas de idempotencia no deben tener lectura directa.';
   END IF;
 
   IF NOT has_function_privilege('authenticated',
