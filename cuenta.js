@@ -42,11 +42,7 @@
   async function loadOrders(userId) {
     const target = $("#customerOrders");
     target.innerHTML = '<p class="muted">Cargando pedidos…</p>';
-    const { data, error } = await client.from("orders")
-      .select("id,order_number,status,payment_status,subtotal,delivery_fee,total,created_at,businesses(name),order_items(product_name,quantity,unit_price,line_total)")
-      .eq("customer_user_id", userId)
-      .order("created_at", { ascending:false })
-      .limit(50);
+    const { data, error } = await client.rpc("get_customer_order_history");
     if (activeUserId !== userId) return;
     if (error) {
       target.textContent = "No fue posible cargar el historial. Comprueba que la migración de clientes esté aplicada.";
@@ -59,10 +55,10 @@
     }
     target.innerHTML = data.map(order => `
       <article class="security-note">
-        <strong>Pedido #${escapeHtml(order.order_number)} · ${escapeHtml(order.businesses?.name || "Negocio")}</strong>
+        <strong>Pedido #${escapeHtml(order.order_number)} · ${escapeHtml(order.business_name || "Negocio")}</strong>
         <p>${escapeHtml(date(order.created_at))} · ${escapeHtml(status(order.status))}</p>
         <p>Total: <strong>${money(order.total)}</strong> · Pago: ${escapeHtml(order.payment_status)}</p>
-        <ul>${(order.order_items || []).map(item => `<li>${escapeHtml(item.product_name)} × ${Number(item.quantity)} — ${money(item.line_total ?? Number(item.unit_price) * Number(item.quantity))}</li>`).join("")}</ul>
+        <ul>${(order.items || []).map(item => `<li>${escapeHtml(item.product_name)} × ${Number(item.quantity)} — ${money(item.line_total ?? Number(item.unit_price) * Number(item.quantity))}</li>`).join("")}</ul>
       </article>`).join("");
   }
   async function loadFavorites(userId) {
