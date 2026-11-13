@@ -37,6 +37,17 @@ BEGIN
     RAISE EXCEPTION 'FALLO: el RPC financiero no debe ser ejecutable por anon ni PUBLIC.';
   END IF;
 
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'order_items'
+      AND policyname = 'order_items_customer_select_own'
+      AND qual ILIKE '%customer_owns_order%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: la política de order_items no usa el helper de propiedad del cliente.';
+  END IF;
+
   IF NOT has_function_privilege('authenticated', 'private.customer_owns_order(uuid)', 'EXECUTE') THEN
     RAISE EXCEPTION 'FALLO: falta EXECUTE del helper privado de propiedad de pedidos.';
   END IF;
