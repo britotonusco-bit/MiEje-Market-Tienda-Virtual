@@ -122,7 +122,11 @@
 
   async function loadBusinessAdmin() {
     const [ordersResult, productsResult] = await Promise.all([
-      db.from('orders').select('id,total,payment_status,status,created_at').eq('business_id', businessId),
+      db.rpc('get_business_admin_order_financials', {
+        p_business_id: businessId,
+        p_refundable_only: false,
+        p_limit: 10000
+      }),
       db.from('products').select('id,inventory,is_active').eq('business_id', businessId)
     ]);
     if (ordersResult.error) throw ordersResult.error;
@@ -265,9 +269,23 @@
   async function loadBusinessOrders() {
     const target = document.querySelector('#ordersContainer');
     target.innerHTML = '<div class="empty">Cargando pedidos…</div>';
-    const { data, error } = await db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,payment_status,status,total,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
-    if (error) return showError(target, error);
-    renderOrders(target, (data || []).map(o => ({ ...o, items: o.order_items || [] })), true);
+    const [ordersResult, financeResult] = await Promise.all([
+      db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,status,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100),
+      db.rpc('get_business_admin_order_financials', {
+        p_business_id: businessId,
+        p_refundable_only: false,
+        p_limit: 100
+      })
+    ]);
+    if (ordersResult.error) return showError(target, ordersResult.error);
+    if (financeResult.error) return showError(target, financeResult.error);
+    const financeByOrder = new Map((financeResult.data || []).map(row => [row.order_id, row]));
+    renderOrders(target, (ordersResult.data || []).map(o => ({
+      ...o,
+      ...(financeByOrder.get(o.id) || {}),
+      id: o.id,
+      items: o.order_items || []
+    })), true);
   }
 
   async function loadEmployeeOrders() {
@@ -1017,13 +1035,11 @@
     const target = document.querySelector('#refundsContainer');
     if (!target || panel !== 'business_admin') return;
     target.innerHTML = '<div class="empty">Consultando pedidos pagados y cancelados…</div>';
-    const { data, error } = await db.from('orders')
-      .select('id,order_number,total,created_at')
-      .eq('business_id', businessId)
-      .eq('status', 'cancelled')
-      .eq('payment_status', 'paid')
-      .order('created_at', { ascending: false })
-      .limit(100);
+    const { data, error } = await db.rpc('get_business_admin_order_financials', {
+      p_business_id: businessId,
+      p_refundable_only: true,
+      p_limit: 100
+    });
     if (error) return showError(target, error);
     const orders = data || [];
     if (!orders.length) {
@@ -1034,7 +1050,7 @@
       esc(`#${o.order_number}`),
       money(o.total),
       dateTime(o.created_at),
-      `<button class="small-button" data-register-refund="${esc(o.id)}">Registrar reembolso realizado</button>`
+      `<button class="small-button" data-register-refund="${esc(o.order_id)}">Registrar reembolso realizado</button>`
     ]);
     target.innerHTML = tableHtml(['Pedido','Importe a devolver','Fecha del pedido','Acción'], rows);
     target.querySelectorAll('[data-register-refund]').forEach(button => {
@@ -1098,7 +1114,7 @@
     if (!target || panel !== 'business_admin') return;
     target.innerHTML = '<div class="empty">Cargando solicitudes…</div>';
     const { data, error } = await db.from('order_cancellation_requests')
-      .select('id,order_id,customer_reason,status,forwarded_at,admin_response,orders(order_number,status,total,payment_status)')
+      .select('id,order_id,customer_reason,status,forwarded_at,admin_response,orders(order_number,status)')
       .eq('business_id', businessId)
       .order('created_at', { ascending: false })
       .limit(100);
@@ -1113,15 +1129,13 @@
       const decision = r.status === 'pending'
         ? `<button class="small-button" data-cancellation-decision="approved" data-request="${esc(r.id)}">Aprobar</button> <button class="small-button" data-cancellation-decision="rejected" data-request="${esc(r.id)}">Rechazar</button>`
         : esc(r.status === 'approved' ? 'Aprobada' : 'Rechazada');
-      const refundNote = r.status === 'approved' && order?.payment_status === 'paid'
-        ? '<br><small>Pedido pagado: el reembolso de dinero requiere un proceso separado.</small>' : '';
       return [
         esc(order?.order_number ? `#${order.order_number}` : r.order_id),
         esc(r.customer_reason),
         esc(statusLabels[order?.status] || order?.status || '—'),
         esc(r.status === 'pending' ? 'Pendiente' : r.status === 'approved' ? 'Aprobada' : 'Rechazada'),
         dateTime(r.forwarded_at),
-        `${decision}${refundNote}`
+        decision
       ];
     });
     target.innerHTML = tableHtml(['Pedido','Motivo','Estado del pedido','Solicitud','Fecha','Decisión'], rows);
