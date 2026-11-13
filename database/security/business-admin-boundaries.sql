@@ -687,6 +687,12 @@ WITH CHECK (
 -- Limitar INSERT a los datos propios del gasto; no permitir que el cliente
 -- asigne ID/fechas del sistema, estado de pago, ni campos de anulación.
 REVOKE INSERT ON TABLE public.business_expenses FROM PUBLIC, anon, authenticated;
+REVOKE INSERT (
+  id, business_id, expense_date, category, description, amount,
+  payment_status, payment_method, supplier, transaction_reference,
+  receipt_path, notes, paid_at, status, void_reason, voided_by,
+  voided_at, created_by, created_at, updated_at
+) ON TABLE public.business_expenses FROM PUBLIC, anon, authenticated;
 GRANT INSERT (
   business_id,
   expense_date,
@@ -705,6 +711,12 @@ GRANT INSERT (
 -- valida private.guard_business_expense_update(); el trigger compara el resto
 -- de las columnas y rechaza cualquier modificación adicional.
 REVOKE UPDATE ON TABLE public.business_expenses FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE (
+  id, business_id, expense_date, category, description, amount,
+  payment_status, payment_method, supplier, transaction_reference,
+  receipt_path, notes, paid_at, status, void_reason, voided_by,
+  voided_at, created_by, created_at, updated_at
+) ON TABLE public.business_expenses FROM PUBLIC, anon, authenticated;
 GRANT UPDATE (
   payment_status,
   payment_method,
