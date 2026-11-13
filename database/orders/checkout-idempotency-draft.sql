@@ -270,6 +270,10 @@ BEGIN
   PERFORM pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended(p_idempotency_key::text, 0)
   );
+  DELETE FROM private.checkout_rate_limit_reservations
+  WHERE idempotency_key = p_idempotency_key
+    AND created_at < pg_catalog.now() - interval '24 hours';
+
   SELECT ip_hash, request_hash
     INTO v_existing_ip_hash, v_existing_request_hash
   FROM private.checkout_rate_limit_reservations
