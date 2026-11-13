@@ -614,7 +614,6 @@ USING (
     SELECT 1
     FROM public.business_memberships AS target_membership
     WHERE target_membership.user_id = profiles.id
-      AND target_membership.status = 'active'
       AND private.business_is_active(target_membership.business_id)
       AND private.has_business_role(
         target_membership.business_id,
