@@ -1,8 +1,9 @@
 -- MiEje Market Independiente
 -- Vinculación segura de pedidos con clientes y favoritos.
--- ESTADO: BORRADOR. No ejecutar hasta aplicar checkout-idempotency-draft.sql
--- y order-financial-access-draft.sql en staging, validar sus dependencias y
--- ejecutar la matriz de pruebas. No aplicar directamente en producción.
+-- ESTADO: BORRADOR. Esta migración debe aplicarse ANTES de
+-- checkout-idempotency-draft.sql y order-financial-access-draft.sql, porque
+-- ambos dependen de orders.customer_user_id. Probar el conjunto en staging;
+-- no aplicar directamente en producción.
 
 -- Los pedidos de invitados conservan customer_user_id NULL. Los pedidos de
 -- clientes autenticados quedan vinculados al usuario; al eliminar una cuenta,
