@@ -32,6 +32,19 @@
       currentProfile = access.profile;
       const profile = access.profile;
       document.querySelector('#userName').textContent = profile.display_name || currentUser.email || 'Usuario';
+      const emailNode = document.querySelector('#userEmail');
+      if (emailNode) emailNode.textContent = currentUser.email || '';
+      const roleNode = document.querySelector('#profileRole');
+      if (roleNode) roleNode.textContent = panel === 'technical' ? 'Propietario de la plataforma' : (panel === 'business_admin' ? 'Administrador del negocio' : 'Empleado del negocio');
+      const titleNode = document.querySelector('#profileBusinessTitle');
+      if (titleNode) titleNode.textContent = panel === 'technical' ? 'Control general de MiEje Market' : '';
+      const avatarNode = document.querySelector('#profileAvatar');
+      if (avatarNode && profile.avatar_url) {
+        avatarNode.textContent = '';
+        avatarNode.style.backgroundImage = 'url("' + String(profile.avatar_url).replace(/["\\\\]/g, '') + '")';
+        avatarNode.style.backgroundSize = 'cover';
+        avatarNode.style.backgroundPosition = 'center';
+      }
       document.querySelector('#logoutBtn').addEventListener('click', signOut);
       document.querySelector('#refreshTechnicalBtn')?.addEventListener('click', refreshTechnical);
       document.querySelector('#createBusinessForm')?.addEventListener('submit', createBusiness);
@@ -60,6 +73,7 @@
           return;
         }
         await logPanel(null, 'technical', 'panel_open');
+         await showSupportLink();
         notice.textContent = 'Acceso validado. Consultando datos disponibles del proyecto independiente.';
         notice.className = 'notice';
         await loadTechnical();
@@ -73,6 +87,9 @@
         businessId = match.business_id;
         businessName = match.business.name;
         isBusinessOwner = match.role === 'business_admin';
+        if (roleNode) roleNode.textContent = match.role_label || (match.role === 'business_admin' ? 'Administrador del negocio' : 'Empleado del negocio');
+        if (titleNode) titleNode.textContent = match.job_title || '';
+
         document.querySelector('#businessName').textContent = businessName;
         await logPanel(businessId, panel, 'panel_open');
         notice.textContent = `Acceso validado para ${businessName}. Los permisos se aplican en la base de datos.`;
@@ -438,8 +455,46 @@
     try {
       const result = await callTechnicalFunction({ action: 'list_business_members', business_id: id });
       const rows = result.members || [];
-      target.innerHTML = '<option value="">Selecciona una cuenta</option>' + rows.map(m => `<option value="${esc(m.id)}">${esc(m.profiles?.display_name || shortId(m.user_id))} · ${m.role === 'business_admin' ? 'Administrador' : 'Empleado'}${m.status !== 'active' ? ' · Suspendido' : ''}</option>`).join('');
+      const optionHtml = '<option value="">Selecciona una cuenta</option>' + rows.map(m => `<option value="${esc(m.id)}" data-role="${esc(m.role)}" data-job-title="${esc(m.job_title || '')}">${esc(m.profiles?.display_name || shortId(m.user_id))} · ${esc(m.email || 'sin correo')} · ${m.role === 'business_admin' ? 'Administrador' : 'Empleado'}${m.status !== 'active' ? ' · Suspendido' : ''}</option>`).join('');
+      for (const selector of ['#memberTargetSelect', '#assignmentMemberSelect']) {
+        const select = document.querySelector(selector);
+        if (select) select.innerHTML = optionHtml;
+      }
     } catch (error) { target.innerHTML = '<option value="">No se pudieron cargar las cuentas</option>'; }
+  }
+
+  function fillMemberAssignment() {
+    const form = document.querySelector('#memberAssignmentForm');
+    const selected = form?.elements.membership_id?.selectedOptions?.[0];
+    if (!form || !selected) return;
+    form.elements.role.value = selected.dataset.role || 'employee';
+    form.elements.job_title.value = selected.dataset.jobTitle || '';
+  }
+
+  async function saveMemberAssignment(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#memberAssignmentMessage');
+    const payload = {
+      action: 'update_member_assignment',
+      membership_id: form.elements.membership_id.value,
+      role: form.elements.role.value,
+      job_title: form.elements.job_title.value.trim()
+    };
+    if (!payload.membership_id || payload.job_title.length < 2) {
+      message.textContent = 'Selecciona una cuenta y escribe el cargo.';
+      message.className = 'message error';
+      return;
+    }
+    try {
+      const result = await callTechnicalFunction(payload);
+      message.textContent = result.message || 'Asignación actualizada.';
+      message.className = 'message success';
+      await loadTechnicalMembers(form.elements.business_id.value);
+    } catch (error) {
+      message.textContent = error.message || 'No se pudo actualizar la asignación.';
+      message.className = 'message error';
+    }
   }
 
   async function saveMemberStatus(event) {
@@ -510,10 +565,20 @@
   async function showSupportLink() {
     const link = document.querySelector('#technicalSupportLink');
     if (!link) return;
+    const message = document.querySelector('#technicalSupportMessage');
     link.href = '#';
     link.classList.add('hidden');
-    const message = document.querySelector('#technicalSupportMessage');
-    if (message) message.textContent = 'El número de soporte de la plataforma aún no está configurado en el proyecto independiente.';
+    try {
+      const { data, error } = await db.functions.invoke('get-platform-public-settings', { body: {} });
+      if (error || !data?.ok) throw new Error(data?.error || error?.message || 'No se pudo consultar el contacto técnico.');
+      const number = String(data.settings?.support_whatsapp || '').replace(/[^0-9]/g, '');
+      if (!number) throw new Error('El WhatsApp del técnico todavía no está configurado.');
+      link.href = 'https://wa.me/' + number;
+      link.classList.remove('hidden');
+      if (message) message.textContent = 'Soporte técnico oficial de MiEje Market.';
+    } catch (error) {
+      if (message) message.textContent = error.message || 'No se pudo cargar el contacto técnico.';
+    }
   }
 
   async function initBusinessSettings() {
