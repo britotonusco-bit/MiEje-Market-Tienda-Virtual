@@ -141,6 +141,141 @@ Deno.serve(async (req: Request) => {
 
     if (!isOwner) return reply(403, { error: "Solo el administrador técnico puede realizar esta acción." });
 
+    if (action === "list_platform_finance") {
+      const [financeResult, payrollResult] = await Promise.all([
+        admin.from("platform_financial_records")
+          .select("id,business_id,record_type,description,amount,currency,occurred_at,reference,created_at")
+          .order("occurred_at", { ascending: false }).limit(100),
+        admin.from("payroll_records")
+          .select("id,business_id,payee_name,description,amount,currency,status,due_date,paid_at,payment_reference,created_at,updated_at")
+          .order("created_at", { ascending: false }).limit(100),
+      ]);
+      if (financeResult.error) throw financeResult.error;
+      if (payrollResult.error) throw payrollResult.error;
+      return reply(200, {
+        ok: true,
+        financial_records: financeResult.data ?? [],
+        payroll_records: payrollResult.data ?? [],
+      });
+    }
+
+    if (action === "create_platform_financial_record") {
+      const recordType = textValue(body.record_type, 20);
+      const description = textValue(body.description, 500);
+      const amount = Number(body.amount);
+      const currency = (textValue(body.currency, 3) || "COP").toUpperCase();
+      const reference = textValue(body.reference, 160) || null;
+      const businessId = textValue(body.business_id, 80) || null;
+      const occurredAtInput = textValue(body.occurred_at, 40);
+      const allowedTypes = ["income", "expense", "refund", "adjustment"];
+      if (!allowedTypes.includes(recordType)) return reply(400, { error: "Tipo de movimiento no válido." });
+      if (description.length < 3 || !Number.isFinite(amount) || amount <= 0) {
+        return reply(400, { error: "La descripción debe tener al menos 3 caracteres y el importe debe ser mayor que cero." });
+      }
+      if (!/^[A-Z]{3}$/.test(currency)) return reply(400, { error: "La moneda debe usar un código de tres letras, por ejemplo COP." });
+      if (businessId && !/^[0-9a-f-]{36}$/i.test(businessId)) return reply(400, { error: "Identificador de negocio no válido." });
+      const occurredAt = occurredAtInput && !Number.isNaN(Date.parse(occurredAtInput))
+        ? new Date(occurredAtInput).toISOString()
+        : new Date().toISOString();
+      const { data, error } = await admin.from("platform_financial_records").insert({
+        business_id: businessId,
+        record_type: recordType,
+        description,
+        amount,
+        currency,
+        occurred_at: occurredAt,
+        reference,
+        created_by: user.id,
+      }).select("id,business_id,record_type,description,amount,currency,occurred_at,reference,created_at").single();
+      if (error) throw error;
+      const { error: auditError } = await admin.from("audit_logs").insert({
+        business_id: businessId,
+        actor_id: user.id,
+        action: "platform.finance_record_created",
+        entity_type: "platform_financial_record",
+        entity_id: data.id,
+        details: { record_type: recordType, amount, currency, description },
+      });
+      return reply(200, {
+        ok: true,
+        record: data,
+        audit_warning: auditError ? "El movimiento se guardó, pero no se pudo registrar la auditoría." : null,
+      });
+    }
+
+    if (action === "create_payroll_record") {
+      const payeeName = textValue(body.payee_name, 160);
+      const description = textValue(body.description, 500);
+      const amount = Number(body.amount);
+      const currency = (textValue(body.currency, 3) || "COP").toUpperCase();
+      const businessId = textValue(body.business_id, 80) || null;
+      const dueDate = textValue(body.due_date, 10) || null;
+      if (payeeName.length < 2 || description.length < 3 || !Number.isFinite(amount) || amount <= 0) {
+        return reply(400, { error: "Beneficiario, descripción e importe son obligatorios; el importe debe ser mayor que cero." });
+      }
+      if (!/^[A-Z]{3}$/.test(currency)) return reply(400, { error: "La moneda debe usar un código de tres letras, por ejemplo COP." });
+      if (businessId && !/^[0-9a-f-]{36}$/i.test(businessId)) return reply(400, { error: "Identificador de negocio no válido." });
+      if (dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return reply(400, { error: "La fecha límite no es válida." });
+      const { data, error } = await admin.from("payroll_records").insert({
+        business_id: businessId,
+        payee_name: payeeName,
+        description,
+        amount,
+        currency,
+        status: "pending",
+        due_date: dueDate,
+        created_by: user.id,
+        updated_by: user.id,
+      }).select("id,business_id,payee_name,description,amount,currency,status,due_date,created_at").single();
+      if (error) throw error;
+      const { error: auditError } = await admin.from("audit_logs").insert({
+        business_id: businessId,
+        actor_id: user.id,
+        action: "platform.payroll_created",
+        entity_type: "payroll_record",
+        entity_id: data.id,
+        details: { payee_name: payeeName, amount, currency, due_date: dueDate },
+      });
+      return reply(200, {
+        ok: true,
+        record: data,
+        audit_warning: auditError ? "El registro de nómina se guardó, pero no se pudo registrar la auditoría." : null,
+      });
+    }
+
+    if (action === "resolve_payroll_record") {
+      const recordId = textValue(body.record_id, 80);
+      const decision = textValue(body.decision, 20);
+      const paymentReference = textValue(body.payment_reference, 160) || null;
+      if (!/^[0-9a-f-]{36}$/i.test(recordId)) return reply(400, { error: "Identificador de nómina no válido." });
+      if (!["paid", "cancelled"].includes(decision)) return reply(400, { error: "Estado de nómina no válido." });
+      const { data, error } = await admin.from("payroll_records").update({
+        status: decision,
+        paid_at: decision === "paid" ? new Date().toISOString() : null,
+        payment_reference: decision === "paid" ? paymentReference : null,
+        updated_by: user.id,
+        updated_at: new Date().toISOString(),
+      }).eq("id", recordId).eq("status", "pending")
+        .select("id,business_id,payee_name,description,amount,currency,status,paid_at,payment_reference,updated_at")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return reply(409, { error: "El registro ya fue resuelto o no existe. Actualiza la lista antes de continuar." });
+      const { error: auditError } = await admin.from("audit_logs").insert({
+        business_id: data.business_id,
+        actor_id: user.id,
+        action: decision === "paid" ? "platform.payroll_marked_paid" : "platform.payroll_cancelled",
+        entity_type: "payroll_record",
+        entity_id: data.id,
+        details: { amount: data.amount, currency: data.currency, payment_reference: data.payment_reference },
+      });
+      return reply(200, {
+        ok: true,
+        record: data,
+        message: decision === "paid" ? "Pago registrado en el control interno." : "Registro de nómina cancelado.",
+        audit_warning: auditError ? "El cambio se guardó, pero no se pudo registrar la auditoría." : null,
+      });
+    }
+
     if (action === "get_platform_public_settings") {
       const { data, error } = await admin.from("platform_public_settings")
         .select("site_name,site_description,logo_url,hero_image_url,support_whatsapp,updated_at")
