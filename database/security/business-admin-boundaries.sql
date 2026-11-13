@@ -98,6 +98,13 @@ USING (
   OR private.has_business_role(id, ARRAY['business_admin','employee']::text[])
 );
 
+DROP POLICY IF EXISTS businesses_public_directory_anon ON public.businesses;
+CREATE POLICY businesses_public_directory_anon
+ON public.businesses
+FOR SELECT
+TO anon
+USING (status = ANY (ARRAY['active','suspended']::text[]));
+
 -- Directorio público: concede únicamente columnas comerciales necesarias para
 -- mostrar las tiendas. Los datos internos de suspensión/propiedad siguen privados.
 REVOKE SELECT ON TABLE public.businesses FROM PUBLIC, anon, authenticated;
