@@ -1019,15 +1019,19 @@
     if (!orders.length) { target.innerHTML = '<div class="empty">No hay pedidos registrados en este negocio.</div>'; return; }
     const rows = orders.map(o => {
       const items = Array.isArray(o.items) ? o.items.map(i => `${esc(i.product_name)} × ${esc(i.quantity)}`).join('<br>') : '';
-      const action = `${nextStatus[o.status] ? `<button class="small-button" data-next="${nextStatus[o.status]}" data-order="${esc(o.id)}">Marcar: ${statusLabels[nextStatus[o.status]]}</button>` : ''}${!['delivered','cancelled'].includes(o.status) ? ` <button class="small-button" data-cancel-request="${esc(o.id)}">Solicitar cancelación</button>` : ''}` || '—';
+      const paymentAction = admin && o.payment_status === 'pending' && o.status !== 'cancelled'
+        ? ` <button class="small-button" data-mark-payment="${esc(o.id)}" data-payment-method="${esc(o.payment_method || '')}">Confirmar pago recibido</button>`
+        : '';
+      const action = `${nextStatus[o.status] ? `<button class="small-button" data-next="${nextStatus[o.status]}" data-order="${esc(o.id)}">Marcar: ${statusLabels[nextStatus[o.status]]}</button>` : ''}${paymentAction}${!['delivered','cancelled'].includes(o.status) ? ` <button class="small-button" data-cancel-request="${esc(o.id)}">Solicitar cancelación</button>` : ''}` || '—';
       const base = [esc(`#${o.order_number}`), esc(o.customer_name || 'Cliente'), esc(o.customer_phone || '—'), esc(o.delivery_address || '—') + (o.delivery_notes ? `<br><small>${esc(o.delivery_notes)}</small>` : ''), items || 'Sin detalle', `<span class="pill ${statusClass[o.status] || ''}">${statusLabels[o.status] || esc(o.status)}</span>`, dateTime(o.created_at)];
-      if (admin) base.splice(5, 0, `${money(o.total)}<br><small>${esc(o.payment_status || '—')}</small>`);
+      if (admin) base.splice(5, 0, `${money(o.total)}<br><small>${esc(o.payment_status || '—')} · ${esc(o.payment_method || '—')}</small>`);
       base.push(action);
       return base;
     });
     const headers = admin ? ['Pedido','Cliente','Teléfono','Entrega','Productos','Total / pago','Estado','Creado','Acción'] : ['Pedido','Cliente','Teléfono','Entrega','Productos','Estado','Creado','Acción'];
     target.innerHTML = tableHtml(headers, rows);
     target.querySelectorAll('[data-next][data-order]').forEach(button => button.addEventListener('click', () => changeOrderStatus(button.dataset.order, button.dataset.next, button)));
+    target.querySelectorAll('[data-mark-payment]').forEach(button => button.addEventListener('click', () => markOrderPaymentReceived(button.dataset.markPayment, button.dataset.paymentMethod, button)));
     target.querySelectorAll('[data-cancel-request]').forEach(button => button.addEventListener('click', () => requestCancellation(button.dataset.cancelRequest, button)));
   }
 
@@ -1056,6 +1060,36 @@
     target.querySelectorAll('[data-register-refund]').forEach(button => {
       button.addEventListener('click', () => registerOrderRefund(button.dataset.registerRefund, button));
     });
+  }
+
+  async function markOrderPaymentReceived(orderId, paymentMethod, button) {
+    if (!window.confirm('Confirma que el negocio ya recibió realmente el pago de este pedido? Esta acción registrará el ingreso y no realiza ningún cobro automático.')) return;
+    const provider = window.prompt('Entidad o proveedor (opcional, por ejemplo, banco o billetera):');
+    if (provider === null) return;
+    const reference = window.prompt(paymentMethod === 'cash'
+      ? 'Referencia o comprobante (opcional para efectivo):'
+      : 'Referencia o número del comprobante del pago recibido:');
+    if (reference === null) return;
+    if (paymentMethod !== 'cash' && !reference.trim()) {
+      alert('Para pagos que no son en efectivo debes registrar una referencia o comprobante.');
+      return;
+    }
+    const notes = window.prompt('Observaciones adicionales (opcional):');
+    if (notes === null) return;
+    button.disabled = true;
+    const { data, error } = await db.rpc('mark_order_payment_received', {
+      p_order_id: orderId,
+      p_provider: provider.trim() || null,
+      p_reference: reference.trim() || null,
+      p_notes: notes.trim() || null
+    });
+    if (error) {
+      alert(`No se pudo confirmar el pago. Comprueba que el procedimiento de confirmación esté desplegado y que el dinero ya se haya recibido. ${error.message}`);
+      button.disabled = false;
+      return;
+    }
+    alert('Pago recibido y registrado. El ingreso quedó guardado en los movimientos financieros.');
+    await loadBusinessAdmin();
   }
 
   async function registerOrderRefund(orderId, button) {
