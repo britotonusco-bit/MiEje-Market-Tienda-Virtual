@@ -601,6 +601,64 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    if (action === "list_block_requests") {
+      const { data: requests, error: requestError } = await admin
+        .from("access_block_requests")
+        .select("id,business_id,requested_by,target_user_id,reason,status,technician_note,resolved_by,resolved_at,created_at,businesses(name)")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (requestError) throw requestError;
+
+      const userIds = [...new Set((requests ?? []).flatMap((request: any) =>
+        [request.requested_by, request.target_user_id].filter(Boolean)
+      ))];
+      const { data: profiles, error: profilesError } = userIds.length
+        ? await admin.from("profiles").select("id,display_name").in("id", userIds)
+        : { data: [], error: null };
+      if (profilesError) throw profilesError;
+      const names = new Map((profiles ?? []).map((profile: any) => [profile.id, profile.display_name]));
+
+      return reply(200, {
+        ok: true,
+        requests: (requests ?? []).map((request: any) => ({
+          ...request,
+          requested_by_name: names.get(request.requested_by) ?? null,
+          target_user_name: names.get(request.target_user_id) ?? null,
+        })),
+      });
+    }
+
+    if (action === "resolve_block_request") {
+      const requestId = textValue(body.request_id, 80);
+      const decision = textValue(body.decision, 20);
+      const technicianNote = textValue(body.technician_note, 2000);
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)
+          || !["approved", "rejected"].includes(decision)) {
+        return reply(400, { error: "Solicitud y decisión válida son obligatorias." });
+      }
+
+      const { data: result, error: resolveError } = await admin.rpc("resolve_access_block_request", {
+        p_request_id: requestId,
+        p_decision: decision,
+        p_technician_note: technicianNote,
+        p_technician_id: user.id,
+      });
+      if (resolveError) {
+        console.error("Access block request resolution failed:", resolveError);
+        const message = resolveError.message || "No se pudo resolver la solicitud.";
+        const status = /no se encontró|ya fue resuelta|último administrador|membresía activa|cambió durante/i.test(message) ? 409 : 400;
+        return reply(status, { error: message });
+      }
+
+      return reply(200, {
+        ok: true,
+        result,
+        message: decision === "approved"
+          ? "Solicitud aprobada. Se suspendió el acceso de esa cuenta únicamente en el negocio indicado."
+          : "Solicitud rechazada. El acceso de la cuenta no fue modificado.",
+      });
+    }
+
     return reply(400, { error: "Acción no reconocida." });
   } catch (error) {
     console.error("technical-business-management error:", error);
