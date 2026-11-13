@@ -596,7 +596,7 @@
     const support = form.elements.support_whatsapp.value.replace(/[^0-9]/g, '').slice(0, 18);
     let aiSaved = false;
     try {
-      await callTechnicalFunction({
+      const aiResult = await callTechnicalFunction({
         action: 'update_platform_ai_settings',
         enabled: form.elements.enabled.checked,
         assistant_name: form.elements.assistant_name.value.trim(),
@@ -611,8 +611,12 @@
         hero_image_url: form.elements.hero_image_url.value.trim(),
         support_whatsapp: support
       });
-      message.textContent = publicResult.message || 'Configuración general guardada.';
-      message.className = 'message success';
+      message.textContent = [
+        publicResult.message || 'Configuración general guardada.',
+        aiResult.audit_warning,
+        publicResult.audit_warning
+      ].filter(Boolean).join(' ');
+      message.className = aiResult.audit_warning || publicResult.audit_warning ? 'message error' : 'message success';
     } catch (error) {
       message.textContent = aiSaved
         ? 'La configuración del asistente se guardó, pero no se completó la configuración pública: ' + (error.message || 'Error desconocido.')
