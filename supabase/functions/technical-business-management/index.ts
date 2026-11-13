@@ -602,6 +602,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "list_block_requests") {
+      if (!isOwner) return reply(403, { error: "Solo el propietario técnico puede consultar estas solicitudes." });
       const { data: requests, error: requestError } = await admin
         .from("access_block_requests")
         .select("id,business_id,requested_by,target_user_id,reason,status,technician_note,resolved_by,resolved_at,created_at,businesses(name)")
@@ -629,6 +630,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "resolve_block_request") {
+      if (!isOwner) return reply(403, { error: "Solo el propietario técnico puede resolver estas solicitudes." });
       const requestId = textValue(body.request_id, 80);
       const decision = textValue(body.decision, 20);
       const technicianNote = textValue(body.technician_note, 2000);
