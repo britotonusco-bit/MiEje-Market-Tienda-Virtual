@@ -34,6 +34,7 @@ CREATE INDEX IF NOT EXISTS access_block_requests_pending_created_idx
 
 ALTER TABLE public.access_block_requests ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.access_block_requests FROM PUBLIC, anon, authenticated, service_role;
+GRANT SELECT ON TABLE public.access_block_requests TO service_role;
 GRANT INSERT (business_id, requested_by, target_user_id, reason)
   ON TABLE public.access_block_requests TO authenticated;
 
