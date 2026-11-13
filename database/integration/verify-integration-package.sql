@@ -146,6 +146,13 @@ BEGIN
     RAISE EXCEPTION 'FALLO: faltan políticas de IA exclusivas del administrador del negocio.';
   END IF;
 
+  IF to_regprocedure('public.resolve_platform_payroll_record(uuid,text,text,uuid)') IS NULL
+     OR NOT has_function_privilege('service_role','public.resolve_platform_payroll_record(uuid,text,text,uuid)','EXECUTE')
+     OR has_function_privilege('anon','public.resolve_platform_payroll_record(uuid,text,text,uuid)','EXECUTE')
+     OR has_function_privilege('authenticated','public.resolve_platform_payroll_record(uuid,text,text,uuid)','EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: la RPC de resolución de nómina no es exclusiva del servidor.';
+  END IF;
+
   IF to_regprocedure('private.audit_business_ai_settings_change()') IS NULL
      OR NOT EXISTS (
        SELECT 1 FROM pg_trigger t
