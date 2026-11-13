@@ -504,9 +504,12 @@ Deno.serve(async (req: Request) => {
       const { data: membership, error: updateError } = await admin.from("business_memberships").update({
         status: "active",
         blocked_reason: null,
-      }).eq("id", membershipId).select("id,business_id,user_id,role,status").maybeSingle();
+      }).eq("id", membershipId).eq("status", "suspended")
+        .select("id,business_id,user_id,role,status").maybeSingle();
       if (updateError) throw updateError;
-      if (!membership) return reply(404, { error: "No se encontró esa asignación de usuario." });
+      if (!membership) {
+        return reply(409, { error: "El acceso cambió mientras se procesaba la reactivación. Actualiza la lista antes de continuar." });
+      }
 
       const { error: auditError } = await admin.from("audit_logs").insert({
         business_id: membership.business_id,
