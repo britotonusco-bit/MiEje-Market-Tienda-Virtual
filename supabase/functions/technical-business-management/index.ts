@@ -131,6 +131,43 @@ Deno.serve(async (req: Request) => {
 
     if (!isOwner) return reply(403, { error: "Solo el administrador técnico puede realizar esta acción." });
 
+    if (action === "get_platform_public_settings") {
+      const { data, error } = await admin.from("platform_public_settings")
+        .select("site_name,site_description,logo_url,hero_image_url,support_whatsapp,updated_at")
+        .eq("id", true).maybeSingle();
+      if (error) throw error;
+      return reply(200, { ok: true, settings: data ?? {} });
+    }
+
+    if (action === "update_platform_public_settings") {
+      const siteName = textValue(body.site_name, 120);
+      const siteDescription = textValue(body.site_description, 2000);
+      const logoUrl = textValue(body.logo_url, 2048);
+      const heroImageUrl = textValue(body.hero_image_url, 2048);
+      const supportWhatsapp = textValue(body.support_whatsapp, 30).replace(/[^0-9]/g, "").slice(0, 18);
+      const validImageUrl = (value: string) => {
+        if (!value) return true;
+        try { return new URL(value).protocol === "https:"; } catch { return false; }
+      };
+      if (!siteName || !validImageUrl(logoUrl) || !validImageUrl(heroImageUrl) || (supportWhatsapp && supportWhatsapp.length < 10)) {
+        return reply(400, { error: "Revisa el nombre, las direcciones HTTPS de las imágenes y el número de WhatsApp." });
+      }
+      const { data, error } = await admin.from("platform_public_settings").upsert({
+        id: true, site_name: siteName, site_description: siteDescription,
+        logo_url: logoUrl || null, hero_image_url: heroImageUrl || null,
+        support_whatsapp: supportWhatsapp || null, updated_by: user.id,
+        updated_at: new Date().toISOString()
+      }, { onConflict: "id" }).select("site_name,site_description,logo_url,hero_image_url,support_whatsapp,updated_at").single();
+      if (error) throw error;
+      const { error: auditError } = await admin.from("audit_logs").insert({
+        business_id: null, actor_id: user.id, action: "platform.public_settings_updated",
+        entity_type: "platform_settings", entity_id: null,
+        details: { site_name: siteName, logo_changed: Boolean(logoUrl), hero_image_changed: Boolean(heroImageUrl), support_updated: Boolean(supportWhatsapp) }
+      });
+      if (auditError) throw auditError;
+      return reply(200, { ok: true, settings: data, message: "Configuración pública de MiEje Market guardada." });
+    }
+
     if (action === "list_businesses") {
       const { data, error } = await admin.from("businesses")
         .select("id,name,slug,category,status,suspension_reason,public_suspension_message,created_at")
