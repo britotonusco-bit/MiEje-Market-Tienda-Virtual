@@ -388,6 +388,9 @@ Deno.serve(async (req: Request) => {
       const { data: membership, error: updateError } = await admin.from("business_memberships")
         .update({ role, job_title: jobTitle })
         .eq("id", membershipId)
+        .eq("business_id", before.business_id)
+        .eq("role", before.role)
+        .eq("status", before.status)
         .select("id,business_id,user_id,role,status,job_title").maybeSingle();
       if (updateError) throw updateError;
       if (!membership) return reply(409, { error: "La membresía cambió durante la operación. Actualiza la lista." });
