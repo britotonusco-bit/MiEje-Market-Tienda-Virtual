@@ -173,10 +173,13 @@ Deno.serve(async (req: Request) => {
         return reply(400, { error: "La descripción debe tener al menos 3 caracteres y el importe debe ser mayor que cero." });
       }
       if (!/^[A-Z]{3}$/.test(currency)) return reply(400, { error: "La moneda debe usar un código de tres letras, por ejemplo COP." });
-      if (businessId && !/^[0-9a-f-]{36}$/i.test(businessId)) return reply(400, { error: "Identificador de negocio no válido." });
-      const occurredAt = occurredAtInput && !Number.isNaN(Date.parse(occurredAtInput))
-        ? new Date(occurredAtInput).toISOString()
-        : new Date().toISOString();
+      if (businessId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(businessId)) {
+        return reply(400, { error: "Identificador de negocio no válido." });
+      }
+      if (occurredAtInput && Number.isNaN(Date.parse(occurredAtInput))) {
+        return reply(400, { error: "La fecha del movimiento no es válida." });
+      }
+      const occurredAt = occurredAtInput ? new Date(occurredAtInput).toISOString() : new Date().toISOString();
       const { data, error } = await admin.from("platform_financial_records").insert({
         business_id: businessId,
         record_type: recordType,
@@ -214,8 +217,15 @@ Deno.serve(async (req: Request) => {
         return reply(400, { error: "Beneficiario, descripción e importe son obligatorios; el importe debe ser mayor que cero." });
       }
       if (!/^[A-Z]{3}$/.test(currency)) return reply(400, { error: "La moneda debe usar un código de tres letras, por ejemplo COP." });
-      if (businessId && !/^[0-9a-f-]{36}$/i.test(businessId)) return reply(400, { error: "Identificador de negocio no válido." });
-      if (dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return reply(400, { error: "La fecha límite no es válida." });
+      if (businessId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(businessId)) {
+        return reply(400, { error: "Identificador de negocio no válido." });
+      }
+      if (dueDate) {
+        const parsedDueDate = new Date(dueDate + "T00:00:00.000Z");
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate) || Number.isNaN(parsedDueDate.getTime()) || parsedDueDate.toISOString().slice(0, 10) !== dueDate) {
+          return reply(400, { error: "La fecha límite no es válida." });
+        }
+      }
       const { data, error } = await admin.from("payroll_records").insert({
         business_id: businessId,
         payee_name: payeeName,
