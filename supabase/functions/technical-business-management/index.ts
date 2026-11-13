@@ -270,8 +270,9 @@ Deno.serve(async (req: Request) => {
       const email = textValue(body.email, 254).toLowerCase();
       const role = textValue(body.role, 40);
       const displayName = textValue(body.display_name, 160);
-      if (!businessId || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !["business_admin", "employee"].includes(role)) {
-        return reply(400, { error: "Negocio, correo válido y rol permitido son obligatorios." });
+      const jobTitle = textValue(body.job_title, 100) || (role === "business_admin" ? "Administrador del negocio" : "");
+      if (!businessId || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !["business_admin", "employee"].includes(role) || displayName.length < 3 || jobTitle.length < 2) {
+        return reply(400, { error: "Negocio, nombre completo, correo, rol y cargo válido son obligatorios." });
       }
 
       const { data: business, error: businessError } = await admin
@@ -318,11 +319,19 @@ Deno.serve(async (req: Request) => {
 
       if (!targetUser?.id) return reply(500, { error: "Supabase no devolvió el usuario de destino." });
 
-      const { error: profileUpsertError } = await admin.from("profiles").upsert({
-        id: targetUser.id,
-        display_name: displayName || null,
-      }, { onConflict: "id", ignoreDuplicates: true });
-      if (profileUpsertError) throw profileUpsertError;
+      const { data: existingProfile, error: profileReadError } = await admin.from("profiles")
+        .select("id,display_name").eq("id", targetUser.id).maybeSingle();
+      if (profileReadError) throw profileReadError;
+      if (!existingProfile) {
+        const { error: profileInsertError } = await admin.from("profiles").insert({
+          id: targetUser.id, display_name: displayName
+        });
+        if (profileInsertError && profileInsertError.code !== "23505") throw profileInsertError;
+      } else if (!existingProfile.display_name) {
+        const { error: profileUpdateError } = await admin.from("profiles")
+          .update({ display_name: displayName }).eq("id", targetUser.id);
+        if (profileUpdateError) throw profileUpdateError;
+      }
 
       const { data: membership, error: membershipError } = await admin.from("business_memberships").insert({
         business_id: businessId,
@@ -331,7 +340,7 @@ Deno.serve(async (req: Request) => {
         job_title: jobTitle,
         status: "active",
         created_by: user.id,
-      }).select("id, business_id, user_id, role, status").single();
+      }).select("id, business_id, user_id, role, status, job_title").single();
       if (membershipError) {
         if (membershipError.code === "23505") {
           return reply(409, { error: "Ese usuario ya recibió acceso a este negocio. Actualiza la lista de cuentas." });
