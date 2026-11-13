@@ -558,3 +558,19 @@ Se revisó también `panel-live.js` en la rama:
 Resultado de comprobaciones estáticas sobre los borradores SQL y el JavaScript de panel: **15 de 15 verificaciones aprobadas**. Se comprobaron sustitución de políticas, eliminación del bypass técnico en el trigger, retiro de columnas financieras del acceso directo, ACL de RPCs y separación de consultas de administrador/empleado. Esto no equivale a pruebas de ejecución ni de autorización con usuarios reales.
 
 La auditoría live sigue mostrando las políticas antiguas hasta que las migraciones se apliquen en staging y luego se autorice su paso a producción.
+
+
+## Revisión de gastos y auditoría — 13 de noviembre de 2026
+
+La inspección live encontró que la política `business_expenses_insert` permitía a un administrador insertar un gasto con `payment_status='paid'` y/o `paid_at` definido desde el primer INSERT. Eso permitía registrar como pagado un gasto sin pasar por la transición protegida del trigger. El trigger de UPDATE sí limita cambios posteriores: solo permite pasar de pendiente a pagado, o anular una sola vez, y compara el resto de las columnas para rechazar modificaciones adicionales.
+
+Se corrigió el borrador `database/security/business-admin-boundaries.sql`:
+- La política de INSERT ahora exige `payment_status='pending'`, `payment_method IS NULL`, `paid_at IS NULL`, estado activo y campos de anulación vacíos.
+- Exige que `created_by = auth.uid()`, que el usuario sea administrador del negocio y que el negocio esté activo.
+- Revoca privilegios de INSERT y UPDATE tanto a nivel de tabla como a nivel de columna (incluidas concesiones antiguas por columna).
+- El INSERT solo concede columnas propias del gasto y no permite asignar ID, timestamps del sistema ni campos de pago/anulación.
+- El UPDATE solo concede columnas necesarias para marcar pago o anular; el trigger sigue validando la transición y que ninguna otra columna cambie.
+
+La política live `audit_logs_owner_or_business_admin_select` permite al propietario técnico consultar auditoría global, coherente con su función de supervisión, y a administradores consultar auditoría de su negocio. Los registros de auditoría no tienen permiso de escritura directa para `authenticated`; los eventos se generan desde funciones/operaciones controladas. La política de membresías live todavía conserva un bypass técnico y el borrador lo sustituye por lectura propia o del equipo del negocio para el administrador. La revisión de las funciones técnicas con service role y sus controles de autorización continúa pendiente.
+
+Comprobaciones estáticas del nuevo bloque de gastos: 9/9 aprobadas. No se ejecutó SQL ni se modificaron gastos live.
