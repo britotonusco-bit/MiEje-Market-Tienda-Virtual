@@ -662,3 +662,56 @@ WITH CHECK (id = (SELECT auth.uid()));
 
 -- El cargo se almacena en la membresía porque puede variar si una persona
 -- trabaja en más de un negocio. El panel y el rol se derivan del campo role.
+
+
+-- Los gastos nuevos deben comenzar pendientes y sin datos de pago/anulación.
+-- El pago se registra después mediante la transición protegida por trigger.
+DROP POLICY IF EXISTS business_expenses_insert ON public.business_expenses;
+CREATE POLICY business_expenses_insert
+ON public.business_expenses
+FOR INSERT
+TO authenticated
+WITH CHECK (
+  created_by = (SELECT auth.uid())
+  AND payment_status = 'pending'
+  AND payment_method IS NULL
+  AND paid_at IS NULL
+  AND status = 'active'
+  AND voided_at IS NULL
+  AND voided_by IS NULL
+  AND void_reason IS NULL
+  AND private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+);
+
+-- Limitar INSERT a los datos propios del gasto; no permitir que el cliente
+-- asigne ID/fechas del sistema, estado de pago, ni campos de anulación.
+REVOKE INSERT ON TABLE public.business_expenses FROM PUBLIC, anon, authenticated;
+GRANT INSERT (
+  business_id,
+  expense_date,
+  category,
+  description,
+  amount,
+  payment_status,
+  supplier,
+  transaction_reference,
+  receipt_path,
+  notes,
+  created_by
+) ON TABLE public.business_expenses TO authenticated;
+
+-- Las actualizaciones solo pueden solicitar campos de las transiciones que
+-- valida private.guard_business_expense_update(); el trigger compara el resto
+-- de las columnas y rechaza cualquier modificación adicional.
+REVOKE UPDATE ON TABLE public.business_expenses FROM PUBLIC, anon, authenticated;
+GRANT UPDATE (
+  payment_status,
+  payment_method,
+  paid_at,
+  status,
+  void_reason,
+  voided_by,
+  voided_at,
+  updated_at
+) ON TABLE public.business_expenses TO authenticated;
