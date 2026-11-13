@@ -685,7 +685,7 @@ La rama prepara un flujo nuevo que:
 - Consulta primero la clave idempotente; la función SQL serializa solicitudes simultáneas con un advisory transaction lock.
 - Crea el pedido, descuenta inventario y guarda la respuesta idempotente en la misma transacción SQL.
 - Rechaza reutilizar una clave con datos distintos.
-- El rate limit se consume solo para claves nuevas y dentro de la transacción del pedido.
+- El límite se reserva mediante una RPC independiente solo para claves nuevas; la reserva permanece aunque la creación del pedido falle. Reintentar la misma clave y el mismo contenido no consume otra reserva.
 
 ### Permisos live consultados
 
@@ -710,3 +710,22 @@ El endpoint sigue siendo público por diseño: el token privado de seguimiento a
 Las verificaciones estáticas de la rama cubren validación de JWT, perfil bloqueado, método de pago asociado al negocio, recuperación idempotente, bloqueo transaccional, permisos service_role y respuesta mínima de seguimiento. El flujo nuevo no está desplegado: live sigue en v3 sin idempotencia. Tampoco se ejecutaron pruebas concurrentes ni pruebas con inventario real.
 
 No se ejecutó SQL, no se desplegó ninguna Edge Function y no se cambió `main`.
+
+
+### Refuerzo adicional del límite de solicitudes — 13 de noviembre de 2026
+
+La revisión transaccional detectó que consumir el límite dentro de la transacción de creación provocaba que el contador se revirtiera si el pedido fallaba por inventario o validación. Eso dejaba los intentos fallidos fuera del límite.
+
+Se corrigió el borrador SQL y la Edge Function:
+- Se añadió la tabla privada `private.checkout_rate_limit_reservations`, sin permisos directos para anon, authenticated ni service_role.
+- Se añadió la RPC `reserve_checkout_rate_limit`, SECURITY DEFINER, con `search_path` vacío y EXECUTE únicamente para service_role.
+- La reserva se identifica por clave idempotente, IP hasheada con SHA-256 y hash del contenido del pedido.
+- El límite sigue siendo 10 reservas por IP en 10 minutos.
+- Una misma clave y el mismo contenido reutilizan la reserva existente; la misma clave con otra IP o contenido se rechaza.
+- La Edge Function consulta primero si el pedido ya existe; si no existe, reserva el intento en una llamada RPC independiente y después crea el pedido idempotente.
+- La creación del pedido y el almacenamiento de su respuesta continúan en la misma transacción; si falla la creación, no se crea un pedido parcial, pero la reserva del intento permanece.
+- Las reservas se limpian después de 24 horas.
+
+Comprobaciones estáticas: **14/14 aprobadas** para tabla privada, RLS, privilegios, hash, concurrencia por clave/IP, límite, orden de RPCs, validación de JWT y respuesta mínima de seguimiento.
+
+Pendiente de prueba en staging: ráfagas concurrentes con distintas claves desde la misma IP, reintentos de misma clave, payload alterado, pedido rechazado por inventario y verificación de que el contador persiste tras el rollback del pedido. El nuevo SQL y la Edge Function siguen sin ejecutarse/desplegarse en el proyecto live.
