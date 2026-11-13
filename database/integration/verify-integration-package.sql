@@ -314,6 +314,41 @@ BEGIN
     RAISE EXCEPTION 'FALLO: anon no tiene las columnas públicas mínimas para resolver contenido publicado.';
   END IF;
 
+  IF NOT has_column_privilege('anon','public.businesses','name','SELECT')
+     OR NOT has_column_privilege('anon','public.businesses','slug','SELECT')
+     OR NOT has_column_privilege('anon','public.businesses','business_type','SELECT')
+     OR NOT has_column_privilege('anon','public.businesses','category','SELECT')
+     OR NOT has_column_privilege('anon','public.businesses','description','SELECT')
+     OR NOT has_column_privilege('anon','public.businesses','tagline','SELECT')
+     OR NOT has_column_privilege('anon','public.businesses','city','SELECT')
+     OR NOT has_column_privilege('anon','public.businesses','contact_phone','SELECT')
+     OR NOT has_column_privilege('anon','public.businesses','whatsapp_support','SELECT')
+     OR NOT has_column_privilege('anon','public.businesses','opening_hours','SELECT')
+     OR NOT has_column_privilege('anon','public.businesses','logo_url','SELECT')
+     OR NOT has_column_privilege('anon','public.businesses','public_suspension_message','SELECT')
+     OR NOT has_column_privilege('anon','public.businesses','delivery_fee','SELECT')
+     OR NOT has_column_privilege('anon','public.businesses','minimum_order_amount','SELECT') THEN
+    RAISE EXCEPTION 'FALLO: anon no puede leer todas las columnas públicas necesarias del directorio.';
+  END IF;
+
+  IF NOT has_table_privilege('anon','public.products','SELECT')
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_policies
+       WHERE schemaname='public' AND tablename='businesses'
+         AND policyname='businesses_public_directory_anon'
+         AND cmd='SELECT' AND roles @> ARRAY['anon']::name[]
+     )
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_policies
+       WHERE schemaname='public' AND tablename='products'
+         AND policyname='products_public_active_anon'
+         AND cmd='SELECT' AND roles @> ARRAY['anon']::name[]
+         AND qual ILIKE '%EXISTS%'
+         AND qual NOT ILIKE '%private.business_is_active%'
+     ) THEN
+    RAISE EXCEPTION 'FALLO: el catálogo público anon no tiene grants/políticas independientes de helpers privados.';
+  END IF;
+
   IF has_function_privilege('anon','private.business_is_active(uuid)','EXECUTE')
      OR has_function_privilege('anon','private.has_business_role(uuid,text[])','EXECUTE') THEN
     RAISE EXCEPTION 'FALLO: no se debe conceder a anon ejecución de helpers privados.';
