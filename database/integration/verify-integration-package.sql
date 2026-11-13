@@ -56,6 +56,52 @@ BEGIN
     RAISE EXCEPTION 'FALLO: la RPC de resolución de bloqueos no tiene permisos exclusivos de servidor.';
   END IF;
 
+  IF to_regclass('public.business_ai_settings') IS NULL
+     OR to_regclass('public.platform_ai_settings') IS NULL
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_class c
+       JOIN pg_namespace n ON n.oid=c.relnamespace
+       WHERE n.nspname='public' AND c.relname='business_ai_settings'
+         AND c.relrowsecurity
+     )
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_class c
+       JOIN pg_namespace n ON n.oid=c.relnamespace
+       WHERE n.nspname='public' AND c.relname='platform_ai_settings'
+         AND c.relrowsecurity
+     ) THEN
+    RAISE EXCEPTION 'FALLO: faltan tablas de configuración IA o RLS no está habilitado.';
+  END IF;
+
+  IF has_table_privilege('anon','public.business_ai_settings','SELECT')
+     OR has_table_privilege('anon','public.business_ai_settings','INSERT')
+     OR has_table_privilege('anon','public.platform_ai_settings','SELECT')
+     OR has_table_privilege('anon','public.platform_ai_settings','INSERT')
+     OR has_table_privilege('authenticated','public.platform_ai_settings','SELECT')
+     OR has_table_privilege('authenticated','public.platform_ai_settings','INSERT')
+     OR has_table_privilege('authenticated','public.platform_ai_settings','UPDATE')
+     OR NOT has_table_privilege('service_role','public.platform_ai_settings','SELECT')
+     OR NOT has_table_privilege('service_role','public.platform_ai_settings','INSERT')
+     OR NOT has_table_privilege('service_role','public.platform_ai_settings','UPDATE') THEN
+    RAISE EXCEPTION 'FALLO: los permisos de configuración IA no respetan el acceso por rol.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='business_ai_settings'
+      AND policyname='business_ai_settings_admin_select' AND cmd='SELECT'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='business_ai_settings'
+      AND policyname='business_ai_settings_admin_insert' AND cmd='INSERT'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='business_ai_settings'
+      AND policyname='business_ai_settings_admin_update' AND cmd='UPDATE'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: faltan políticas de IA exclusivas del administrador del negocio.';
+  END IF;
+
   IF NOT EXISTS (
     SELECT 1 FROM pg_class c
     JOIN pg_namespace n ON n.oid=c.relnamespace
