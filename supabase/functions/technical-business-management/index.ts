@@ -356,13 +356,16 @@ Deno.serve(async (req: Request) => {
         entity_id: membership.id,
         details: { target_user_id: targetUser.id, role, invitation_sent: invitationSent },
       });
-      if (auditError) throw auditError;
+      if (auditError) console.error("Membership created but audit insert failed:", auditError);
 
       return reply(201, {
         ok: true,
         membership,
         invitation_sent: invitationSent,
-        message: invitationSent ? "Invitación enviada al correo." : "Usuario existente asignado al negocio.",
+        audit_warning: auditError ? "La asignación se creó, pero no se pudo guardar su evento de auditoría. No repitas la invitación; revisa los registros técnicos." : null,
+        message: auditError
+          ? (invitationSent ? "La invitación se envió y la asignación se creó." : "El usuario existente quedó asignado al negocio.")
+          : (invitationSent ? "Invitación enviada al correo." : "Usuario existente asignado al negocio."),
       });
     }
 
@@ -400,8 +403,13 @@ Deno.serve(async (req: Request) => {
         entity_id: membership.id,
         details: { target_user_id: membership.user_id, previous_role: before.role, role, previous_job_title: before.job_title, job_title: jobTitle }
       });
-      if (auditError) throw auditError;
-      return reply(200, { ok: true, membership, message: "Rol y cargo actualizados y registrados en auditoría." });
+      if (auditError) console.error("Membership assignment updated but audit insert failed:", auditError);
+      return reply(200, {
+        ok: true,
+        membership,
+        audit_warning: auditError ? "El rol y el cargo se actualizaron, pero no se pudo guardar el evento de auditoría." : null,
+        message: auditError ? "El rol y el cargo se actualizaron." : "Rol y cargo actualizados y registrados en auditoría.",
+      });
     }
 
     if (action === "set_business_status") {
@@ -479,8 +487,13 @@ Deno.serve(async (req: Request) => {
         entity_id: membership.id,
         details: { target_user_id: membership.user_id, role: membership.role, reason },
       });
-      if (auditError) throw auditError;
-      return reply(200, { ok: true, membership });
+      if (auditError) console.error("Membership suspended but audit insert failed:", auditError);
+      return reply(200, {
+        ok: true,
+        membership,
+        audit_warning: auditError ? "El acceso se suspendió, pero no se pudo guardar el evento de auditoría." : null,
+        message: auditError ? "El acceso se suspendió." : "Acceso suspendido y registrado en auditoría.",
+      });
     }
 
     if (action === "unblock_member") {
@@ -522,8 +535,13 @@ Deno.serve(async (req: Request) => {
         entity_id: membership.id,
         details: { target_user_id: membership.user_id, role: membership.role, reason },
       });
-      if (auditError) throw auditError;
-      return reply(200, { ok: true, membership, message: "Acceso reactivado y registrado en auditoría." });
+      if (auditError) console.error("Membership reactivated but audit insert failed:", auditError);
+      return reply(200, {
+        ok: true,
+        membership,
+        audit_warning: auditError ? "El acceso se reactivó, pero no se pudo guardar el evento de auditoría." : null,
+        message: auditError ? "El acceso se reactivó." : "Acceso reactivado y registrado en auditoría.",
+      });
     }
 
     if (action === "moderate_business_content") {
