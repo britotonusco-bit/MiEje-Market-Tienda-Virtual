@@ -56,6 +56,50 @@ BEGIN
     RAISE EXCEPTION 'FALLO: la RPC de resolución de bloqueos no tiene permisos exclusivos de servidor.';
   END IF;
 
+  IF to_regclass('public.platform_financial_records') IS NULL
+     OR to_regclass('public.payroll_records') IS NULL
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_class c
+       JOIN pg_namespace n ON n.oid=c.relnamespace
+       WHERE n.nspname='public' AND c.relname='platform_financial_records'
+         AND c.relrowsecurity
+     )
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_class c
+       JOIN pg_namespace n ON n.oid=c.relnamespace
+       WHERE n.nspname='public' AND c.relname='payroll_records'
+         AND c.relrowsecurity
+     ) THEN
+    RAISE EXCEPTION 'FALLO: faltan tablas financieras de plataforma o RLS no está habilitado.';
+  END IF;
+
+  IF has_table_privilege('anon','public.platform_financial_records','SELECT')
+     OR has_table_privilege('anon','public.platform_financial_records','INSERT')
+     OR has_table_privilege('authenticated','public.platform_financial_records','SELECT')
+     OR has_table_privilege('authenticated','public.platform_financial_records','INSERT')
+     OR has_table_privilege('authenticated','public.platform_financial_records','UPDATE')
+     OR has_table_privilege('authenticated','public.platform_financial_records','DELETE')
+     OR has_table_privilege('anon','public.payroll_records','SELECT')
+     OR has_table_privilege('authenticated','public.payroll_records','SELECT')
+     OR has_table_privilege('authenticated','public.payroll_records','INSERT')
+     OR has_table_privilege('authenticated','public.payroll_records','UPDATE')
+     OR has_table_privilege('authenticated','public.payroll_records','DELETE')
+     OR NOT has_table_privilege('service_role','public.platform_financial_records','SELECT')
+     OR NOT has_table_privilege('service_role','public.platform_financial_records','INSERT')
+     OR NOT has_table_privilege('service_role','public.payroll_records','SELECT')
+     OR NOT has_table_privilege('service_role','public.payroll_records','INSERT')
+     OR NOT has_table_privilege('service_role','public.payroll_records','UPDATE') THEN
+    RAISE EXCEPTION 'FALLO: los grants financieros no son exclusivos del servidor.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.check_constraints
+    WHERE constraint_schema='public'
+      AND constraint_name='payroll_paid_fields_consistent'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: falta la validación de coherencia del estado de nómina.';
+  END IF;
+
   IF to_regclass('public.business_ai_settings') IS NULL
      OR to_regclass('public.platform_ai_settings') IS NULL
      OR NOT EXISTS (
