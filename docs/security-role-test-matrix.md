@@ -743,3 +743,93 @@ La Edge Function live `track-public-order` v1 y el código de la rama consultan 
 Pendiente: la función de seguimiento no tiene un límite de solicitudes por IP en el código revisado. El UUID aleatorio hace inviable una búsqueda práctica por fuerza bruta, pero el rate limit ayudaría a reducir abuso de recursos. Debe incorporarse antes de considerar cerrada la auditoría de endpoints públicos.
 
 La consulta de esquema e índices fue de solo lectura. No se modificaron pedidos ni tokens.
+
+
+## Auditoría integral de los cinco bloques funcionales — 13 de noviembre de 2026
+
+**Alcance:** revisión estática del código de la rama `correcciones-funcionales`, lectura de solo lectura del proyecto Supabase independiente y comparación de funciones desplegadas con las preparadas en la rama. No equivale a una prueba end-to-end.
+
+### Bloque 1. Checkout y funciones públicas
+
+**Revisado**
+- `create-public-order` valida UUID de negocio, método de pago, clave de idempotencia, campos de cliente, productos y cantidades.
+- Consulta que el método de pago pertenezca al negocio y esté habilitado para una compra nueva.
+- Si hay sesión de cliente, valida el access token con Auth, comprueba el perfil y rechaza cuentas bloqueadas; invitados pueden comprar.
+- La rama usa `get_public_order_idempotent`, reserva de límite por IP y `create_public_order_idempotent`.
+- `get-public-storefront` devuelve solo métodos habilitados de negocios activos.
+- `track-public-order` exige un token UUID y devuelve únicamente los campos previstos para seguimiento; las respuestas usan `Cache-Control: no-store`.
+- `create-job-application` valida negocio y vacante activa/aprobada, consentimiento, tipo/extensión declarados, tamaño máximo, sesión de carga con expiración y límite de solicitudes. La descarga para el administrador se hace mediante URL firmada temporal.
+
+**Corrección aplicada**
+- Se detectó una incompatibilidad potencial para compras de invitados: el navegador usa una clave moderna `sb_publishable_`, mientras que el runtime también puede exponer la clave legacy `SUPABASE_ANON_KEY`. Comparar solo contra una de ellas podía interpretar la clave pública como access token y rechazar al invitado. La rama ahora reconoce las claves anon configuradas y el prefijo público moderno; los JWT de usuario siguen pasando por `auth.getUser`.
+- Commit: `3df6a65e680cc1d34afefc82f3c1d7734265cefa`.
+
+**Bloqueo live**
+- Edge Function live `create-public-order` continúa en versión 3 y no contiene la nueva idempotencia. La versión de la rama depende de `checkout-idempotency-draft.sql`, que no está aplicado ni desplegado.
+- El endpoint público de seguimiento no tiene un limitador propio. El token UUID tiene alta entropía; agregar límites y métricas sigue siendo una mejora recomendada.
+- Los documentos adjuntos de postulaciones no pasan por análisis antivirus ni inspección profunda del contenido. La extensión/MIME/tamaño no prueban que un documento sea seguro.
+
+### Bloque 2. Pedidos, inventario, cancelaciones y reembolsos
+
+**Revisado**
+- La función SQL live `create_public_order` recalcula importes en servidor, valida negocio/productos activos, rechaza líneas duplicadas y cantidades inválidas, bloquea las filas de productos con `FOR UPDATE`, verifica inventario y descuenta existencias dentro de la misma transacción.
+- Los productos y costos históricos se guardan en sus tablas correspondientes.
+- El flujo preparado de cancelaciones bloquea pedido/solicitud, requiere aprobación administrativa, impide doble decisión y repone inventario dentro de la transacción.
+- El flujo de reembolsos registra una devolución ya ejecutada externamente; no realiza transferencias ni cobros automáticos.
+
+**Bloqueo live**
+- El trigger live de estados todavía permite bypass del propietario técnico; la versión preparada en `business-admin-boundaries.sql` lo elimina y exige membresía activa de administrador/empleado.
+- No existen todavía en la base live los RPC `get_business_admin_order_financials`, `mark_order_payment_received`, `request_order_cancellation`, `decide_order_cancellation` ni `complete_order_refund`. Sus definiciones están en los borradores SQL.
+- El panel de administrador llama a esos RPC. En especial, `loadBusinessAdmin()` necesita `get_business_admin_order_financials`; sin aplicarlo, el panel no puede completar su carga financiera.
+- La migración de checkout idempotente y la migración de vinculación de clientes deben aplicarse antes que los RPC financieros que usan `orders.customer_user_id`. Cancelaciones y reembolsos deben aplicarse después de sus dependencias.
+
+### Bloque 3. Paneles y permisos
+
+**Revisado**
+- Las páginas activas del modelo de tres paneles son `panel-tecnico.html`, `panel-negocio.html` y `panel-personal.html`; comparten `panel-live.js`.
+- Se compararon 58 selectores usados por el JavaScript con los identificadores de las tres páginas: no se encontraron referencias a IDs ausentes en el conjunto de páginas.
+- El panel de empleados muestra cola de pedidos sin importes y permite avanzar estados mediante el trigger.
+- El panel de administrador incluye pedidos, cancelaciones, registro de reembolsos, productos, configuración comercial, contenido/vacantes, postulaciones y auditoría.
+- `panel-admin.html` se identifica explícitamente como prototipo visual sin conexión; no debe confundirse con el panel administrativo activo, que es `panel-negocio.html`.
+
+**Funciones pendientes**
+- El panel de administrador no tiene módulo de gastos operativos; tampoco presenta gráficos consolidados diarios, mensuales y anuales de ingresos/gastos.
+- El panel técnico indica que finanzas globales y nómina no están conectadas. La base live no contiene `platform_financial_records` ni `payroll_records`.
+- El panel técnico muestra las solicitudes de bloqueo como no disponibles; el panel de negocio puede enviar una solicitud, pero la cola técnica todavía no está implementada.
+- El formulario de promociones y vacantes está presente, pero debe probarse el flujo completo de publicación, moderación, postulación, carga y descarga de documentos.
+
+### Bloque 4. Página pública y cuentas de clientes
+
+**Revisado**
+- El registro público de clientes está separado del login interno de paneles.
+- La página consulta negocios/productos registrados, métodos de pago públicos y contenido aprobado. Los productos de demostración no permiten comprar.
+- El checkout puede asociar el pedido al cliente autenticado desde el servidor; no confía en un `customer_user_id` enviado por el navegador.
+- Se preparó la migración `customer-account-migration.sql` para `orders.customer_user_id` y `customer_favorites`.
+- El historial está encapsulado en `get_customer_order_history()`; los favoritos tienen políticas RLS de propietario.
+
+**Bloqueo live**
+- `orders.customer_user_id` y `customer_favorites` aún no existen. Por eso el historial y los favoritos no están operativos en la base independiente.
+- No se vinculan automáticamente pedidos anteriores de invitado por correo; no se debe hacer esa asociación sin un proceso de verificación de titularidad.
+- No hay negocios ni productos registrados en el proyecto independiente, así que no se puede completar una compra real de prueba.
+
+### Bloque 5. Auditoría integral y seguridad
+
+**Hallazgos confirmados en Supabase live**
+- Siguen activas políticas con bypass `platform_owner` en `orders`, `order_items`, `business_memberships`, `profiles` y lectura de `business_content_pages`. El borrador de límites de administrador elimina esos bypass del Data API y reserva las operaciones técnicas a la Edge Function.
+- El asesor de seguridad mantiene la advertencia de protección de contraseñas comprometidas desactivada. Debe revisarse en Auth > Password Security antes de producción.
+- Las tablas internas de limitación y sesiones de carga tienen RLS habilitado sin políticas; la revisión de grants indica que no se concedió acceso a anon/authenticated, por lo que no se deben abrir para silenciar el aviso.
+- El asesor detecta 16 claves foráneas sin índice, 17 índices sin uso registrado y una advertencia por dos políticas SELECT permisivas en `business_content_pages`.
+- Se corrigió el borrador SQL para unificar la lectura pública y la lectura del administrador en una sola política SELECT. Commit SQL: `2f536bf65b1e0ed2ffc9e9a3c2bd1f078ad47942`.
+- El asesor de salud no reportó hallazgos.
+
+**Datos disponibles para pruebas**
+- El proyecto independiente tiene 1 usuario Auth, 1 perfil y 0 membresías.
+- No hay negocios ni productos registrados.
+- Las funciones desplegadas son: `technical-business-management` v6, `create-public-order` v3, `track-public-order` v1, `resolve-my-access` v2, `get-public-storefront` v2 y `create-job-application` v2.
+- La rama contiene cambios que todavía no están desplegados; no asumir que el código de GitHub coincide con la función live.
+
+### Estado de los cinco bloques
+
+La revisión estática de los cinco bloques quedó completada. **La auditoría funcional todavía no se puede declarar aprobada para producción**: faltan aplicar los borradores en staging, crear datos de prueba aislados, probar dos negocios con roles distintos, ejecutar compras concurrentes, validar correos/redirects y revisar los resultados de punta a punta.
+
+No se ejecutó SQL, no se desplegaron funciones, no se fusionaron PR y no se modificó `main`.
