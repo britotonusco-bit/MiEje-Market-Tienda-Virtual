@@ -23,13 +23,14 @@ Cada archivo es una unidad independiente. Ejecutar uno a uno, revisar el resulta
 |---:|---|---|
 | 1 | `database/platform/platform-public-settings-draft.sql` | Crea la tabla de configuración pública global que necesita la función de ajustes de plataforma. |
 | 2 | `database/security/business-admin-boundaries.sql` | Endurece RLS, grants, límites por negocio, perfiles, membresías y trigger de último administrador. Debe quedar antes de las pruebas de roles y de los flujos posteriores. |
-| 3 | `database/security/access-block-requests-draft.sql` | Crea solicitudes de bloqueo por negocio y una RPC transaccional que solo puede ejecutar la Edge Function técnica; requiere helpers, membresías y auditoría base. |
-| 4 | `database/security/storage-policy-fix.sql` | Repara políticas de Storage; requiere buckets ya creados y helpers de autorización disponibles. |
-| 5 | `database/customers/customer-account-migration.sql` | Crea `orders.customer_user_id` y favoritos; es dependencia de checkout e historial. |
-| 6 | `database/orders/checkout-idempotency-draft.sql` | Depende de la columna anterior, de `create_public_order`, de los helpers/rate-limit existentes y de `extensions.digest`. Este archivo repite parte de la estructura de clientes con `IF NOT EXISTS`; la migración de clientes es la fuente de verdad y debe ejecutarse primero. |
-| 7 | `database/orders/order-financial-access-draft.sql` | Depende de `orders.customer_user_id`, del esquema de checkout y de las tablas financieras existentes. Restringe columnas y crea RPCs de finanzas/historial. |
-| 8 | `database/orders/cancellation-flow-draft.sql` | Depende del esquema de pedidos, las membresías/helpers y del trigger de transición instalado por la migración de límites de negocio. |
-| 9 | `database/orders/refund-flow-draft.sql` | Depende de cancelaciones aprobadas y de las tablas `financial_transactions`, `refund_details` y auditoría. |
+| 3 | `database/ai/ai-settings-draft.sql` | Crea la configuración de IA separada por negocio y la configuración global privada; requiere helpers de autorización y usa Edge Function con AAL2 para la IA global. |
+| 4 | `database/security/access-block-requests-draft.sql` | Crea solicitudes de bloqueo por negocio y una RPC transaccional que solo puede ejecutar la Edge Function técnica; requiere helpers, membresías y auditoría base. |
+| 5 | `database/security/storage-policy-fix.sql` | Repara políticas de Storage; requiere buckets ya creados y helpers de autorización disponibles. |
+| 6 | `database/customers/customer-account-migration.sql` | Crea `orders.customer_user_id` y favoritos; es dependencia de checkout e historial. |
+| 7 | `database/orders/checkout-idempotency-draft.sql` | Depende de la columna anterior, de `create_public_order`, de los helpers/rate-limit existentes y de `extensions.digest`. Este archivo repite parte de la estructura de clientes con `IF NOT EXISTS`; la migración de clientes es la fuente de verdad y debe ejecutarse primero. |
+| 8 | `database/orders/order-financial-access-draft.sql` | Depende de `orders.customer_user_id`, del esquema de checkout y de las tablas financieras existentes. Restringe columnas y crea RPCs de finanzas/historial. |
+| 9 | `database/orders/cancellation-flow-draft.sql` | Depende del esquema de pedidos, las membresías/helpers y del trigger de transición instalado por la migración de límites de negocio. |
+| 10 | `database/orders/refund-flow-draft.sql` | Depende de cancelaciones aprobadas y de las tablas `financial_transactions`, `refund_details` y auditoría. |
 
 ### Endurecimiento MFA del propietario: etapa separada y condicionada
 
@@ -67,7 +68,7 @@ Ejecutar `verify-integration-package.sql`. Debe terminar sin excepciones. Guarda
 Usar `docs/security-role-test-matrix.md` como matriz principal. Prioridad mínima:
 
 1. **Aislamiento:** admin A y empleado A no leen ni alteran datos de B; admin B no lee A; técnico no obtiene datos comerciales globales desde Data API.
-2. **Membresías y bloqueos:** no se puede retirar, suspender o degradar al último administrador activo; dos operaciones concurrentes no dejan el negocio sin admin. Solo el administrador activo puede solicitar el bloqueo de otro miembro de su negocio; el técnico con MFA puede aprobar o rechazar, y la aprobación suspende solo esa membresía y deja auditoría.
+2. **Membresías, bloqueos e IA:** no se puede retirar, suspender o degradar al último administrador activo; dos operaciones concurrentes no dejan el negocio sin admin. Solo el administrador activo puede solicitar el bloqueo de otro miembro de su negocio; el técnico con MFA puede aprobar o rechazar, y la aprobación suspende solo esa membresía y deja auditoría. El administrador A solo configura la IA de A; el propietario con AAL2 administra la configuración global; empleados y clientes no pueden modificar ninguna configuración.
 3. **Checkout:** invitado y cliente; método deshabilitado; producto inactivo; inventario insuficiente; clave repetida; misma clave con payload distinto; dos compras concurrentes por la última unidad.
 4. **Historial/favoritos:** cliente A no accede a los datos de B; favorito de producto inactivo se rechaza; eliminar favorito propio funciona; eliminar cuenta conserva pedidos y limpia la relación.
 5. **Finanzas:** empleado no lee importes ni confirma pagos; admin solo ve su negocio; pagos duplicados y reembolsos duplicados se rechazan.
