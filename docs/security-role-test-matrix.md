@@ -478,3 +478,6 @@ Auditoría de solo lectura del proyecto independiente `cqixlrwbqatbhzmpygiz` y d
 No se ejecutaron cambios en la base de datos ni se desplegaron funciones durante esta auditoría. La rama y el PR continúan siendo borradores.
 
 8. Confirmar en Authentication > URL Configuration que la URL exacta `https://britotonusco-bit.github.io/MiEje-Market-Tienda-Virtual/aceptar-invitacion.html` esté en Redirect URLs. Supabase ignora un `redirectTo` que no esté permitido y usa el Site URL; por eso no basta con que la página exista en GitHub Pages.
+
+9. La acción `list_business_members` devuelve `job_title` y el correo consultado desde Auth; la consulta se ejecuta únicamente después de validar propietario técnico y MFA AAL2.
+10. La actualización de rol/cargo ahora usa comparación de estado, rol y negocio leídos previamente; si la membresía cambió entre lectura y escritura, devuelve conflicto en vez de sobrescribir el cambio.
