@@ -37,6 +37,30 @@ BEGIN
     RAISE EXCEPTION 'FALLO: el RPC financiero no debe ser ejecutable por anon ni PUBLIC.';
   END IF;
 
+  IF NOT has_function_privilege('authenticated', 'public.mark_order_payment_received(uuid,text,text,text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: falta EXECUTE del RPC de confirmación de pago.';
+  END IF;
+
+  IF has_function_privilege('anon', 'public.mark_order_payment_received(uuid,text,text,text)', 'EXECUTE')
+     OR EXISTS (
+       SELECT 1
+       FROM pg_proc p
+       CROSS JOIN LATERAL aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
+       WHERE p.oid = to_regprocedure('public.mark_order_payment_received(uuid,text,text,text)')
+         AND acl.grantee = 0
+         AND acl.privilege_type = 'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'FALLO: el RPC de confirmación de pago no debe ser ejecutable por anon ni PUBLIC.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE schemaname = 'public'
+      AND indexname = 'financial_one_completed_payment_per_order'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: falta el índice único para impedir pagos duplicados.';
+  END IF;
+
   IF NOT has_function_privilege('authenticated', 'public.get_customer_order_history()', 'EXECUTE') THEN
     RAISE EXCEPTION 'FALLO: falta EXECUTE del RPC de historial de cliente.';
   END IF;
