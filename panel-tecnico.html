@@ -34,7 +34,7 @@
 <section id="finanzas" class="panel-section">
   <div class="section-heading"><div><h2>Finanzas de la plataforma y nómina</h2><p>Control interno de movimientos y obligaciones. Registrar un pago aquí no ejecuta transferencias ni reemplaza el comprobante bancario.</p></div></div>
   <div class="split">
-    <form id="platformFinanceForm" class="panel-card">
+    <form id="platformFinanceForm" class="card">
       <h3>Registrar movimiento financiero</h3>
       <label>Tipo de movimiento<select class="field" name="record_type" required><option value="income">Ingreso</option><option value="expense">Gasto</option><option value="refund">Reembolso registrado</option><option value="adjustment">Ajuste contable</option></select></label>
       <label>Negocio relacionado (opcional)<select class="field" name="business_id"><option value="">Plataforma</option></select></label>
@@ -45,7 +45,7 @@
       <button class="button primary" type="submit">Guardar movimiento</button>
       <p id="platformFinanceMessage" class="message" aria-live="polite"></p>
     </form>
-    <form id="payrollForm" class="panel-card">
+    <form id="payrollForm" class="card">
       <h3>Registrar nómina u honorarios</h3>
       <label>Beneficiario<input class="field" name="payee_name" maxlength="160" minlength="2" required></label>
       <label>Negocio relacionado (opcional)<select class="field" name="business_id"><option value="">Plataforma</option></select></label>
