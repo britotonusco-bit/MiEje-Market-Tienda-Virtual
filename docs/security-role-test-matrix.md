@@ -876,11 +876,12 @@ El paquete sigue pendiente de staging. No se ejecutó SQL, no se desplegaron Edg
 
 La prueba de solo lectura ejecutada con `SET LOCAL ROLE anon` confirmó que:
 - La consulta pública de `businesses` puede ejecutarse con las columnas comerciales necesarias.
-- La consulta de `products` falla con `permission denied for function private.business_is_active`, porque la política `products_public_active_anon` invoca un helper privado sin permiso de ejecución para `anon`.
+- Las consultas de `products` y `business_content_pages` fallan con `permission denied for function private.business_is_active`, porque sus políticas públicas actuales invocan un helper privado sin permiso de ejecución para `anon`.
 - No se debe solucionar concediendo ejecución de helpers privados al rol anónimo.
 
 Se añadió al borrador `database/security/business-admin-boundaries.sql`:
 - Reemplazo de `products_public_active_anon` por una política que comprueba `is_active` y la existencia de un negocio con `status='active'`.
+- Separación de `business_content_pages_public_read` para `anon`, también con comprobación directa del negocio activo; la política autenticada conserva sus helpers de membresía.
 - Grants de lectura limitados a las columnas públicas de `businesses`, manteniendo privados `suspension_reason`, `created_by`, `created_at` y `updated_at`.
 - Política explícita `businesses_public_directory_anon` para negocios activos o suspendidos.
 - Verificaciones post-migración para grants, políticas y ausencia de ejecución anónima de helpers privados.
