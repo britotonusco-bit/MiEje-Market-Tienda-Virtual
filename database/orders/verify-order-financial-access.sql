@@ -26,7 +26,14 @@ BEGIN
   END IF;
 
   IF has_function_privilege('anon', 'public.get_business_admin_order_financials(uuid,boolean,integer)', 'EXECUTE')
-     OR has_function_privilege('PUBLIC', 'public.get_business_admin_order_financials(uuid,boolean,integer)', 'EXECUTE') THEN
+     OR EXISTS (
+       SELECT 1
+       FROM pg_proc p
+       CROSS JOIN LATERAL aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
+       WHERE p.oid = to_regprocedure('public.get_business_admin_order_financials(uuid,boolean,integer)')
+         AND acl.grantee = 0
+         AND acl.privilege_type = 'EXECUTE'
+     ) THEN
     RAISE EXCEPTION 'FALLO: el RPC financiero no debe ser ejecutable por anon ni PUBLIC.';
   END IF;
 
@@ -35,7 +42,14 @@ BEGIN
   END IF;
 
   IF has_function_privilege('anon', 'public.get_customer_order_history()', 'EXECUTE')
-     OR has_function_privilege('PUBLIC', 'public.get_customer_order_history()', 'EXECUTE') THEN
+     OR EXISTS (
+       SELECT 1
+       FROM pg_proc p
+       CROSS JOIN LATERAL aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
+       WHERE p.oid = to_regprocedure('public.get_customer_order_history()')
+         AND acl.grantee = 0
+         AND acl.privilege_type = 'EXECUTE'
+     ) THEN
     RAISE EXCEPTION 'FALLO: el RPC de historial no debe ser ejecutable por anon ni PUBLIC.';
   END IF;
 
