@@ -168,6 +168,7 @@ USING (
 -- negocio. Los empleados pueden crear solicitudes mediante la RPC controlada,
 -- pero no consultar la bandeja ni decidir solicitudes.
 DROP POLICY IF EXISTS cancellation_members_select ON public.order_cancellation_requests;
+DROP POLICY IF EXISTS cancellation_admin_select ON public.order_cancellation_requests;
 CREATE POLICY cancellation_admin_select
 ON public.order_cancellation_requests
 FOR SELECT
@@ -602,6 +603,7 @@ GRANT UPDATE (display_name, avatar_url, phone) ON TABLE public.profiles TO authe
 
 DROP POLICY IF EXISTS profiles_select_self_or_owner ON public.profiles;
 DROP POLICY IF EXISTS profiles_select_self ON public.profiles;
+DROP POLICY IF EXISTS profiles_select_self_or_same_business_admin ON public.profiles;
 CREATE POLICY profiles_select_self_or_same_business_admin
 ON public.profiles
 FOR SELECT
