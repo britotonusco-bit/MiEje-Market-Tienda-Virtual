@@ -166,7 +166,7 @@ BEGIN
       ELSE 'access.block_request_rejected'
     END,
     'access_block_request',
-    v_request.id,
+    v_request.id::text,
     pg_catalog.jsonb_build_object(
       'target_user_id', v_request.target_user_id,
       'requested_by', v_request.requested_by,
