@@ -98,6 +98,18 @@ USING (
   OR private.has_business_role(id, ARRAY['business_admin','employee']::text[])
 );
 
+-- Directorio público: concede únicamente columnas comerciales necesarias para
+-- mostrar las tiendas. Los datos internos de suspensión/propiedad siguen privados.
+REVOKE SELECT ON TABLE public.businesses FROM PUBLIC, anon, authenticated;
+REVOKE SELECT (id, name, slug, business_type, category, description, tagline,
+  city, contact_phone, whatsapp_support, opening_hours, logo_url, status,
+  public_suspension_message, delivery_fee, minimum_order_amount)
+ON TABLE public.businesses FROM PUBLIC, anon, authenticated;
+GRANT SELECT (id, name, slug, business_type, category, description, tagline,
+  city, contact_phone, whatsapp_support, opening_hours, logo_url, status,
+  public_suspension_message, delivery_fee, minimum_order_amount)
+ON TABLE public.businesses TO anon, authenticated;
+
 DROP POLICY IF EXISTS memberships_select_self_admin_owner ON public.business_memberships;
 CREATE POLICY memberships_select_self_admin_owner
 ON public.business_memberships
@@ -108,6 +120,24 @@ USING (
   OR (
     private.business_is_active(business_id)
     AND private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  )
+);
+
+-- Los visitantes anónimos no pueden ejecutar helpers privados de membresía.
+-- La política pública valida directamente que el producto esté activo y que
+-- pertenezca a un negocio activo, usando solo las columnas públicas concedidas.
+DROP POLICY IF EXISTS products_public_active_anon ON public.products;
+CREATE POLICY products_public_active_anon
+ON public.products
+FOR SELECT
+TO anon
+USING (
+  is_active = true
+  AND EXISTS (
+    SELECT 1
+    FROM public.businesses b
+    WHERE b.id = products.business_id
+      AND b.status = 'active'
   )
 );
 
