@@ -149,6 +149,51 @@ Deno.serve(async (req: Request) => {
       return reply(200, { ok: true, settings: data ?? {} });
     }
 
+    if (action === "get_platform_ai_settings") {
+      const { data, error } = await admin.from("platform_ai_settings")
+        .select("enabled,assistant_name,system_instructions,updated_at")
+        .eq("id", true).maybeSingle();
+      if (error) throw error;
+      return reply(200, { ok: true, settings: data ?? {
+        enabled: false,
+        assistant_name: "Asistente general de MiEje Market",
+        system_instructions: "",
+      } });
+    }
+
+    if (action === "update_platform_ai_settings") {
+      if (typeof body.enabled !== "boolean") {
+        return reply(400, { error: "Indica si la configuración del asistente general estará habilitada." });
+      }
+      const assistantName = textValue(body.assistant_name, 120);
+      const instructions = textValue(body.system_instructions, 8000);
+      if (assistantName.length < 2) {
+        return reply(400, { error: "El nombre del asistente debe tener al menos dos caracteres." });
+      }
+      const { data, error } = await admin.from("platform_ai_settings").upsert({
+        id: true,
+        enabled: body.enabled,
+        assistant_name: assistantName,
+        system_instructions: instructions,
+        updated_by: user.id,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "id" })
+        .select("enabled,assistant_name,system_instructions,updated_at")
+        .single();
+      if (error) throw error;
+
+      const { error: auditError } = await admin.from("audit_logs").insert({
+        business_id: null,
+        actor_id: user.id,
+        action: "platform.ai_settings_updated",
+        entity_type: "platform_ai_settings",
+        entity_id: null,
+        details: { enabled: body.enabled, assistant_name: assistantName },
+      });
+      if (auditError) throw auditError;
+      return reply(200, { ok: true, settings: data, message: "Configuración del asistente general guardada. Esto no activa por sí solo un proveedor de IA." });
+    }
+
     if (action === "update_platform_public_settings") {
       const siteName = textValue(body.site_name, 120);
       const siteDescription = textValue(body.site_description, 2000);
