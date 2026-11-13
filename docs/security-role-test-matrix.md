@@ -819,7 +819,7 @@ La consulta de esquema e índices fue de solo lectura. No se modificaron pedidos
 - El asesor de seguridad mantiene la advertencia de protección de contraseñas comprometidas desactivada. Debe revisarse en Auth > Password Security antes de producción.
 - Las tablas internas de limitación y sesiones de carga tienen RLS habilitado sin políticas; la revisión de grants indica que no se concedió acceso a anon/authenticated, por lo que no se deben abrir para silenciar el aviso.
 - El asesor detecta 16 claves foráneas sin índice, 17 índices sin uso registrado y una advertencia por dos políticas SELECT permisivas en `business_content_pages`.
-- Se corrigió el borrador SQL para unificar la lectura pública y la lectura del administrador en una sola política SELECT. Commit SQL: `2f536bf65b1e0ed2ffc9e9a3c2bd1f078ad47942`.
+- Se ajustó el borrador SQL para separar la política pública `anon` (sin invocar helpers privados) de la política `authenticated` (catálogo público más lectura del administrador de su negocio). Así se evita exigir a `anon` EXECUTE sobre `private.business_is_active` o `private.has_business_role`. El cambio actual está en el commit `4ae88a7dba0c0da9e8fc8d72ccdf8b99412bfaa1`.
 - El asesor de salud no reportó hallazgos.
 
 **Datos disponibles para pruebas**
@@ -840,3 +840,8 @@ No se ejecutó SQL, no se desplegaron funciones, no se fusionaron PR y no se mod
 Se ejecutó una pasada adicional de 16 comprobaciones sobre la clave publishable, validación de sesión, asociación de cliente, idempotencia, límites de solicitudes, permisos de RPC, borradores de pedidos/cancelaciones/reembolsos, límites de negocio, política pública unificada y documentación. **16/16 pasaron**. Este resultado verifica presencia y consistencia estática de los controles; no sustituye ejecución SQL ni pruebas con solicitudes reales.
 
 El PR #2 continúa abierto como borrador, desde `correcciones-funcionales` hacia `integracion-supabase-independiente`. No está fusionado. `main` no fue modificado.
+
+
+### Hallazgo de dependencias durante el armado del paquete
+
+Al preparar el verificador de staging se comprobó que los roles `anon` y `authenticated` no tienen EXECUTE sobre `private.business_is_active(uuid)` ni `private.has_business_role(uuid,text[])`. Por eso no era correcto usar esos helpers dentro de una política `FOR SELECT TO anon, authenticated`. Se corrigió el borrador `business-admin-boundaries.sql`: la política `anon` usa la condición pública y un EXISTS sobre columnas públicas de `businesses`; la política `authenticated` conserva los helpers privados. Los permisos de columnas públicas de `businesses.id/status` sí están disponibles para anon. No se otorgó EXECUTE adicional a anon.
