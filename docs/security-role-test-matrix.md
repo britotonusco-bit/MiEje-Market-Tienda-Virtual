@@ -833,3 +833,10 @@ La consulta de esquema e índices fue de solo lectura. No se modificaron pedidos
 La revisión estática de los cinco bloques quedó completada. **La auditoría funcional todavía no se puede declarar aprobada para producción**: faltan aplicar los borradores en staging, crear datos de prueba aislados, probar dos negocios con roles distintos, ejecutar compras concurrentes, validar correos/redirects y revisar los resultados de punta a punta.
 
 No se ejecutó SQL, no se desplegaron funciones, no se fusionaron PR y no se modificó `main`.
+
+
+### Verificación estática final de la revisión — 13 de noviembre de 2026
+
+Se ejecutó una pasada adicional de 16 comprobaciones sobre la clave publishable, validación de sesión, asociación de cliente, idempotencia, límites de solicitudes, permisos de RPC, borradores de pedidos/cancelaciones/reembolsos, límites de negocio, política pública unificada y documentación. **16/16 pasaron**. Este resultado verifica presencia y consistencia estática de los controles; no sustituye ejecución SQL ni pruebas con solicitudes reales.
+
+El PR #2 continúa abierto como borrador, desde `correcciones-funcionales` hacia `integracion-supabase-independiente`. No está fusionado. `main` no fue modificado.
