@@ -31,6 +31,18 @@ BEGIN
   END IF;
 
   IF NOT EXISTS (
+    SELECT 1 FROM pg_class c
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname='public' AND c.relname='platform_public_settings'
+      AND c.relrowsecurity
+  ) OR has_table_privilege('anon','public.platform_public_settings','SELECT')
+    OR has_table_privilege('authenticated','public.platform_public_settings','SELECT')
+    OR has_table_privilege('anon','public.platform_public_settings','UPDATE')
+    OR has_table_privilege('authenticated','public.platform_public_settings','UPDATE') THEN
+    RAISE EXCEPTION 'FALLO: configuración global sin RLS o expuesta directamente al cliente.';
+  END IF;
+
+  IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_schema='public' AND table_name='business_memberships'
       AND column_name='job_title'
@@ -144,11 +156,13 @@ BEGIN
   END IF;
 
   IF NOT EXISTS (
-    SELECT 1 FROM storage.buckets WHERE id='business-assets'
+    SELECT 1 FROM storage.buckets
+    WHERE id='business-assets' AND public=true AND file_size_limit=5242880
   ) OR NOT EXISTS (
-    SELECT 1 FROM storage.buckets WHERE id='job-applications-private'
+    SELECT 1 FROM storage.buckets
+    WHERE id='job-applications-private' AND public=false AND file_size_limit=5242880
   ) THEN
-    RAISE EXCEPTION 'FALLO: faltan buckets de archivos requeridos.';
+    RAISE EXCEPTION 'FALLO: buckets ausentes o su visibilidad/límite de 5 MB no coincide con lo esperado.';
   END IF;
 
   IF NOT has_column_privilege('anon','public.businesses','id','SELECT')
