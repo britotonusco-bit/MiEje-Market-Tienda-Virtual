@@ -101,7 +101,7 @@
         await logPanel(businessId, panel, 'panel_open');
         notice.textContent = `Acceso validado para ${businessName}. Los permisos se aplican en la base de datos.`;
         notice.className = 'notice';
-        if (panel === 'business_admin') { await loadBusinessAdmin(); await initBusinessSettings(); }
+        if (panel === 'business_admin') { await loadBusinessAdmin(); await initBusinessSettings(); await loadBlockTargetUsers(); }
         else { await loadEmployeeOrders(); await showSupportLink(); }
       }
     } catch (error) {
@@ -328,7 +328,7 @@
     await loadSelectedBusiness('');
     await loadAuditEvents(null, '#auditContainer');
     const finance = document.querySelector('#financeContainer'); if (finance) finance.innerHTML = '<div class="empty">El módulo financiero global y nómina aún no está conectado al esquema independiente.</div>';
-    const blocks = document.querySelector('#blockRequestsContainer'); if (blocks) blocks.innerHTML = '<div class="empty">Las solicitudes de bloqueo no están disponibles en este proyecto todavía.</div>';
+    await loadBlockRequests();
     await loadContentModeration();
     await initPlatformAi();
   }
@@ -915,10 +915,75 @@
     const {error}=await db.from('business_ai_settings').upsert(payload,{onConflict:'business_id'}); message.textContent=error?`No se pudo guardar: ${error.message}`:'Configuración de IA de este negocio guardada por separado de la IA general.'; message.className=error?'message error':'message success';
   }
 
+  async function loadBlockTargetUsers() {
+    const target = document.querySelector('#blockTargetUser');
+    if (!target) return;
+    if (panel !== 'business_admin' || !isBusinessOwner) {
+      target.closest('form')?.classList.add('hidden');
+      const note = document.querySelector('#blockRequestOwnerNote');
+      if (note) note.classList.remove('hidden');
+      return;
+    }
+    target.innerHTML = '<option value="">Cargando usuarios del negocio…</option>';
+    const { data, error } = await db.from('business_memberships')
+      .select('user_id,role,profiles(display_name)')
+      .eq('business_id', businessId)
+      .eq('status', 'active')
+      .neq('user_id', currentUser.id)
+      .order('created_at', { ascending: true });
+    if (error) {
+      target.innerHTML = '<option value="">No se pudieron cargar los usuarios</option>';
+      const message = document.querySelector('#blockRequestMessage');
+      if (message) { message.textContent = 'No fue posible consultar las cuentas activas del negocio.'; message.className = 'message error'; }
+      console.warn('Block request target users:', error);
+      return;
+    }
+    const users = data || [];
+    target.innerHTML = '<option value="">Selecciona una cuenta</option>' + users.map(member => {
+      const profile = Array.isArray(member.profiles) ? member.profiles[0] : member.profiles;
+      const name = profile?.display_name || shortId(member.user_id);
+      const role = member.role === 'business_admin' ? 'Administrador' : 'Empleado';
+      return `<option value="${esc(member.user_id)}">${esc(name)} · ${role}</option>`;
+    }).join('');
+    if (!users.length) target.innerHTML = '<option value="">No hay otras cuentas activas en este negocio</option>';
+  }
+
   async function submitBlockRequest(event) {
-    event.preventDefault(); const form=event.currentTarget, message=document.querySelector('#blockRequestMessage');
-    const payload={business_id:businessId,requested_by:currentUser.id,target_user_id:form.elements.target_user_id.value,reason:form.elements.reason.value.trim()};
-    const {error}=await db.from('access_block_requests').insert(payload); message.textContent=error?`No se pudo enviar la solicitud: ${error.message}`:'Solicitud enviada al servicio técnico. El acceso no se bloquea hasta que el técnico la revise.'; message.className=error?'message error':'message success'; if(!error) form.reset();
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#blockRequestMessage');
+    const button = form.querySelector('button[type="submit"]');
+    const targetUserId = form.elements.target_user_id.value;
+    const reason = form.elements.reason.value.trim();
+    if (panel !== 'business_admin' || !isBusinessOwner) {
+      message.textContent = 'Solo el administrador del negocio puede solicitar este bloqueo.';
+      message.className = 'message error';
+      return;
+    }
+    if (!targetUserId || targetUserId === currentUser.id || reason.length < 5) {
+      message.textContent = 'Selecciona otra cuenta activa y escribe un motivo de al menos cinco caracteres.';
+      message.className = 'message error';
+      return;
+    }
+    button.disabled = true;
+    try {
+      const { error } = await db.from('access_block_requests').insert({
+        business_id: businessId,
+        requested_by: currentUser.id,
+        target_user_id: targetUserId,
+        reason
+      });
+      if (error) throw error;
+      message.textContent = 'Solicitud enviada al servicio técnico. El acceso no se bloquea hasta que el propietario técnico la revise.';
+      message.className = 'message success';
+      form.reset();
+      await loadBlockTargetUsers();
+    } catch (error) {
+      message.textContent = error.message || 'No se pudo enviar la solicitud.';
+      message.className = 'message error';
+    } finally {
+      button.disabled = false;
+    }
   }
 
   async function loadFinance() {
@@ -973,12 +1038,40 @@
   }
 
   async function loadBlockRequests() {
-    const target=document.querySelector('#blockRequestsContainer'); if(!target) return;
-    const {data,error}=await db.from('access_block_requests').select('id,business_id,requested_by,target_user_id,reason,status,created_at,businesses(name)').order('created_at',{ascending:false}).limit(100);
-    if(error){showError(target,error);return;} const rows=data||[]; if(!rows.length){target.innerHTML='<div class="empty">No hay solicitudes de bloqueo pendientes.</div>';return;}
-    const names=await getUserNames(rows.flatMap(r=>[r.requested_by,r.target_user_id]));
-    target.innerHTML=`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Negocio</th><th>Solicitante</th><th>Cuenta solicitada</th><th>Motivo</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${dateTime(r.created_at)}</td><td>${esc(r.businesses?.name||shortId(r.business_id))}</td><td>${esc(names.get(r.requested_by)||shortId(r.requested_by))}</td><td>${esc(names.get(r.target_user_id)||shortId(r.target_user_id))}</td><td>${esc(r.reason)}</td><td>${esc(r.status)}</td><td>${r.status==='pending'?`<button class="small-button" data-request-resolve="${esc(r.id)}" data-decision="approved">Bloquear cuenta</button> <button class="small-button" data-request-resolve="${esc(r.id)}" data-decision="rejected">Rechazar</button>`:'—'}</td></tr>`).join('')}</tbody></table></div>`;
-    target.querySelectorAll('[data-request-resolve]').forEach(btn=>btn.addEventListener('click',async()=>{ const note=window.prompt('Nota del servicio técnico (opcional):','')||''; btn.disabled=true; try{const result=await callTechnicalFunction({action:'resolve_block_request',request_id:btn.dataset.requestResolve,decision:btn.dataset.decision,technician_note:note}); alert(result.message); await loadBlockRequests(); await loadTechnical();}catch(e){alert(e.message);btn.disabled=false;} }));
+    const target = document.querySelector('#blockRequestsContainer');
+    if (!target) return;
+    target.innerHTML = '<div class="empty">Cargando solicitudes de bloqueo…</div>';
+    try {
+      const result = await callTechnicalFunction({ action: 'list_block_requests' });
+      const rows = result.requests || [];
+      if (!rows.length) {
+        target.innerHTML = '<div class="empty">No hay solicitudes de bloqueo registradas.</div>';
+        return;
+      }
+      target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Negocio</th><th>Solicitante</th><th>Cuenta solicitada</th><th>Motivo</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${rows.map(r => `<tr><td>${dateTime(r.created_at)}</td><td>${esc(r.businesses?.name || shortId(r.business_id))}</td><td>${esc(r.requested_by_name || shortId(r.requested_by))}</td><td>${esc(r.target_user_name || shortId(r.target_user_id))}</td><td>${esc(r.reason)}</td><td>${esc(r.status)}</td><td>${r.status === 'pending' ? `<button class="small-button" data-request-resolve="${esc(r.id)}" data-decision="approved">Bloquear acceso</button> <button class="small-button" data-request-resolve="${esc(r.id)}" data-decision="rejected">Rechazar</button>` : esc(r.technician_note || 'Resuelta')}</td></tr>`).join('')}</tbody></table></div>`;
+      target.querySelectorAll('[data-request-resolve]').forEach(button => button.addEventListener('click', async () => {
+        const decision = button.dataset.decision;
+        const note = window.prompt('Nota del servicio técnico (opcional):', '') || '';
+        if (decision === 'approved' && !window.confirm('Se suspenderá únicamente la membresía de esta persona en el negocio indicado. ¿Deseas continuar?')) return;
+        button.disabled = true;
+        try {
+          const result = await callTechnicalFunction({
+            action: 'resolve_block_request',
+            request_id: button.dataset.requestResolve,
+            decision,
+            technician_note: note
+          });
+          alert(result.message);
+          await loadBlockRequests();
+          await loadTechnical();
+        } catch (error) {
+          alert(error.message || 'No se pudo resolver la solicitud.');
+          button.disabled = false;
+        }
+      }));
+    } catch (error) {
+      showError(target, error);
+    }
   }
 
   async function loadAccessEvents(id, selector) {
