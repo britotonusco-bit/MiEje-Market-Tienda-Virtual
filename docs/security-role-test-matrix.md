@@ -605,3 +605,49 @@ La Edge Function de esta rama no tiene acciones `delete_business` ni `delete_mem
 Se aprobaron 14/14 verificaciones estáticas de autenticación, AAL2, roles, negocio activo, control de último administrador, auditoría y ausencia de acciones de borrado no implementadas. Son comprobaciones de código, no pruebas dinámicas con usuarios.
 
 No se desplegó la nueva Edge Function, no se cambió la configuración de Auth y no se envió ninguna invitación. La versión live continúa en v6 sin el requisito AAL2.
+
+
+## Auditoría de autenticación, invitaciones y recuperación — 13 de noviembre de 2026
+
+### Corrección de activación de invitaciones
+
+Se detectó que `aceptar-invitacion.js` aceptaba cualquier sesión que ya estuviera guardada en el navegador, aunque la URL abierta no correspondiera a una invitación. Se corrigió en esta rama:
+- Exige una señal explícita `type=invite` en la consulta o el fragmento de la URL.
+- Si recibe `token_hash`, lo verifica con `verifyOtp` y tipo `invite`.
+- Después exige una sesión válida.
+- Al terminar la verificación, limpia parámetros y fragmentos de la URL para retirar códigos/tokens de la barra de direcciones.
+- Solo entonces habilita la creación de contraseña (mínimo 10 caracteres y confirmación coincidente).
+- Al activar la cuenta, cierra la sesión y redirige al login.
+
+### Revisión de los demás flujos
+
+- El login interno no ofrece registro público de cuentas de panel. Resuelve los permisos desde `resolve-my-access` y filtra membresías activas de negocios activos.
+- El propietario técnico debe verificar TOTP y confirmar AAL2 antes de entrar al panel. `panel-live.js` vuelve a comprobar AAL2 al cargar el panel técnico.
+- El panel registra el acceso mediante `log_login` después de comprobar la sesión, rol/membresía y negocio activo.
+- La recuperación de contraseña no permite cambiar la clave por tener una sesión normal: `actualizar-clave.js` espera el evento `PASSWORD_RECOVERY` antes de habilitar el formulario.
+- El registro público de clientes permanece separado en `cuenta.js`; no asigna roles internos desde el navegador. El trigger de Auth live crea el perfil de cliente sin elevar privilegios.
+- Los pedidos históricos de invitado no se vinculan automáticamente a una cuenta de cliente.
+
+### Bloqueos de integración confirmados en la base live
+
+La consulta de solo lectura del proyecto independiente confirmó que existe `profiles`, pero todavía no existen `customer_favorites` ni `get_customer_order_history()`. La base tiene 1 usuario Auth, 1 perfil y 0 membresías. No se consultaron ni mostraron correos o identificadores.
+
+Por tanto, el registro y login de clientes están preparados en código, pero favoritos e historial no pueden funcionar hasta crear y aplicar la migración correspondiente. En el repositorio de esta rama no se encontró un archivo SQL de migración para esas dos piezas.
+
+### Configuración de Auth que sigue sin verificarse
+
+No se pudo leer mediante las herramientas disponibles la lista efectiva de Redirect URLs permitidas, la plantilla de invitación, la plantilla de recuperación, SMTP ni la política de contraseñas configurada en Auth. No se deben enviar invitaciones reales ni dar por probada la recuperación hasta revisar en Supabase Dashboard:
+- URL exacta de Pages para `aceptar-invitacion.html`.
+- `cuenta.html` para confirmación de clientes.
+- `actualizar-clave.html` para recuperación.
+- Plantilla de invitación que conserve el indicador `type=invite` al regresar a la página.
+- Plantilla y envío real de recuperación, SMTP y política de contraseñas.
+- Protección de contraseñas filtradas/comprometidas.
+
+La URL de invitación apunta a GitHub Pages, pero Pages en `main` sigue conectado al proyecto Supabase antiguo. No desplegar la función de invitaciones ni mandar invitaciones reales hasta resolver esa publicación.
+
+### Pruebas estáticas
+
+Resultado: 18/18 comprobaciones estáticas aprobadas para invitaciones, login, MFA, recuperación y resolución de permisos. No son pruebas end-to-end con correos reales ni usuarios de prueba.
+
+No se enviaron correos, no se cambió Auth, no se desplegaron funciones y no se ejecutó SQL durante esta revisión.
