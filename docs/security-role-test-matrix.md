@@ -505,3 +505,43 @@ No se ejecutaron cambios en la base de datos ni se desplegaron funciones durante
 21. **Confirmación de pagos recibidos.** La auditoría read-only no encontró una función que cambiara `orders.payment_status` a `paid`; el checkout siempre inicia en `pending`. Se añadió al borrador financiero `mark_order_payment_received`, exclusivo del administrador activo, que bloquea el pedido, rechaza cancelados/fallidos/reembolsados y valores cero, exige referencia para transferencias/tarjetas/otros medios, inserta el movimiento `payment_received`, actualiza el pedido y registra auditoría en una sola transacción. Un índice único impide registrar dos ingresos completados para el mismo pedido. El panel del administrador incorpora el botón “Confirmar pago recibido” y exige confirmación explícita; no se realiza ningún cobro automático ni se conecta a pasarelas. La introspección live encontró 0 pedidos y 0 movimientos financieros, por lo que no había datos existentes que migrar ni duplicados al momento de la revisión. Sigue sin ejecutarse y requiere prueba en staging.
 
 22. La política RLS de `order_items` para clientes se ajustó para no depender de conceder SELECT sobre `orders.customer_user_id`. El helper `private.customer_owns_order` verifica la propiedad con `SECURITY DEFINER`; solo authenticated puede ejecutarlo y la función no devuelve el identificador del cliente. Se confirmó por introspección que el rol authenticated tiene USAGE del esquema `private` y EXECUTE de los helpers de negocio existentes. Falta probar la política en staging con dos clientes y pedidos distintos.
+
+
+## Auditoría de solo lectura: pedidos, inventario, cancelaciones y finanzas — 13 de noviembre de 2026
+
+Se volvió a consultar el esquema activo del proyecto independiente. Esta revisión confirma que los borradores aún no están aplicados y que los siguientes permisos siguen vigentes en live:
+
+- `orders_members_select` y `orders_members_update_status` todavía incluyen `private.is_platform_owner()` como alternativa. El propietario técnico conserva acceso directo a filas de pedidos y a la actualización permitida por la política live.
+- `order_items_members_select` todavía incluye el bypass del propietario técnico.
+- `products_authenticated_select` todavía incluye el bypass del propietario técnico.
+- `financial_admin_select` y `refund_admin_select` todavía permiten lectura global al propietario técnico.
+- `cancellation_members_select` todavía permite lectura de solicitudes al propietario técnico y a empleados.
+- `product_costs_admin_select/insert/update` todavía incluyen el bypass del propietario técnico.
+- El trigger live `private.enforce_order_status_transition()` todavía permite al propietario técnico cambiar estados y no exige que el negocio esté activo. El reemplazo del borrador elimina ese bypass y exige administrador/empleado del negocio activo.
+- Los grants live de `orders` solo permiten UPDATE directo de `status` y `delivery_tracking` a `authenticated`; no permiten cambiar directamente importes ni `payment_status`.
+- La función live `create_public_order` es SECURITY DEFINER, pero no es ejecutable por `anon`, `authenticated` ni `PUBLIC`. La creación pública se mantiene canalizada por la Edge Function/rol de servicio; no se detectó una vía RPC directa para saltarse su validación.
+- `create_public_order` bloquea cada producto con `FOR UPDATE`, valida inventario y descuenta existencias en la misma transacción que crea el pedido y sus líneas.
+- En el esquema live todavía no existen las RPC nuevas de cancelación/reembolso/consulta financiera; por tanto, esos flujos continúan siendo borradores y no deben habilitarse en el panel antes de aplicar y probar sus migraciones.
+
+### Qué corrige la rama de trabajo
+
+El borrador `database/security/business-admin-boundaries.sql` reemplaza las políticas de pedidos, líneas, productos, costos, movimientos financieros, detalles de reembolso y solicitudes de cancelación para retirar los bypasses del propietario técnico. Conserva el acceso operativo de administradores/empleados al negocio activo y reserva la bandeja de cancelaciones y las finanzas al administrador.
+
+El borrador `database/orders/order-financial-access-draft.sql` retira de `authenticated` la lectura directa de importes y estado de pago en `orders`, y de precios por línea en `order_items`. Los importes del negocio se consultan mediante un RPC que valida administrador activo; el historial del cliente usa otro RPC limitado a `auth.uid()`. Incluye un helper privado para que la política de líneas del cliente no requiera exponer `customer_user_id`.
+
+Los borradores `cancellation-flow-draft.sql` y `refund-flow-draft.sql` mantienen escrituras detrás de RPCs SECURITY DEFINER con `search_path` vacío, comprobación de usuario/rol/negocio y revocación de EXECUTE a PUBLIC y anon. La cancelación aprobada restaura inventario dentro de la misma transacción; el reembolso registra una devolución total que el negocio ya realizó externamente, no transfiere dinero ni se conecta a una pasarela.
+
+### Resultado y pruebas pendientes
+
+La inspección de políticas live confirmó que los accesos amplios señalados siguen activos hasta aplicar las migraciones; no se deben describir como corregidos en producción. Los borradores contienen las sustituciones previstas, pero todavía no se han ejecutado.
+
+Antes de habilitar estas funciones, aplicar en un entorno aislado y probar con cuentas reales separadas:
+1. propietario técnico, administrador A, empleado A, administrador B, empleado B y cliente.
+2. El técnico no debe leer pedidos, costos, finanzas ni solicitudes de cancelación por Data API.
+3. El empleado solo debe ver pedidos operativos y actualizar los estados/transporte permitidos; no importes, pagos, costos ni bandeja de cancelaciones.
+4. El administrador A solo debe ver y gestionar operaciones financieras y cancelaciones de A, nunca de B.
+5. Un cliente solo debe consultar su historial y los precios de sus propios pedidos.
+6. Reintentos y concurrencia de checkout, solicitudes y decisiones de cancelación, restauración exacta de inventario y reembolso único.
+7. Comprobar que el panel del administrador utiliza los RPC financieros y que el panel de empleados no solicita columnas que se retirarán del Data API.
+
+No se ejecutó SQL, no se desplegó ninguna función y no se modificó información de pedidos o inventario live durante esta auditoría.
