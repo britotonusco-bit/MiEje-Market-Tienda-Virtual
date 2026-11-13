@@ -542,13 +542,21 @@
 
   async function initPlatformAi() {
     const form = document.querySelector('#platformAiForm'); if (!form) return;
-    const [aiResult, publicResult] = await Promise.all([
-      db.from('platform_ai_settings').select('enabled,assistant_name,system_instructions,settings').eq('id', true).maybeSingle(),
-      callTechnicalFunction({ action: 'get_platform_public_settings' })
-    ]);
-    if (aiResult.error) { document.querySelector('#platformAiMessage').textContent = 'No se pudo leer la configuración de IA: ' + aiResult.error.message; return; }
+    const aiResult = await db.from('platform_ai_settings')
+      .select('enabled,assistant_name,system_instructions,settings').eq('id', true).maybeSingle();
+    if (aiResult.error) {
+      document.querySelector('#platformAiMessage').textContent = 'No se pudo leer la configuración de IA: ' + aiResult.error.message;
+      return;
+    }
     const data = aiResult.data;
-    const settings = publicResult?.settings || {};
+    let settings = {};
+    try {
+      const publicResult = await callTechnicalFunction({ action: 'get_platform_public_settings' });
+      settings = publicResult?.settings || {};
+    } catch (error) {
+      const message = document.querySelector('#platformAiMessage');
+      if (message) message.textContent = 'La configuración pública global requiere aplicar su migración y desplegar la función técnica: ' + (error.message || 'No disponible todavía.');
+    }
     form.elements.site_name.value = settings.site_name || 'MiEje Market';
     form.elements.site_description.value = settings.site_description || '';
     form.elements.logo_url.value = settings.logo_url || '';
