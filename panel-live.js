@@ -416,6 +416,7 @@
       message.textContent = result.message || (result.invitation_sent
         ? `Invitación enviada para el nuevo usuario como ${assignedRole}.`
         : `Usuario existente asignado como ${assignedRole} al negocio.`);
+      if (result.audit_warning) message.textContent += ` Advertencia: ${result.audit_warning}`;
       const keepBusiness = form.elements.business_id.value;
       form.reset();
       form.elements.business_id.value = keepBusiness;
@@ -491,7 +492,8 @@
     try {
       const result = await callTechnicalFunction(payload);
       message.textContent = result.message || 'Asignación actualizada.';
-      message.className = 'message success';
+      if (result.audit_warning) message.textContent += ` Advertencia: ${result.audit_warning}`;
+      message.className = result.audit_warning ? 'message error' : 'message success';
       await loadTechnicalMembers(form.elements.business_id.value, '#assignmentMemberSelect');
     } catch (error) {
       message.textContent = error.message || 'No se pudo actualizar la asignación.';
@@ -517,7 +519,8 @@
         reason
       });
       message.textContent = result.message || (suspended ? 'Acceso suspendido.' : 'Acceso reactivado.');
-      message.className = 'message success';
+      if (result.audit_warning) message.textContent += ` Advertencia: ${result.audit_warning}`;
+      message.className = result.audit_warning ? 'message error' : 'message success';
       await loadTechnicalMembers(form.elements.business_id.value);
     } catch (error) {
       message.textContent = error.message || 'No se pudo cambiar el acceso.';
