@@ -572,3 +572,49 @@ ON public.profiles
 FOR SELECT
 TO authenticated
 USING (id = (SELECT auth.uid()));
+
+
+-- Reglas de cuentas y membresías: solo el servicio técnico puede crear o modificar asignaciones.
+-- El Data API de authenticated queda limitado a consultar sus membresías propias.
+ALTER TABLE public.business_memberships
+  ADD COLUMN IF NOT EXISTS job_title text;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.business_memberships'::regclass
+      AND conname = 'business_memberships_job_title_length'
+  ) THEN
+    ALTER TABLE public.business_memberships
+      ADD CONSTRAINT business_memberships_job_title_length
+      CHECK (job_title IS NULL OR char_length(btrim(job_title)) BETWEEN 2 AND 100);
+  END IF;
+END $$;
+
+REVOKE INSERT, UPDATE, DELETE ON TABLE public.business_memberships FROM PUBLIC, anon, authenticated;
+
+-- El usuario puede cambiar únicamente los datos de presentación de su perfil.
+-- Nunca puede modificar platform_role, is_blocked ni blocked_reason.
+REVOKE UPDATE ON TABLE public.profiles FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE (display_name, avatar_url, phone) ON TABLE public.profiles FROM authenticated;
+GRANT UPDATE (display_name, avatar_url, phone) ON TABLE public.profiles TO authenticated;
+
+DROP POLICY IF EXISTS profiles_select_self_or_owner ON public.profiles;
+DROP POLICY IF EXISTS profiles_select_self ON public.profiles;
+CREATE POLICY profiles_select_self
+ON public.profiles
+FOR SELECT
+TO authenticated
+USING (id = (SELECT auth.uid()));
+
+DROP POLICY IF EXISTS profiles_update_self ON public.profiles;
+CREATE POLICY profiles_update_self
+ON public.profiles
+FOR UPDATE
+TO authenticated
+USING (id = (SELECT auth.uid()))
+WITH CHECK (id = (SELECT auth.uid()));
+
+-- El cargo se almacena en la membresía porque puede variar si una persona
+-- trabaja en más de un negocio. El panel y el rol se derivan del campo role.
