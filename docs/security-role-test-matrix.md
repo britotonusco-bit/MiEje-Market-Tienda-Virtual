@@ -545,3 +545,16 @@ Antes de habilitar estas funciones, aplicar en un entorno aislado y probar con c
 7. Comprobar que el panel del administrador utiliza los RPC financieros y que el panel de empleados no solicita columnas que se retirarán del Data API.
 
 No se ejecutó SQL, no se desplegó ninguna función y no se modificó información de pedidos o inventario live durante esta auditoría.
+
+
+### Verificación estática de la integración del panel — 13 de noviembre de 2026
+
+Se revisó también `panel-live.js` en la rama:
+- El panel del administrador consulta los importes y estados de pago mediante `get_business_admin_order_financials` y combina esos datos con una consulta operativa de pedidos y productos.
+- El panel de empleados solicita únicamente identificador, número, datos de entrega, estado, fecha y nombre/cantidad de productos. No solicita `total`, `payment_status`, `unit_price` ni `line_total`.
+- El panel administrativo utiliza el mismo RPC financiero para los indicadores y las listas; la bandeja de reembolsos usa el filtro `p_refundable_only`.
+- Las acciones de cancelación y reembolso se invocan mediante las RPCs correspondientes; la interfaz informa que el reembolso debe haberse realizado externamente antes de registrarlo.
+
+Resultado de comprobaciones estáticas sobre los borradores SQL y el JavaScript de panel: **15 de 15 verificaciones aprobadas**. Se comprobaron sustitución de políticas, eliminación del bypass técnico en el trigger, retiro de columnas financieras del acceso directo, ACL de RPCs y separación de consultas de administrador/empleado. Esto no equivale a pruebas de ejecución ni de autorización con usuarios reales.
+
+La auditoría live sigue mostrando las políticas antiguas hasta que las migraciones se apliquen en staging y luego se autorice su paso a producción.
