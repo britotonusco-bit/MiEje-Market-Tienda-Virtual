@@ -20,15 +20,19 @@ CREATE TABLE IF NOT EXISTS public.customer_favorites (
 );
 
 ALTER TABLE public.customer_favorites ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON TABLE public.customer_favorites FROM PUBLIC, anon;
-GRANT SELECT, INSERT, DELETE ON TABLE public.customer_favorites TO authenticated;
+REVOKE ALL ON TABLE public.customer_favorites FROM PUBLIC, anon, authenticated;
+GRANT SELECT, DELETE ON TABLE public.customer_favorites TO authenticated;
+GRANT INSERT (user_id, product_id) ON TABLE public.customer_favorites TO authenticated;
 
 DROP POLICY IF EXISTS customer_favorites_select_own ON public.customer_favorites;
 CREATE POLICY customer_favorites_select_own ON public.customer_favorites
   FOR SELECT TO authenticated USING (user_id = (SELECT auth.uid()));
 
+-- Mantener una sola política de INSERT para evitar reglas duplicadas que se
+-- combinen mediante OR después de aplicar customer-account-migration.sql.
 DROP POLICY IF EXISTS customer_favorites_insert_own ON public.customer_favorites;
-CREATE POLICY customer_favorites_insert_own ON public.customer_favorites
+DROP POLICY IF EXISTS customer_favorites_insert_own_active_product ON public.customer_favorites;
+CREATE POLICY customer_favorites_insert_own_active_product ON public.customer_favorites
   FOR INSERT TO authenticated WITH CHECK (
     user_id = (SELECT auth.uid())
     AND EXISTS (
