@@ -81,9 +81,15 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_policies
     WHERE schemaname='public' AND tablename='business_content_pages'
-      AND policyname='business_content_pages_public_or_admin_read' AND cmd='SELECT'
+      AND policyname='business_content_pages_public_read'
+      AND cmd='SELECT' AND roles @> ARRAY['anon']::name[]
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='business_content_pages'
+      AND policyname='business_content_pages_public_or_admin_read'
+      AND cmd='SELECT' AND roles @> ARRAY['authenticated']::name[]
   ) THEN
-    RAISE EXCEPTION 'FALLO: no se encuentra la política unificada de contenido público.';
+    RAISE EXCEPTION 'FALLO: faltan políticas separadas para contenido público anon y authenticated.';
   END IF;
 
   IF NOT has_function_privilege('service_role',
