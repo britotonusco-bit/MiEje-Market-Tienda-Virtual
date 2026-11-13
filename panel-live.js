@@ -406,7 +406,6 @@
     const message = document.querySelector('#inviteMemberMessage');
     const payload = Object.fromEntries(new FormData(form).entries());
     payload.action = 'invite_member';
-    payload.redirect_to = new URL('aceptar-invitacion.html', window.location.href).href;
     button.disabled = true;
     message.className = 'message';
     message.textContent = 'Creando invitación y registrando la asignación…';
