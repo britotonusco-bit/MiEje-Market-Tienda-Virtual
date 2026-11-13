@@ -113,8 +113,16 @@ Deno.serve(async (req: Request) => {
     let customerUserId: string | null = null;
     const authorization = req.headers.get("authorization") || "";
     const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
-    const publicKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || "";
-    if (bearer && bearer !== publicKey) {
+    const anonymousKeys = [
+      Deno.env.get("SUPABASE_ANON_KEY"),
+      Deno.env.get("SUPABASE_PUBLISHABLE_KEY"),
+    ].filter((key): key is string => Boolean(key));
+    // El cliente web usa una clave sb_publishable_ como Authorization cuando
+    // no hay sesión. No confundirla con un access token de usuario autenticado,
+    // incluso si el runtime también expone la clave legacy SUPABASE_ANON_KEY.
+    const isPublishableKey = Boolean(bearer?.startsWith("sb_publishable_"));
+    const isAnonymousKey = Boolean(bearer && anonymousKeys.includes(bearer));
+    if (bearer && !isAnonymousKey && !isPublishableKey) {
       const { data: authData, error: authError } = await admin.auth.getUser(bearer);
       if (authError || !authData.user) {
         return reply(401, { error: "La sesión del cliente no es válida. Inicia sesión nuevamente." });
