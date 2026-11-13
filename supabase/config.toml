@@ -1,0 +1,2 @@
+[functions.get-platform-public-settings]
+verify_jwt = false
