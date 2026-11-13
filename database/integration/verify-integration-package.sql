@@ -124,6 +124,32 @@ BEGIN
     RAISE EXCEPTION 'FALLO: faltan buckets de archivos requeridos.';
   END IF;
 
+  IF NOT has_column_privilege('anon','public.businesses','id','SELECT')
+     OR NOT has_column_privilege('anon','public.businesses','status','SELECT') THEN
+    RAISE EXCEPTION 'FALLO: anon no tiene las columnas públicas mínimas para resolver contenido publicado.';
+  END IF;
+
+  IF has_function_privilege('anon','private.business_is_active(uuid)','EXECUTE')
+     OR has_function_privilege('anon','private.has_business_role(uuid,text[])','EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: no se debe conceder a anon ejecución de helpers privados.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='storage' AND tablename='objects'
+      AND policyname='business_assets_admin_upload' AND cmd='INSERT'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='storage' AND tablename='objects'
+      AND policyname='business_assets_admin_read' AND cmd='SELECT'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='storage' AND tablename='objects'
+      AND policyname='job_application_documents_business_admin_read' AND cmd='SELECT'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: faltan políticas de Storage para activos o documentos privados.';
+  END IF;
+
   RAISE NOTICE 'OK: estructura, RPCs, RLS, privilegios y buckets del paquete están presentes.';
 END
 $verify$;
