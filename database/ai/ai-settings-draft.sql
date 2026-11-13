@@ -77,7 +77,7 @@ BEGIN
     pg_catalog.jsonb_build_object(
       'enabled', NEW.enabled,
       'assistant_name', NEW.assistant_name,
-      'instructions_changed', TG_OP = 'INSERT' OR OLD.instructions IS DISTINCT FROM NEW.instructions
+      'instructions_changed', CASE WHEN TG_OP = 'INSERT' THEN true ELSE OLD.instructions IS DISTINCT FROM NEW.instructions END
     )
   );
   RETURN NEW;
