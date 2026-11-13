@@ -81,7 +81,7 @@ Deno.serve(async (req: Request) => {
   return reply(200, {
     ok: true,
     user: { id: user.id, email: user.email ?? null },
-    profile: { id: profile.id, display_name: profile.display_name ?? null, avatar_url: profile.avatar_url ?? null, platform_role: profile.platform_role ?? null, panel_name: profile.platform_role === "platform_owner" ? "Panel técnico superior" : "Panel de cliente" },
+    profile: { id: profile.id, display_name: profile.display_name ?? null, avatar_url: profile.avatar_url ?? null, platform_role: profile.platform_role ?? null, account_status: "active", panel_name: profile.platform_role === "platform_owner" ? "Panel técnico superior" : "Panel de cliente" },
     is_platform_owner: profile.platform_role === "platform_owner",
     memberships: activeMemberships,
   });
