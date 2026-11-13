@@ -595,6 +595,13 @@ END $$;
 
 REVOKE INSERT, UPDATE, DELETE ON TABLE public.business_memberships FROM PUBLIC, anon, authenticated;
 
+-- El Data API solo expone los campos de perfil necesarios para la interfaz.
+-- Los campos internos de rol y bloqueo quedan disponibles únicamente a las
+-- funciones de confianza (service_role), no a las consultas directas del cliente.
+REVOKE SELECT ON TABLE public.profiles FROM PUBLIC, anon, authenticated;
+GRANT SELECT (id, display_name, avatar_url, phone)
+ON TABLE public.profiles TO authenticated;
+
 -- El usuario puede cambiar únicamente los datos de presentación de su perfil.
 -- Nunca puede modificar platform_role, is_blocked ni blocked_reason.
 REVOKE UPDATE ON TABLE public.profiles FROM PUBLIC, anon, authenticated;
