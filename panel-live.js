@@ -411,7 +411,7 @@
     message.textContent = 'Creando invitación y registrando la asignación…';
     try {
       const result = await callTechnicalFunction(payload);
-      message.className = 'message success';
+      message.className = result.audit_warning ? 'message error' : 'message success';
       const assignedRole = result.membership?.role === 'business_admin' ? 'administrador' : 'empleado';
       message.textContent = result.message || (result.invitation_sent
         ? `Invitación enviada para el nuevo usuario como ${assignedRole}.`
