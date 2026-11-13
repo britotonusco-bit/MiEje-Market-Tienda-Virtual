@@ -729,3 +729,17 @@ Se corrigió el borrador SQL y la Edge Function:
 Comprobaciones estáticas: **14/14 aprobadas** para tabla privada, RLS, privilegios, hash, concurrencia por clave/IP, límite, orden de RPCs, validación de JWT y respuesta mínima de seguimiento.
 
 Pendiente de prueba en staging: ráfagas concurrentes con distintas claves desde la misma IP, reintentos de misma clave, payload alterado, pedido rechazado por inventario y verificación de que el contador persiste tras el rollback del pedido. El nuevo SQL y la Edge Function siguen sin ejecutarse/desplegarse en el proyecto live.
+
+
+### Verificación del código privado de seguimiento — 13 de noviembre de 2026
+
+La base live confirma que `orders.public_tracking_token`:
+- Es UUID NOT NULL.
+- Se genera por defecto con `gen_random_uuid()`.
+- Tiene un índice UNIQUE.
+
+La Edge Function live `track-public-order` v1 y el código de la rama consultan el pedido exclusivamente por ese token y devuelven número, estado, fechas, negocio, total y estado de entrega. No devuelven teléfono, dirección ni correo. La rama añade `Cache-Control: no-store, private`; esa cabecera todavía no está en la versión live.
+
+Pendiente: la función de seguimiento no tiene un límite de solicitudes por IP en el código revisado. El UUID aleatorio hace inviable una búsqueda práctica por fuerza bruta, pero el rate limit ayudaría a reducir abuso de recursos. Debe incorporarse antes de considerar cerrada la auditoría de endpoints públicos.
+
+La consulta de esquema e índices fue de solo lectura. No se modificaron pedidos ni tokens.
