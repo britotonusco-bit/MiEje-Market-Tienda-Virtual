@@ -23,12 +23,13 @@ Cada archivo es una unidad independiente. Ejecutar uno a uno, revisar el resulta
 |---:|---|---|
 | 1 | `database/platform/platform-public-settings-draft.sql` | Crea la tabla de configuración pública global que necesita la función de ajustes de plataforma. |
 | 2 | `database/security/business-admin-boundaries.sql` | Endurece RLS, grants, límites por negocio, perfiles, membresías y trigger de último administrador. Debe quedar antes de las pruebas de roles y de los flujos posteriores. |
-| 3 | `database/security/storage-policy-fix.sql` | Repara políticas de Storage; requiere buckets ya creados y helpers de autorización disponibles. |
-| 4 | `database/customers/customer-account-migration.sql` | Crea `orders.customer_user_id` y favoritos; es dependencia de checkout e historial. |
-| 5 | `database/orders/checkout-idempotency-draft.sql` | Depende de la columna anterior, de `create_public_order`, de los helpers/rate-limit existentes y de `extensions.digest`. Este archivo repite parte de la estructura de clientes con `IF NOT EXISTS`; la migración de clientes es la fuente de verdad y debe ejecutarse primero. |
-| 6 | `database/orders/order-financial-access-draft.sql` | Depende de `orders.customer_user_id`, del esquema de checkout y de las tablas financieras existentes. Restringe columnas y crea RPCs de finanzas/historial. |
-| 7 | `database/orders/cancellation-flow-draft.sql` | Depende del esquema de pedidos, las membresías/helpers y del trigger de transición instalado por la migración de límites de negocio. |
-| 8 | `database/orders/refund-flow-draft.sql` | Depende de cancelaciones aprobadas y de las tablas `financial_transactions`, `refund_details` y auditoría. |
+| 3 | `database/security/access-block-requests-draft.sql` | Crea solicitudes de bloqueo por negocio y una RPC transaccional que solo puede ejecutar la Edge Function técnica; requiere helpers, membresías y auditoría base. |
+| 4 | `database/security/storage-policy-fix.sql` | Repara políticas de Storage; requiere buckets ya creados y helpers de autorización disponibles. |
+| 5 | `database/customers/customer-account-migration.sql` | Crea `orders.customer_user_id` y favoritos; es dependencia de checkout e historial. |
+| 6 | `database/orders/checkout-idempotency-draft.sql` | Depende de la columna anterior, de `create_public_order`, de los helpers/rate-limit existentes y de `extensions.digest`. Este archivo repite parte de la estructura de clientes con `IF NOT EXISTS`; la migración de clientes es la fuente de verdad y debe ejecutarse primero. |
+| 7 | `database/orders/order-financial-access-draft.sql` | Depende de `orders.customer_user_id`, del esquema de checkout y de las tablas financieras existentes. Restringe columnas y crea RPCs de finanzas/historial. |
+| 8 | `database/orders/cancellation-flow-draft.sql` | Depende del esquema de pedidos, las membresías/helpers y del trigger de transición instalado por la migración de límites de negocio. |
+| 9 | `database/orders/refund-flow-draft.sql` | Depende de cancelaciones aprobadas y de las tablas `financial_transactions`, `refund_details` y auditoría. |
 
 ### Endurecimiento MFA del propietario: etapa separada y condicionada
 
