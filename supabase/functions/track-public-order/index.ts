@@ -10,12 +10,12 @@ const corsHeaders = {
 function reply(status: number, payload: Record<string, unknown>) {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "no-store, private" },
   });
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: { ...corsHeaders, "Cache-Control": "no-store" } });
   if (req.method !== "POST") return reply(405, { error: "Método no permitido." });
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
