@@ -11,18 +11,29 @@
       client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY, { auth: { detectSessionInUrl: true, persistSession: true, autoRefreshToken: true } });
       const url = new URL(window.location.href);
       const tokenHash = url.searchParams.get('token_hash');
-      const type = url.searchParams.get('type');
-      if (tokenHash && type === 'invite') {
+      const queryType = url.searchParams.get('type');
+      const hashParams = new URLSearchParams(url.hash.startsWith('#') ? url.hash.slice(1) : url.hash);
+      const hashType = hashParams.get('type');
+
+      // No aceptar una sesión que ya estuviera guardada en el navegador:
+      // la página solo debe activarse desde un enlace identificado como invitación.
+      if (queryType !== 'invite' && hashType !== 'invite') {
+        throw new Error('Este enlace no corresponde a una invitación de MiEje Market. Abre el enlace original recibido por correo o solicita uno nuevo.');
+      }
+
+      if (tokenHash && queryType === 'invite') {
         const { error } = await client.auth.verifyOtp({ token_hash: tokenHash, type: 'invite' });
         if (error) throw error;
-        url.searchParams.delete('token_hash');
-        url.searchParams.delete('type');
-        window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
       }
+
       const { data, error } = await client.auth.getSession();
-      if (error || !data.session) throw new Error('El enlace no es válido o ya expiró. Solicita una nueva invitación al propietario de MiEje Market.');
+      if (error || !data.session) throw new Error('El enlace de invitación no es válido o ya expiró. Solicita una nueva invitación al propietario de MiEje Market.');
+
+      // Supabase ya intercambió/verificó el enlace. Retira códigos y tokens de la barra
+      // de direcciones para que no queden expuestos al copiar o compartir la URL.
+      window.history.replaceState({}, document.title, url.pathname);
       ready = true;
-      show('Enlace verificado. Ahora puedes crear tu contraseña.', 'success');
+      show('Invitación verificada. Ahora puedes crear tu contraseña.', 'success');
     } catch (error) {
       show(error.message || 'No se pudo verificar la invitación.', 'error');
       form.querySelector('button').disabled = true;
