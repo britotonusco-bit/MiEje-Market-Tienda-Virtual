@@ -53,10 +53,10 @@
       document.querySelector('#businessSelect')?.addEventListener('change', event => loadSelectedBusiness(event.currentTarget.value));
       document.querySelector('#suspensionForm')?.addEventListener('submit', saveSuspension);
       document.querySelector('#memberStatusForm')?.addEventListener('submit', saveMemberStatus);
-      document.querySelector('#assignmentBusinessSelect')?.addEventListener('change', event => loadTechnicalMembers(event.currentTarget.value));
+      document.querySelector('#assignmentBusinessSelect')?.addEventListener('change', event => loadTechnicalMembers(event.currentTarget.value, '#assignmentMemberSelect'));
       document.querySelector('#assignmentMemberSelect')?.addEventListener('change', fillMemberAssignment);
       document.querySelector('#memberAssignmentForm')?.addEventListener('submit', saveMemberAssignment);
-      document.querySelector('#memberBusinessSelect')?.addEventListener('change', event => loadTechnicalMembers(event.currentTarget.value));
+      document.querySelector('#memberBusinessSelect')?.addEventListener('change', event => loadTechnicalMembers(event.currentTarget.value, '#memberTargetSelect'));
       document.querySelector('#platformAiForm')?.addEventListener('submit', savePlatformAi);
       document.querySelector('#storeSettingsForm')?.addEventListener('submit', saveStoreSettings);
       document.querySelector('#productForm')?.addEventListener('submit', saveProduct);
@@ -451,18 +451,14 @@
       : '<div class="empty">Selecciona un negocio para administrar sus usuarios y accesos. La información comercial permanece en su panel administrativo.</div>';
   }
 
-  async function loadTechnicalMembers(id) {
-    const target = document.querySelector('#memberTargetSelect'); if (!target) return;
+  async function loadTechnicalMembers(id, targetSelector = '#memberTargetSelect') {
+    const target = document.querySelector(targetSelector); if (!target) return;
     target.innerHTML = '<option value="">Cargando cuentas…</option>';
     if (!id) { target.innerHTML = '<option value="">Selecciona primero un negocio</option>'; return; }
     try {
       const result = await callTechnicalFunction({ action: 'list_business_members', business_id: id });
       const rows = result.members || [];
-      const optionHtml = '<option value="">Selecciona una cuenta</option>' + rows.map(m => `<option value="${esc(m.id)}" data-role="${esc(m.role)}" data-job-title="${esc(m.job_title || '')}">${esc(m.profiles?.display_name || shortId(m.user_id))} · ${esc(m.email || 'sin correo')} · ${m.role === 'business_admin' ? 'Administrador' : 'Empleado'}${m.status !== 'active' ? ' · Suspendido' : ''}</option>`).join('');
-      for (const selector of ['#memberTargetSelect', '#assignmentMemberSelect']) {
-        const select = document.querySelector(selector);
-        if (select) select.innerHTML = optionHtml;
-      }
+      target.innerHTML = '<option value="">Selecciona una cuenta</option>' + rows.map(m => `<option value="${esc(m.id)}" data-role="${esc(m.role)}" data-job-title="${esc(m.job_title || '')}">${esc(m.profiles?.display_name || shortId(m.user_id))} · ${esc(m.email || 'sin correo')} · ${m.role === 'business_admin' ? 'Administrador' : 'Empleado'}${m.status !== 'active' ? ' · Suspendido' : ''}</option>`).join('');
     } catch (error) { target.innerHTML = '<option value="">No se pudieron cargar las cuentas</option>'; }
   }
 
