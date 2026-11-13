@@ -451,3 +451,28 @@ No se alteró la configuración live de Storage, no se subieron ni descargaron a
 11. Confirmar que todos los cambios del panel técnico requieren MFA AAL2 y quedan registrados en auditoría.
 
 No se ejecutaron estas migraciones, no se desplegaron las Edge Functions y no se modificó el proyecto live. Los cambios permanecen en la rama de trabajo y el PR continúa como borrador.
+
+## Revisión de invitaciones y membresías — 13 de noviembre de 2026
+
+Auditoría de solo lectura del proyecto independiente `cqixlrwbqatbhzmpygiz` y de la rama `correcciones-funcionales`:
+
+- La función activa `technical-business-management` está en versión 6 y todavía no exige MFA AAL2. La rama contiene la comprobación AAL2 antes de permitir acciones técnicas; el cambio no está desplegado.
+- La función activa `resolve-my-access` está en versión 2 y todavía no devuelve el perfil ampliado ni el cargo de la membresía. La versión de la rama añade esos campos y filtra membresías suspendidas o asociadas a negocios inactivos.
+- El esquema activo de `business_memberships` todavía no contiene `job_title`. La función de la rama consulta e inserta ese campo, por lo que la lista de miembros y las invitaciones nuevas requieren primero la migración pendiente.
+- El esquema activo no tiene todavía el trigger transaccional `guard_last_active_business_admin`. El borrador SQL lo incorpora para impedir que dos operaciones simultáneas retiren al último administrador activo.
+- En el esquema activo, `authenticated` no tiene permisos efectivos de INSERT, UPDATE o DELETE en `business_memberships`; tampoco puede insertar perfiles ni modificar columnas de rol/bloqueo. La política SELECT actual sí permite al propietario técnico leer membresías y perfiles de otros usuarios; el borrador elimina ese acceso directo y deja las consultas técnicas en Edge Functions con service role.
+- El trigger de registro de Auth llama a `private.handle_new_auth_user()`, que crea el perfil con el nombre recibido y no asigna `platform_owner`. El registro de clientes continúa separado de las invitaciones internas.
+- La página `aceptar-invitacion.html` y su JavaScript existen en `main`; sin embargo, `main/supabase-config.js` sigue apuntando al proyecto Supabase anterior. No se considera validado el flujo real de invitación en la plataforma publicada.
+- Se corrigió en `panel-live.js` la recarga del selector de membresías después de cambiar rol/cargo: ahora actualiza `#assignmentMemberSelect` en vez del selector de suspensión.
+
+### Pruebas pendientes antes de habilitar invitaciones
+
+1. Aplicar primero, en un entorno de pruebas, el esquema de `job_title` y el trigger de último administrador.
+2. Probar invitación nueva, correo ya registrado sin membresía, membresía activa duplicada y membresía suspendida.
+3. Confirmar que el correo llega y redirige a `aceptar-invitacion.html` en la versión publicada que usa el proyecto independiente.
+4. Verificar que la persona establece contraseña, cierra la sesión de activación y luego entra al panel asignado.
+5. Probar asignación y cambio de rol/cargo con técnico AAL2; confirmar que admin, empleado y cliente no pueden invitar ni cambiar membresías.
+6. Intentar dos suspensiones/demotions concurrentes sobre los dos últimos administradores y comprobar que el negocio conserva al menos uno.
+7. Probar que un negocio suspendido o una membresía suspendida no permite abrir el panel, aunque el usuario conserve su cuenta de Auth.
+
+No se ejecutaron cambios en la base de datos ni se desplegaron funciones durante esta auditoría. La rama y el PR continúan siendo borradores.
