@@ -414,3 +414,40 @@ No se aplicaron las políticas live ni se ejecutaron pruebas con usuarios reales
 - Revisar una estrategia de análisis antimalware antes de permitir que personal descargue archivos adjuntos de usuarios externos.
 
 No se alteró la configuración live de Storage, no se subieron ni descargaron archivos reales y no se enviaron postulaciones de prueba.
+
+## Gestión de cuentas, membresías y perfil de panel
+
+### Reglas funcionales incorporadas en la rama
+- Solo platform_owner, validado en la Edge Function technical-business-management y con sesión MFA AAL2, puede crear negocios, enviar invitaciones, asignar membresías, suspender/reactivar accesos o cambiar el rol y cargo laboral.
+- Los administradores y empleados no reciben operaciones de alta/cambio de membresías en el cliente. La base de datos conserva solo SELECT de membresías para usuarios autenticados; las mutaciones quedan reservadas a service_role a través de la función técnica.
+- El administrador que necesita un empleado debe contactar al soporte técnico por WhatsApp; el técnico realiza la invitación y asignación.
+- Las invitaciones requieren nombre completo, correo, rol y cargo laboral. El rol permitido es únicamente business_admin o employee.
+- El campo job_title se guarda en business_memberships, no en profiles, porque una misma persona puede tener cargos distintos en negocios diferentes.
+- La función técnica permite cambiar rol/cargo de una membresía y registra el cambio en auditoría. El borrador SQL añade un trigger transaccional que protege al último administrador activo.
+- resolve-my-access devuelve nombre, avatar, correo, panel, rol, cargo y negocio activo asignado. El panel muestra estos datos y usa avatar_url cuando existe.
+- Las políticas borrador limitan lectura de profiles al propio usuario y permiten actualizar únicamente display_name, avatar_url y phone; no platform_role, is_blocked ni blocked_reason.
+- Se añadieron controles de perfil y soporte WhatsApp a los tres paneles activos: panel-tecnico.html, panel-negocio.html y panel-personal.html.
+
+### Configuración pública global de MiEje Market
+- Se aclaró la separación entre la plataforma y los negocios: el técnico puede configurar nombre, descripción, logo, imagen principal y WhatsApp de soporte de MiEje Market.
+- El técnico no puede modificar desde el panel técnico la ficha comercial, logo, portada, productos, pagos ni horarios de los negocios; cada administrador configura únicamente su propio negocio.
+- Se preparó database/platform/platform-public-settings-draft.sql para crear platform_public_settings con los datos públicos globales, sin acceso directo desde anon/authenticated.
+- Se añadió la Edge Function pública de solo lectura get-platform-public-settings, que expone únicamente los campos públicos y no concede acceso a tablas privadas.
+- La función técnica permite leer y actualizar la configuración global con MFA y registra los cambios en auditoría.
+- La página pública lee la configuración y aplica nombre, descripción, logo e imagen principal. Los campos de imagen aceptan direcciones HTTPS; todavía no se implementó carga de archivos desde el panel.
+- El esquema live no tenía la tabla platform_public_settings; por tanto, estos ajustes requieren ejecutar la migración draft y desplegar ambas Edge Functions antes de funcionar en el sitio publicado.
+
+### Límites y pruebas pendientes
+1. Aplicar primero las migraciones en un entorno de pruebas, no en producción, y confirmar que el esquema incluye business_memberships.job_title y platform_public_settings.
+2. Confirmar que un administrador y un empleado no pueden crear, insertar, cambiar, borrar ni trasladar membresías mediante Data API o invocación directa de la función técnica.
+3. Confirmar que un usuario no puede elevar profiles.platform_role, cambiar is_blocked ni modificar el rol de una membresía desde su propio perfil.
+4. Invitar a un correo nuevo: verificar entrega, aceptación, creación de contraseña, nombre completo, rol, cargo y acceso solo al negocio asignado.
+5. Asignar un usuario existente a otro negocio; comprobar que conserva sus otros roles y que cada negocio muestra su cargo independiente.
+6. Cambiar employee a business_admin y viceversa; comprobar auditoría, permisos y protección del último administrador activo con dos operaciones simultáneas.
+7. Suspender/reactivar una membresía y suspender/reactivar el negocio; confirmar que resolve-my-access no devuelve asignaciones suspendidas ni negocios inactivos.
+8. Configurar el WhatsApp técnico y comprobar el enlace desde los tres paneles; verificar que el endpoint público solo devuelve los campos permitidos.
+9. Guardar nombre, descripción, logo e imagen principal en el panel técnico y comprobar que la página pública los aplica sin alterar los datos de los negocios.
+10. Completar la carga segura de foto de perfil; por ahora se muestra avatar_url existente, pero no se añadió todavía un flujo de subida de imágenes.
+11. Confirmar que todos los cambios del panel técnico requieren MFA AAL2 y quedan registrados en auditoría.
+
+No se ejecutaron estas migraciones, no se desplegaron las Edge Functions y no se modificó el proyecto live. Los cambios permanecen en la rama de trabajo y el PR continúa como borrador.
