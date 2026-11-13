@@ -668,3 +668,45 @@ Se ajustó `cuenta.js` para que los favoritos de productos que ya no están disp
 **Orden de dependencias:** primero esta migración de clientes; después `checkout-idempotency-draft.sql` y `order-financial-access-draft.sql`, porque esos borradores usan `orders.customer_user_id`. Todo debe probarse en staging antes de producción.
 
 Resultado de comprobaciones estáticas: **12/12 aprobadas** sobre claves foráneas, índices, unicidad, RLS, políticas de dueño, límites de INSERT/UPDATE y dependencias de checkout/historial. La base live sigue sin la columna ni la tabla; no se ejecutó esta migración ni se modificaron datos.
+
+
+## Auditoría de checkout público, idempotencia y seguimiento — 13 de noviembre de 2026
+
+### Estado de la función activa frente a la rama
+
+Se comparó la Edge Function live `create-public-order` v3 con el código de `correcciones-funcionales`. La versión activa todavía usa el flujo anterior: consume el rate limit antes de crear el pedido y llama directamente a `create_public_order`. No incluye la clave idempotente ni la asociación de la compra a la cuenta autenticada.
+
+La rama prepara un flujo nuevo que:
+- Valida el JWT del cliente cuando se envía una sesión autenticada; no confía en un `customer_user_id` enviado por el navegador.
+- Rechaza perfiles inexistentes o bloqueados.
+- Comprueba que el método de pago pertenezca al negocio indicado.
+- Permite recuperar un pedido ya confirmado aunque el método se haya desactivado después.
+- Para intentos nuevos, exige que el método siga habilitado.
+- Consulta primero la clave idempotente; la función SQL serializa solicitudes simultáneas con un advisory transaction lock.
+- Crea el pedido, descuenta inventario y guarda la respuesta idempotente en la misma transacción SQL.
+- Rechaza reutilizar una clave con datos distintos.
+- El rate limit se consume solo para claves nuevas y dentro de la transacción del pedido.
+
+### Permisos live consultados
+
+La función activa `public.create_public_order` y `public.consume_checkout_rate_limit` son SECURITY DEFINER, propiedad de postgres y con EXECUTE concedido a `service_role`, no a `anon` ni `authenticated`. La tabla privada de rate limits no expone permisos de tabla a esos roles. Esto evita que el cliente llame directamente a la función de creación o manipule el contador mediante PostgREST.
+
+### Corrección de privilegios en favoritos
+
+Se detectó que el borrador de checkout concedía INSERT a nivel de tabla sobre `customer_favorites`, lo que ampliaba los privilegios más allá del diseño de la migración de clientes. Se corrigió para:
+- Revocar los privilegios heredados de `PUBLIC`, `anon` y `authenticated`.
+- Conceder INSERT solo en las columnas `user_id, product_id`.
+- Mantener SELECT y DELETE, sujetos a RLS.
+- Reemplazar las dos posibles políticas de INSERT por una sola política que exige propietario y producto/negocio activos.
+
+### Seguimiento público de pedidos
+
+La Edge Function live `track-public-order` v1 se incorporó al repositorio porque faltaba su fuente en la rama. El endpoint exige un token UUID, devuelve solo número de pedido, estado, fecha, negocio, total y seguimiento de entrega; no devuelve dirección, teléfono ni correo. Se añadió `Cache-Control: no-store, private` para evitar que la respuesta con datos del pedido quede almacenada en cachés compartidas.
+
+El endpoint sigue siendo público por diseño: el token privado de seguimiento actúa como credencial de consulta. Debe mantenerse aleatorio, no mostrarse en páginas públicas ni incluirse en registros visibles.
+
+### Pruebas estáticas y limitación de despliegue
+
+Las verificaciones estáticas de la rama cubren validación de JWT, perfil bloqueado, método de pago asociado al negocio, recuperación idempotente, bloqueo transaccional, permisos service_role y respuesta mínima de seguimiento. El flujo nuevo no está desplegado: live sigue en v3 sin idempotencia. Tampoco se ejecutaron pruebas concurrentes ni pruebas con inventario real.
+
+No se ejecutó SQL, no se desplegó ninguna Edge Function y no se cambió `main`.
