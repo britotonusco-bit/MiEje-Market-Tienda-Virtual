@@ -602,11 +602,24 @@ GRANT UPDATE (display_name, avatar_url, phone) ON TABLE public.profiles TO authe
 
 DROP POLICY IF EXISTS profiles_select_self_or_owner ON public.profiles;
 DROP POLICY IF EXISTS profiles_select_self ON public.profiles;
-CREATE POLICY profiles_select_self
+CREATE POLICY profiles_select_self_or_same_business_admin
 ON public.profiles
 FOR SELECT
 TO authenticated
-USING (id = (SELECT auth.uid()));
+USING (
+  id = (SELECT auth.uid())
+  OR EXISTS (
+    SELECT 1
+    FROM public.business_memberships AS target_membership
+    WHERE target_membership.user_id = profiles.id
+      AND target_membership.status = 'active'
+      AND private.business_is_active(target_membership.business_id)
+      AND private.has_business_role(
+        target_membership.business_id,
+        ARRAY['business_admin']::text[]
+      )
+  )
+);
 
 DROP POLICY IF EXISTS profiles_update_self ON public.profiles;
 CREATE POLICY profiles_update_self
