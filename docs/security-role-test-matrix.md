@@ -845,3 +845,29 @@ El PR #2 continúa abierto como borrador, desde `correcciones-funcionales` hacia
 ### Hallazgo de dependencias durante el armado del paquete
 
 Al preparar el verificador de staging se comprobó que los roles `anon` y `authenticated` no tienen EXECUTE sobre `private.business_is_active(uuid)` ni `private.has_business_role(uuid,text[])`. Por eso no era correcto usar esos helpers dentro de una política `FOR SELECT TO anon, authenticated`. Se corrigió el borrador `business-admin-boundaries.sql`: la política `anon` usa la condición pública y un EXISTS sobre columnas públicas de `businesses`; la política `authenticated` conserva los helpers privados. Los permisos de columnas públicas de `businesses.id/status` sí están disponibles para anon. No se otorgó EXECUTE adicional a anon.
+
+
+## Paquete de integración preparado — 13 de noviembre de 2026
+
+Se preparó la carpeta `database/integration/`:
+- `README.md`: orden de aplicación, dependencias, despliegue de funciones, condiciones de MFA, pruebas y criterios de salida.
+- `00-preflight.sql`: inventario previo de tablas, columnas, helpers, buckets, políticas y grants; solo lectura.
+- `verify-integration-package.sql`: comprobación posterior de tablas, RPCs, RLS, grants, políticas públicas por rol, helpers privados y Storage; solo lectura.
+
+Orden de staging definido:
+1. `platform-public-settings-draft.sql`
+2. `business-admin-boundaries.sql`
+3. `storage-policy-fix.sql`
+4. `customer-account-migration.sql`
+5. `checkout-idempotency-draft.sql`
+6. `order-financial-access-draft.sql`
+7. `cancellation-flow-draft.sql`
+8. `refund-flow-draft.sql`
+
+`owner-mfa-rls.sql` queda como etapa condicionada posterior a desplegar y probar la interfaz MFA y la Edge Function técnica AAL2 en staging. No debe aplicarse antes.
+
+Durante la preparación se detectó y corrigió un delimitador `DO` mal formado en `business-admin-boundaries.sql`. También se detectó que `anon` no tiene EXECUTE sobre los helpers privados de negocio; por eso las políticas de contenido se separaron por rol y no se concedió acceso adicional a esos helpers.
+
+Comprobaciones estáticas del paquete: **50/50 aprobadas** en delimitadores, comentarios, políticas repetibles y separación de permisos de lectura pública/admin. No se ejecutó un parser SQL conectado ni se aplicaron migraciones; el resultado no equivale a ejecución real.
+
+El paquete sigue pendiente de staging. No se ejecutó SQL, no se desplegaron Edge Functions, no se fusionó el PR ni se modificó `main`.
