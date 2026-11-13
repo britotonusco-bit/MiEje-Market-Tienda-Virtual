@@ -1125,6 +1125,48 @@
     if (event.key === "Escape") closeCart();
   });
 
+
+  async function loadPlatformBranding() {
+    if (!window.supabase || !window.MIEJE_SUPABASE_URL || !window.MIEJE_SUPABASE_PUBLISHABLE_KEY) return;
+    try {
+      const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
+      const { data, error } = await client.functions.invoke("get-platform-public-settings", { body: {} });
+      if (error || !data?.ok) return;
+      const settings = data.settings || {};
+      const siteName = String(settings.site_name || "MiEje Market").slice(0, 120);
+      const description = String(settings.site_description || "").slice(0, 2000);
+      document.title = siteName + " | Tienda virtual";
+      const brandText = document.querySelector(".logo > span:last-child");
+      if (brandText) {
+        brandText.textContent = siteName;
+        const tagline = document.createElement("small");
+        tagline.textContent = "Lo nuestro, más cerca";
+        brandText.append(tagline);
+      }
+      const footerBrand = document.querySelector("#platformFooterLogo");
+      if (footerBrand) footerBrand.textContent = siteName;
+      const heroDescription = document.querySelector("#platformHeroDescription");
+      if (heroDescription && description) heroDescription.textContent = description;
+      const logoMark = document.querySelector("#platformLogoMark");
+      if (logoMark && settings.logo_url) {
+        logoMark.textContent = "";
+        logoMark.style.backgroundImage = 'url("' + String(settings.logo_url).replace(/["\\\\]/g, "") + '")';
+        logoMark.style.backgroundSize = "contain";
+        logoMark.style.backgroundPosition = "center";
+        logoMark.style.backgroundRepeat = "no-repeat";
+      }
+      const hero = document.querySelector("#platformHero");
+      if (hero && settings.hero_image_url) {
+        hero.style.backgroundImage = 'linear-gradient(90deg, rgba(8,18,24,.88), rgba(8,18,24,.28)), url("' + String(settings.hero_image_url).replace(/["\\\\]/g, "") + '")';
+        hero.style.backgroundSize = "cover";
+        hero.style.backgroundPosition = "center";
+      }
+    } catch (error) {
+      console.warn("No se pudo cargar la identidad pública de MiEje Market.", error);
+    }
+  }
+
+  loadPlatformBranding();
   loadRegisteredBusinesses().finally(() => {
     renderFeatured();
     renderListing();
