@@ -168,11 +168,15 @@ Deno.serve(async (req: Request) => {
       const businessId = textValue(body.business_id, 80);
       if (!businessId) return reply(400, { error: "Falta el identificador del negocio." });
       const { data, error } = await admin.from("business_memberships")
-        .select("id,business_id,user_id,role,status,blocked_reason,created_at,profiles(display_name,phone)")
+        .select("id,business_id,user_id,role,status,job_title,blocked_reason,created_at,profiles(display_name,avatar_url,phone)")
         .eq("business_id", businessId)
         .order("created_at", { ascending: false });
       if (error) throw error;
-      return reply(200, { ok: true, members: data ?? [] });
+      const members = await Promise.all((data ?? []).map(async (membership: any) => {
+        const { data: authUser } = await admin.auth.admin.getUserById(membership.user_id);
+        return { ...membership, email: authUser?.user?.email ?? null };
+      }));
+      return reply(200, { ok: true, members });
     }
 
     if (action === "create_business") {
@@ -287,6 +291,7 @@ Deno.serve(async (req: Request) => {
         business_id: businessId,
         user_id: targetUser.id,
         role,
+        job_title: jobTitle,
         status: "active",
         created_by: user.id,
       }).select("id, business_id, user_id, role, status").single();
@@ -313,6 +318,41 @@ Deno.serve(async (req: Request) => {
         invitation_sent: invitationSent,
         message: invitationSent ? "Invitación enviada al correo." : "Usuario existente asignado al negocio.",
       });
+    }
+
+    if (action === "update_member_assignment") {
+      const membershipId = textValue(body.membership_id, 80);
+      const role = textValue(body.role, 40);
+      const jobTitle = textValue(body.job_title, 100);
+      if (!membershipId || !["business_admin", "employee"].includes(role) || jobTitle.length < 2) {
+        return reply(400, { error: "Selecciona una membresía, un rol válido y un cargo de al menos dos caracteres." });
+      }
+      const { data: before, error: readError } = await admin.from("business_memberships")
+        .select("id,business_id,user_id,role,status,job_title")
+        .eq("id", membershipId).maybeSingle();
+      if (readError) throw readError;
+      if (!before) return reply(404, { error: "No se encontró la membresía." });
+      if (before.role === "business_admin" && role !== "business_admin" && before.status === "active") {
+        const { count, error: countError } = await admin.from("business_memberships")
+          .select("id", { count: "exact", head: true })
+          .eq("business_id", before.business_id).eq("role", "business_admin").eq("status", "active");
+        if (countError) throw countError;
+        if ((count ?? 0) <= 1) return reply(409, { error: "No se puede retirar el rol del último administrador activo del negocio." });
+      }
+      const { data: membership, error: updateError } = await admin.from("business_memberships")
+        .update({ role, job_title: jobTitle })
+        .eq("id", membershipId)
+        .select("id,business_id,user_id,role,status,job_title").maybeSingle();
+      if (updateError) throw updateError;
+      if (!membership) return reply(409, { error: "La membresía cambió durante la operación. Actualiza la lista." });
+      const { error: auditError } = await admin.from("audit_logs").insert({
+        business_id: membership.business_id, actor_id: user.id,
+        action: "business.member_assignment_updated", entity_type: "business_membership",
+        entity_id: membership.id,
+        details: { target_user_id: membership.user_id, previous_role: before.role, role, previous_job_title: before.job_title, job_title: jobTitle }
+      });
+      if (auditError) throw auditError;
+      return reply(200, { ok: true, membership, message: "Rol y cargo actualizados y registrados en auditoría." });
     }
 
     if (action === "set_business_status") {
