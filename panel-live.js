@@ -493,7 +493,7 @@
       const result = await callTechnicalFunction(payload);
       message.textContent = result.message || 'Asignación actualizada.';
       message.className = 'message success';
-      await loadTechnicalMembers(form.elements.business_id.value);
+      await loadTechnicalMembers(form.elements.business_id.value, '#assignmentMemberSelect');
     } catch (error) {
       message.textContent = error.message || 'No se pudo actualizar la asignación.';
       message.className = 'message error';
