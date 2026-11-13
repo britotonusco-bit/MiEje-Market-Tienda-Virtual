@@ -202,6 +202,120 @@ GRANT EXECUTE ON FUNCTION public.get_public_order_idempotent(
   uuid, uuid, uuid, uuid, text, text, text, text, text, text, jsonb
 ) TO service_role;
 
+-- Reserva de intentos en una transacción independiente al pedido.
+-- Así, los intentos fallidos también cuentan, pero reintentar la misma clave
+-- con el mismo contenido no consume una segunda reserva.
+CREATE TABLE IF NOT EXISTS private.checkout_rate_limit_reservations (
+  idempotency_key uuid PRIMARY KEY,
+  ip_hash text NOT NULL,
+  request_hash text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE private.checkout_rate_limit_reservations ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE private.checkout_rate_limit_reservations
+  FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.reserve_checkout_rate_limit(
+  p_idempotency_key uuid,
+  p_ip text,
+  p_business_id uuid,
+  p_payment_method_id uuid,
+  p_customer_user_id uuid,
+  p_customer_name text,
+  p_customer_phone text,
+  p_customer_email text,
+  p_delivery_address text,
+  p_delivery_notes text,
+  p_payment_method text,
+  p_items jsonb
+)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_ip_hash text;
+  v_request_hash text;
+  v_existing_ip_hash text;
+  v_existing_request_hash text;
+  v_count integer;
+BEGIN
+  IF p_idempotency_key IS NULL
+     OR p_ip IS NULL
+     OR pg_catalog.length(pg_catalog.btrim(p_ip)) < 3
+     OR pg_catalog.length(p_ip) > 100 THEN
+    RETURN false;
+  END IF;
+
+  v_ip_hash := pg_catalog.encode(
+    extensions.digest(pg_catalog.btrim(p_ip), 'sha256'), 'hex'
+  );
+  v_request_hash := pg_catalog.md5(pg_catalog.jsonb_build_object(
+    'business_id', p_business_id,
+    'payment_method_id', p_payment_method_id,
+    'customer_user_id', p_customer_user_id,
+    'customer_name', p_customer_name,
+    'customer_phone', p_customer_phone,
+    'customer_email', p_customer_email,
+    'delivery_address', p_delivery_address,
+    'delivery_notes', p_delivery_notes,
+    'payment_method', p_payment_method,
+    'items', p_items
+  )::text);
+
+  -- Serializar por clave y después por IP para evitar reservas duplicadas
+  -- y que solicitudes concurrentes sobrepasen el límite.
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_idempotency_key::text, 0)
+  );
+  SELECT ip_hash, request_hash
+    INTO v_existing_ip_hash, v_existing_request_hash
+  FROM private.checkout_rate_limit_reservations
+  WHERE idempotency_key = p_idempotency_key;
+
+  IF FOUND THEN
+    IF v_existing_ip_hash <> v_ip_hash OR v_existing_request_hash <> v_request_hash THEN
+      RAISE EXCEPTION 'La clave de este intento ya fue reservada con datos diferentes.';
+    END IF;
+    RETURN true;
+  END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(v_ip_hash, 0)
+  );
+
+  DELETE FROM private.checkout_rate_limit_reservations
+  WHERE created_at < pg_catalog.now() - interval '24 hours';
+
+  SELECT pg_catalog.count(*)::integer
+    INTO v_count
+  FROM private.checkout_rate_limit_reservations
+  WHERE ip_hash = v_ip_hash
+    AND created_at >= pg_catalog.now() - interval '10 minutes';
+
+  IF v_count >= 10 THEN
+    RETURN false;
+  END IF;
+
+  INSERT INTO private.checkout_rate_limit_reservations (
+    idempotency_key, ip_hash, request_hash
+  ) VALUES (
+    p_idempotency_key, v_ip_hash, v_request_hash
+  );
+
+  RETURN true;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.reserve_checkout_rate_limit(
+  uuid, text, uuid, uuid, uuid, text, text, text, text, text, text, jsonb
+) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.reserve_checkout_rate_limit(
+  uuid, text, uuid, uuid, uuid, text, text, text, text, text, text, jsonb
+) TO service_role;
+
 CREATE OR REPLACE FUNCTION public.create_public_order_idempotent(
   p_idempotency_key uuid,
   p_ip text,
@@ -259,12 +373,11 @@ BEGIN
     RETURN v_existing_response;
   END IF;
 
-  -- El límite se consume solo para claves nuevas y dentro de la misma
-  -- transacción que crea el pedido. Los reintentos no consumen otro intento.
+  -- La reserva de IP se realiza antes, mediante una RPC independiente.
+  -- Aquí solo se valida el formato; no se consume otra vez el límite.
   IF p_ip IS NULL OR pg_catalog.length(pg_catalog.btrim(p_ip)) < 3
-     OR pg_catalog.length(p_ip) > 100
-     OR NOT public.consume_checkout_rate_limit(p_ip) THEN
-    RAISE EXCEPTION 'Se recibieron demasiadas solicitudes o no fue posible validar el origen.';
+     OR pg_catalog.length(p_ip) > 100 THEN
+    RAISE EXCEPTION 'No fue posible validar el origen de la solicitud.';
   END IF;
 
   v_response := public.create_public_order_for_customer(
