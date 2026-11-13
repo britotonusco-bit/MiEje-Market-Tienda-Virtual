@@ -38,6 +38,8 @@
       if (panelNode) panelNode.textContent = panel === 'technical' ? 'Panel técnico superior' : (panel === 'business_admin' ? 'Panel de administrador' : 'Panel de empleados');
       const roleNode = document.querySelector('#profileRole');
       if (roleNode) roleNode.textContent = panel === 'technical' ? 'Propietario de la plataforma' : (panel === 'business_admin' ? 'Administrador del negocio' : 'Empleado del negocio');
+      const statusNode = document.querySelector('#profileStatus');
+      if (statusNode) statusNode.textContent = profile.account_status === 'active' ? 'Cuenta activa' : 'Cuenta suspendida';
       const titleNode = document.querySelector('#profileBusinessTitle');
       if (titleNode) titleNode.textContent = panel === 'technical' ? 'Control general de MiEje Market' : '';
       const avatarNode = document.querySelector('#profileAvatar');
