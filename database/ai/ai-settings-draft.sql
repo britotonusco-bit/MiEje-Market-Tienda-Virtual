@@ -56,6 +56,41 @@ WITH CHECK (
   AND private.has_business_role(business_id, ARRAY['business_admin']::text[])
 );
 
+CREATE OR REPLACE FUNCTION private.audit_business_ai_settings_change()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+BEGIN
+  INSERT INTO public.audit_logs (
+    business_id, actor_id, action, entity_type, entity_id, details
+  ) VALUES (
+    NEW.business_id,
+    auth.uid(),
+    CASE WHEN TG_OP = 'INSERT'
+      THEN 'business.ai_settings_created'
+      ELSE 'business.ai_settings_updated'
+    END,
+    'business_ai_settings',
+    NEW.business_id::text,
+    pg_catalog.jsonb_build_object(
+      'enabled', NEW.enabled,
+      'assistant_name', NEW.assistant_name,
+      'instructions_changed', TG_OP = 'INSERT' OR OLD.instructions IS DISTINCT FROM NEW.instructions
+    )
+  );
+  RETURN NEW;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION private.audit_business_ai_settings_change() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS business_ai_settings_audit ON public.business_ai_settings;
+CREATE TRIGGER business_ai_settings_audit
+AFTER INSERT OR UPDATE ON public.business_ai_settings
+FOR EACH ROW EXECUTE FUNCTION private.audit_business_ai_settings_change();
+
 CREATE TABLE IF NOT EXISTS public.platform_ai_settings (
   id boolean PRIMARY KEY DEFAULT true CHECK (id = true),
   enabled boolean NOT NULL DEFAULT false,
