@@ -31,4 +31,30 @@
 <label>URL del logo oficial<input class="field" name="logo_url" type="url" placeholder="https://..."></label>
 <label>URL de la imagen principal de la página<input class="field" name="hero_image_url" type="url" placeholder="https://..."></label>
 <label>WhatsApp de soporte técnico<input class="field" name="support_whatsapp" placeholder="573001234567" inputmode="numeric"></label><label>Nombre del asistente<input class="field" name="assistant_name" maxlength="120" value="Asistente general de MiEje Market"></label><label>Instrucciones generales<textarea class="field" name="system_instructions" rows="4" maxlength="8000" placeholder="Alcance, fuentes permitidas, límites y reglas de respuesta"></textarea></label><label><input type="checkbox" name="enabled"> Configuración de IA general habilitada</label><button class="button primary" type="submit">Guardar configuración general</button><p id="platformAiMessage" class="message" aria-live="polite"></p></form></section>
-<section id="finanzas" class="panel-section"><div class="section-heading"><div><h2>Finanzas de la plataforma y nómina</h2><p>Registros disponibles en la base de datos; todavía no hay datos reales cargados.</p></div></div><div id="financeContainer" class="empty">Cargando registros financieros…</div></section><section id="soporte" class="panel-section"><h2>Soporte técnico</h2><p>Contacto oficial de soporte de MiEje Market.</p><a id="technicalSupportLink" class="button primary hidden" href="#" target="_blank" rel="noopener">Contactar por WhatsApp</a><p id="technicalSupportMessage" class="muted">Cargando contacto de soporte…</p></section><section id="auditoria" class="panel-section"><div class="section-heading"><div><h2>Auditoría y accesos globales</h2><p>Historial central de todos los negocios, independiente de las vistas administrativas.</p></div></div><div id="accessContainer" class="empty">Cargando accesos…</div><div id="auditContainer" class="empty">Cargando auditoría…</div></section><footer class="footer">MiEje Market · Las cuentas de negocio no tienen permisos para borrar el historial central de auditoría.</footer></main></div></body></html>
+<section id="finanzas" class="panel-section">
+  <div class="section-heading"><div><h2>Finanzas de la plataforma y nómina</h2><p>Control interno de movimientos y obligaciones. Registrar un pago aquí no ejecuta transferencias ni reemplaza el comprobante bancario.</p></div></div>
+  <div class="split">
+    <form id="platformFinanceForm" class="panel-card">
+      <h3>Registrar movimiento financiero</h3>
+      <label>Tipo de movimiento<select class="field" name="record_type" required><option value="income">Ingreso</option><option value="expense">Gasto</option><option value="refund">Reembolso registrado</option><option value="adjustment">Ajuste contable</option></select></label>
+      <label>Negocio relacionado (opcional)<select class="field" name="business_id"><option value="">Plataforma</option></select></label>
+      <label>Descripción<input class="field" name="description" maxlength="500" minlength="3" required></label>
+      <label>Importe en COP<input class="field" type="number" name="amount" min="0.01" step="0.01" required></label>
+      <label>Fecha del movimiento<input class="field" type="datetime-local" name="occurred_at"></label>
+      <label>Referencia (opcional)<input class="field" name="reference" maxlength="160"></label>
+      <button class="button primary" type="submit">Guardar movimiento</button>
+      <p id="platformFinanceMessage" class="message" aria-live="polite"></p>
+    </form>
+    <form id="payrollForm" class="panel-card">
+      <h3>Registrar nómina u honorarios</h3>
+      <label>Beneficiario<input class="field" name="payee_name" maxlength="160" minlength="2" required></label>
+      <label>Negocio relacionado (opcional)<select class="field" name="business_id"><option value="">Plataforma</option></select></label>
+      <label>Concepto<input class="field" name="description" maxlength="500" minlength="3" required></label>
+      <label>Importe en COP<input class="field" type="number" name="amount" min="0.01" step="0.01" required></label>
+      <label>Fecha límite (opcional)<input class="field" type="date" name="due_date"></label>
+      <button class="button primary" type="submit">Guardar obligación</button>
+      <p id="payrollMessage" class="message" aria-live="polite"></p>
+    </form>
+  </div>
+  <div id="financeContainer" class="empty">Cargando registros financieros…</div>
+</section><section id="soporte" class="panel-section"><h2>Soporte técnico</h2><p>Contacto oficial de soporte de MiEje Market.</p><a id="technicalSupportLink" class="button primary hidden" href="#" target="_blank" rel="noopener">Contactar por WhatsApp</a><p id="technicalSupportMessage" class="muted">Cargando contacto de soporte…</p></section><section id="auditoria" class="panel-section"><div class="section-heading"><div><h2>Auditoría y accesos globales</h2><p>Historial central de todos los negocios, independiente de las vistas administrativas.</p></div></div><div id="accessContainer" class="empty">Cargando accesos…</div><div id="auditContainer" class="empty">Cargando auditoría…</div></section><footer class="footer">MiEje Market · Las cuentas de negocio no tienen permisos para borrar el historial central de auditoría.</footer></main></div></body></html>
