@@ -13,7 +13,7 @@
 <body>
   <header class="header">
     <a class="logo" href="#" data-action="home">
-      <span class="logo-icon">M<span>+</span></span>
+      <span class="logo-icon" id="platformLogoMark">M<span>+</span></span>
       <span>MiEje <b>Market</b><small>Lo nuestro, más cerca</small></span>
     </a>
 
@@ -37,11 +37,11 @@
 
   <main>
     <section id="homeView">
-      <section class="hero">
+      <section class="hero" id="platformHero">
         <div class="hero-content">
           <p class="eyebrow">PEREIRA · RISARALDA · EJE CAFETERO</p>
-          <h1>Lo mejor de tu región,<br><span>a un clic de distancia.</span></h1>
-          <p>Descubre restaurantes, tiendas y emprendimientos locales en un solo lugar.</p>
+          <h1 id="platformHeroTitle">Lo mejor de tu región,<br><span>a un clic de distancia.</span></h1>
+          <p id="platformHeroDescription">Descubre restaurantes, tiendas y emprendimientos locales en un solo lugar.</p>
           <div class="hero-actions">
             <button class="btn lime" data-action="categories">Explorar categorías ↗</button>
             <button class="btn outline" data-action="businesses">Ver tiendas</button>
@@ -141,7 +141,7 @@
   </main>
 
   <footer class="footer">
-    <div class="footer-logo">M+ <strong>MiEje Market</strong></div>
+    <div class="footer-logo"><span id="platformFooterLogo">M+ <strong>MiEje Market</strong></span></div>
     <p>Lo nuestro, más cerca. Una vitrina digital para los negocios del Eje Cafetero.</p>
     <button data-action="home">Volver al inicio ↑</button>
     <nav class="legal-links" aria-label="Información legal">
