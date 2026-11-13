@@ -481,3 +481,5 @@ No se ejecutaron cambios en la base de datos ni se desplegaron funciones durante
 
 9. La acción `list_business_members` devuelve `job_title` y el correo consultado desde Auth; la consulta se ejecuta únicamente después de validar propietario técnico y MFA AAL2.
 10. La actualización de rol/cargo ahora usa comparación de estado, rol y negocio leídos previamente; si la membresía cambió entre lectura y escritura, devuelve conflicto en vez de sobrescribir el cambio.
+
+11. Se dejó explícita la opción `verify_jwt` de las siete Edge Functions activas conocidas en `supabase/config.toml`: las funciones públicas conservan `false` y las funciones técnicas/de acceso conservan `true`. Esto evita que una futura publicación por CLI cambie accidentalmente el comportamiento de las funciones públicas por depender del valor predeterminado.
