@@ -12,6 +12,7 @@ SELECT x.object_name,
 FROM (VALUES
  ('public.businesses'),
  ('public.profiles'),
+ ('public.audit_logs'),
  ('public.business_memberships'),
  ('public.products'),
  ('public.orders'),
@@ -47,7 +48,16 @@ FROM (VALUES
  ('public.products','business_id'),
  ('public.businesses','status'),
  ('public.business_memberships','role'),
- ('public.business_memberships','status')
+ ('public.business_memberships','status'),
+ ('public.business_memberships','blocked_reason'),
+ ('public.profiles','platform_role'),
+ ('public.profiles','is_blocked'),
+ ('public.audit_logs','business_id'),
+ ('public.audit_logs','actor_id'),
+ ('public.audit_logs','action'),
+ ('public.audit_logs','entity_type'),
+ ('public.audit_logs','entity_id'),
+ ('public.audit_logs','details')
 ) AS x(object_name,column_name)
 ORDER BY x.object_name,x.column_name;
 
