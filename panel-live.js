@@ -62,6 +62,8 @@
       document.querySelector('#memberAssignmentForm')?.addEventListener('submit', saveMemberAssignment);
       document.querySelector('#memberBusinessSelect')?.addEventListener('change', event => loadTechnicalMembers(event.currentTarget.value, '#memberTargetSelect'));
       document.querySelector('#platformAiForm')?.addEventListener('submit', savePlatformAi);
+      document.querySelector('#platformFinanceForm')?.addEventListener('submit', createPlatformFinancialRecord);
+      document.querySelector('#payrollForm')?.addEventListener('submit', createPayrollRecord);
       document.querySelector('#storeSettingsForm')?.addEventListener('submit', saveStoreSettings);
       document.querySelector('#productForm')?.addEventListener('submit', saveProduct);
       document.querySelector('#businessContentForm')?.addEventListener('submit', saveBusinessContent);
@@ -327,7 +329,7 @@
     renderBusinesses();
     await loadSelectedBusiness('');
     await loadAuditEvents(null, '#auditContainer');
-    const finance = document.querySelector('#financeContainer'); if (finance) finance.innerHTML = '<div class="empty">El módulo financiero global y nómina aún no está conectado al esquema independiente.</div>';
+    await loadFinance();
     await loadBlockRequests();
     await loadContentModeration();
     await initPlatformAi();
@@ -1013,18 +1015,129 @@
     }
   }
 
+  function populateFinanceBusinessOptions() {
+    document.querySelectorAll('#platformFinanceForm select[name="business_id"], #payrollForm select[name="business_id"]').forEach(select => {
+      const selected = select.value;
+      select.innerHTML = '<option value="">Plataforma</option>' + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+      select.value = selected;
+    });
+  }
+
   async function loadFinance() {
     const target = document.querySelector('#financeContainer');
-    const [financeResult, payrollResult] = await Promise.all([
-      db.from('platform_financial_records').select('business_id,record_type,description,amount,currency,occurred_at').order('occurred_at', { ascending: false }).limit(30),
-      db.from('payroll_records').select('business_id,payee_name,description,amount,currency,status,paid_at,created_at').order('created_at', { ascending: false }).limit(30)
-    ]);
-    if (financeResult.error) return showError(target, financeResult.error);
-    if (payrollResult.error) return showError(target, payrollResult.error);
-    const businessMap = new Map(cachedBusinesses.map(b => [b.id, b.name]));
-    const finance = financeResult.data || [];
-    const payroll = payrollResult.data || [];
-    target.innerHTML = `<div class="split"><div><div class="section-heading"><h3>Movimientos financieros</h3></div>${finance.length ? tableHtml(['Fecha','Negocio','Tipo','Descripción','Importe'], finance.map(r => [dateTime(r.occurred_at), r.business_id ? businessMap.get(r.business_id) || 'Negocio' : 'Plataforma', r.record_type, r.description, money(r.amount)])) : '<div class="empty">Sin movimientos financieros registrados.</div>'}</div><div><div class="section-heading"><h3>Nómina y honorarios</h3></div>${payroll.length ? tableHtml(['Fecha','Beneficiario','Descripción','Importe','Estado'], payroll.map(r => [dateTime(r.paid_at || r.created_at), r.payee_name, r.description, money(r.amount), r.status])) : '<div class="empty">Sin registros de nómina.</div>'}</div></div>`;
+    if (!target) return;
+    target.innerHTML = '<div class="empty">Cargando finanzas y nómina…</div>';
+    try {
+      const result = await callTechnicalFunction({ action: 'list_platform_finance' });
+      const finance = result.financial_records || [];
+      const payroll = result.payroll_records || [];
+      const businessMap = new Map(cachedBusinesses.map(b => [b.id, b.name]));
+      populateFinanceBusinessOptions();
+      const financeHtml = finance.length
+        ? tableHtml(['Fecha','Negocio','Tipo','Descripción','Importe','Referencia'], finance.map(r => [
+            dateTime(r.occurred_at),
+            r.business_id ? businessMap.get(r.business_id) || 'Negocio' : 'Plataforma',
+            ({ income: 'Ingreso', expense: 'Gasto', refund: 'Reembolso', adjustment: 'Ajuste' })[r.record_type] || r.record_type,
+            r.description,
+            money(r.amount),
+            r.reference || '—'
+          ]))
+        : '<div class="empty">Todavía no hay movimientos financieros registrados.</div>';
+      const payrollHtml = payroll.length
+        ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Beneficiario</th><th>Concepto</th><th>Importe</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${payroll.map(r => `<tr>
+            <td>${dateTime(r.paid_at || r.due_date || r.created_at)}</td>
+            <td>${esc(r.payee_name)}</td>
+            <td>${esc(r.description)}</td>
+            <td>${money(r.amount)}</td>
+            <td>${({ pending: 'Pendiente', paid: 'Registrado como pagado', cancelled: 'Cancelado' })[r.status] || esc(r.status)}</td>
+            <td>${r.status === 'pending'
+              ? `<button class="small-button" data-payroll-action="paid" data-payroll-id="${esc(r.id)}">Registrar pago</button> <button class="small-button" data-payroll-action="cancelled" data-payroll-id="${esc(r.id)}">Cancelar</button>`
+              : '—'}</td>
+          </tr>`).join('')}</tbody></table></div>`
+        : '<div class="empty">Todavía no hay obligaciones de nómina registradas.</div>';
+      target.innerHTML = `<div class="section-heading"><h3>Movimientos financieros</h3></div>${financeHtml}<div class="section-heading"><h3>Nómina y honorarios</h3></div>${payrollHtml}`;
+      target.querySelectorAll('[data-payroll-action]').forEach(button => button.addEventListener('click', async () => {
+        const decision = button.dataset.payrollAction;
+        if (decision === 'cancelled' && !window.confirm('¿Cancelar esta obligación de nómina?')) return;
+        const reference = decision === 'paid' ? (window.prompt('Referencia del comprobante (opcional):', '') || '') : '';
+        button.disabled = true;
+        try {
+          const response = await callTechnicalFunction({
+            action: 'resolve_payroll_record',
+            record_id: button.dataset.payrollId,
+            decision,
+            payment_reference: reference
+          });
+          alert(response.message || 'Registro actualizado.');
+          await loadFinance();
+          await loadAuditEvents(null, '#auditContainer');
+        } catch (error) {
+          alert(error.message || 'No se pudo actualizar el registro.');
+          button.disabled = false;
+        }
+      }));
+    } catch (error) {
+      showError(target, error);
+    }
+  }
+
+  async function createPlatformFinancialRecord(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#platformFinanceMessage');
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      const response = await callTechnicalFunction({
+        action: 'create_platform_financial_record',
+        record_type: form.elements.record_type.value,
+        business_id: form.elements.business_id.value || null,
+        description: form.elements.description.value.trim(),
+        amount: form.elements.amount.value,
+        occurred_at: form.elements.occurred_at.value ? new Date(form.elements.occurred_at.value).toISOString() : null,
+        reference: form.elements.reference.value.trim() || null,
+        currency: 'COP'
+      });
+      message.textContent = response.audit_warning || 'Movimiento financiero guardado.';
+      message.className = response.audit_warning ? 'message error' : 'message success';
+      form.reset();
+      await loadFinance();
+      await loadAuditEvents(null, '#auditContainer');
+    } catch (error) {
+      message.textContent = error.message || 'No se pudo guardar el movimiento.';
+      message.className = 'message error';
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function createPayrollRecord(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#payrollMessage');
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      const response = await callTechnicalFunction({
+        action: 'create_payroll_record',
+        payee_name: form.elements.payee_name.value.trim(),
+        business_id: form.elements.business_id.value || null,
+        description: form.elements.description.value.trim(),
+        amount: form.elements.amount.value,
+        due_date: form.elements.due_date.value || null,
+        currency: 'COP'
+      });
+      message.textContent = response.audit_warning || 'Obligación de nómina guardada.';
+      message.className = response.audit_warning ? 'message error' : 'message success';
+      form.reset();
+      await loadFinance();
+      await loadAuditEvents(null, '#auditContainer');
+    } catch (error) {
+      message.textContent = error.message || 'No se pudo guardar la obligación.';
+      message.className = 'message error';
+    } finally {
+      button.disabled = false;
+    }
   }
 
   async function loadContentModeration() {
