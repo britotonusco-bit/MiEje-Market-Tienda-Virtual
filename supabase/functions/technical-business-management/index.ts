@@ -190,8 +190,15 @@ Deno.serve(async (req: Request) => {
         entity_id: null,
         details: { enabled: body.enabled, assistant_name: assistantName },
       });
-      if (auditError) throw auditError;
-      return reply(200, { ok: true, settings: data, message: "Configuración del asistente general guardada. Esto no activa por sí solo un proveedor de IA." });
+      if (auditError) console.error("Platform AI settings saved but audit insert failed:", auditError);
+      return reply(200, {
+        ok: true,
+        settings: data,
+        audit_warning: auditError ? "La configuración se guardó, pero no se pudo registrar el evento de auditoría." : null,
+        message: auditError
+          ? "La configuración del asistente general se guardó, pero falta registrar la auditoría."
+          : "Configuración del asistente general guardada. Esto no activa por sí solo un proveedor de IA.",
+      });
     }
 
     if (action === "update_platform_public_settings") {
