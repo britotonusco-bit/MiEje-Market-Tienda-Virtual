@@ -504,18 +504,27 @@ WITH CHECK (
 
 -- Evitar que un UPDATE genérico cambie identificadores o la tienda propietaria.
 -- La interfaz actual solo necesita modificar estos campos del producto.
-REVOKE UPDATE ON TABLE public.products FROM authenticated;
+REVOKE UPDATE ON TABLE public.products FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE (id, business_id, name, category, description, sku, price, inventory,
+  image_url, is_active, created_at, updated_at)
+ON TABLE public.products FROM PUBLIC, anon, authenticated;
 GRANT UPDATE (name, category, description, price, inventory, image_url, is_active, sku, updated_at)
 ON TABLE public.products TO authenticated;
 
 -- Los métodos de pago tampoco deben poder trasladarse ni alterar su identidad.
-REVOKE UPDATE ON TABLE public.business_payment_methods FROM authenticated;
+REVOKE UPDATE ON TABLE public.business_payment_methods FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE (id, business_id, method_code, display_name, provider, account_holder,
+  account_type, account_reference, public_instructions, is_enabled, sort_order,
+  created_at, updated_at)
+ON TABLE public.business_payment_methods FROM PUBLIC, anon, authenticated;
 GRANT UPDATE (method_code, display_name, provider, account_holder, account_type,
   account_reference, public_instructions, is_enabled, sort_order, updated_at)
 ON TABLE public.business_payment_methods TO authenticated;
 
 -- Los costos conservan su producto y negocio de origen después de crearse.
-REVOKE UPDATE ON TABLE public.product_costs FROM authenticated;
+REVOKE UPDATE ON TABLE public.product_costs FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE (product_id, business_id, cost_price, created_at, updated_at)
+ON TABLE public.product_costs FROM PUBLIC, anon, authenticated;
 GRANT UPDATE (cost_price, updated_at)
 ON TABLE public.product_costs TO authenticated;
 
@@ -533,7 +542,12 @@ USING (
 
 -- El administrador configura la ficha comercial, pero no puede cambiar
 -- estado de plataforma, slug, propietario técnico ni otros campos internos.
-REVOKE UPDATE ON TABLE public.businesses FROM authenticated;
+REVOKE UPDATE ON TABLE public.businesses FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE (id, name, slug, category, description, tagline, city, contact_phone,
+  whatsapp_support, opening_hours, business_type, logo_url, status,
+  suspension_reason, public_suspension_message, created_by, created_at,
+  updated_at, delivery_fee, minimum_order_amount)
+ON TABLE public.businesses FROM PUBLIC, anon, authenticated;
 GRANT UPDATE (name, category, tagline, description, city, contact_phone,
   whatsapp_support, logo_url, opening_hours, delivery_fee, minimum_order_amount)
 ON TABLE public.businesses TO authenticated;
@@ -599,13 +613,18 @@ REVOKE INSERT, UPDATE, DELETE ON TABLE public.business_memberships FROM PUBLIC, 
 -- Los campos internos de rol y bloqueo quedan disponibles únicamente a las
 -- funciones de confianza (service_role), no a las consultas directas del cliente.
 REVOKE SELECT ON TABLE public.profiles FROM PUBLIC, anon, authenticated;
+REVOKE SELECT (id, display_name, phone, avatar_url, platform_role, is_blocked,
+  blocked_reason, created_at, updated_at)
+ON TABLE public.profiles FROM PUBLIC, anon, authenticated;
 GRANT SELECT (id, display_name, avatar_url, phone)
 ON TABLE public.profiles TO authenticated;
 
 -- El usuario puede cambiar únicamente los datos de presentación de su perfil.
 -- Nunca puede modificar platform_role, is_blocked ni blocked_reason.
 REVOKE UPDATE ON TABLE public.profiles FROM PUBLIC, anon, authenticated;
-REVOKE UPDATE (display_name, avatar_url, phone) ON TABLE public.profiles FROM authenticated;
+REVOKE UPDATE (id, display_name, phone, avatar_url, platform_role, is_blocked,
+  blocked_reason, created_at, updated_at)
+ON TABLE public.profiles FROM PUBLIC, anon, authenticated;
 GRANT UPDATE (display_name, avatar_url, phone) ON TABLE public.profiles TO authenticated;
 
 DROP POLICY IF EXISTS profiles_select_self_or_owner ON public.profiles;
