@@ -74,17 +74,20 @@
       console.warn("Customer favorites:", error);
       return;
     }
-    const visible = (data || []).filter(item => item.products);
-    if (!visible.length) {
+    const favorites = data || [];
+    if (!favorites.length) {
       target.innerHTML = '<p class="muted">Aún no has guardado productos favoritos.</p>';
       return;
     }
-    target.innerHTML = visible.map(item => `
-      <article class="security-note">
-        <strong>${escapeHtml(item.products.name)}</strong>
-        <p>${money(item.products.price)}</p>
-        <button class="button secondary" type="button" data-remove-favorite="${escapeHtml(item.id)}">Quitar de favoritos</button>
-      </article>`).join("");
+    target.innerHTML = favorites.map(item => {
+      const product = item.products;
+      return `
+        <article class="security-note">
+          <strong>${escapeHtml(product?.name || "Producto no disponible")}</strong>
+          <p>${product ? money(product.price) : "Este producto ya no está disponible en la tienda."}</p>
+          <button class="button secondary" type="button" data-remove-favorite="${escapeHtml(item.id)}">Quitar de favoritos</button>
+        </article>`;
+    }).join("");
   }
 
   document.addEventListener("DOMContentLoaded", async () => {
