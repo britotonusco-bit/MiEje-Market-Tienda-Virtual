@@ -102,6 +102,18 @@ BEGIN
     RAISE EXCEPTION 'FALLO: faltan políticas de IA exclusivas del administrador del negocio.';
   END IF;
 
+  IF to_regprocedure('private.audit_business_ai_settings_change()') IS NULL
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_trigger t
+       JOIN pg_class c ON c.oid=t.tgrelid
+       JOIN pg_namespace n ON n.oid=c.relnamespace
+       WHERE n.nspname='public' AND c.relname='business_ai_settings'
+         AND t.tgname='business_ai_settings_audit'
+         AND NOT t.tgisinternal
+     ) THEN
+    RAISE EXCEPTION 'FALLO: falta el registro de auditoría de cambios de IA por negocio.';
+  END IF;
+
   IF NOT EXISTS (
     SELECT 1 FROM pg_class c
     JOIN pg_namespace n ON n.oid=c.relnamespace
