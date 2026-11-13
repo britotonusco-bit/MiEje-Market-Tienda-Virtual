@@ -331,6 +331,18 @@ BEGIN
     RAISE EXCEPTION 'FALLO: anon no puede leer todas las columnas públicas necesarias del directorio.';
   END IF;
 
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='business_content_pages'
+      AND policyname='business_content_pages_public_read'
+      AND cmd='SELECT' AND roles @> ARRAY['anon']::name[]
+      AND qual ILIKE '%EXISTS%'
+      AND qual NOT ILIKE '%private.business_is_active%'
+      AND qual NOT ILIKE '%private.has_business_role%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: el contenido público anon todavía depende de helpers privados.';
+  END IF;
+
   IF NOT has_table_privilege('anon','public.products','SELECT')
      OR NOT EXISTS (
        SELECT 1 FROM pg_policies
