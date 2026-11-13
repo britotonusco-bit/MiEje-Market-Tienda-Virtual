@@ -23,6 +23,7 @@ FROM (VALUES
  ('public.business_expenses'),
  ('public.order_item_costs'),
  ('public.business_content_pages'),
+ ('public.access_block_requests'),
  ('public.job_applications'),
  ('storage.buckets'),
  ('storage.objects')
@@ -56,6 +57,7 @@ FROM (VALUES
  ('public.create_public_order(uuid,text,text,text,text,text,text,jsonb)'),
  ('private.business_is_active(uuid)'),
  ('private.has_business_role(uuid,text[])'),
+ ('public.resolve_access_block_request(uuid,text,text,uuid)'),
  ('private.guard_business_expense_update()'),
  ('private.enforce_order_status_transition()'),
  ('extensions.digest(text,text)')
@@ -77,7 +79,7 @@ FROM pg_policies
 WHERE (schemaname='public' AND tablename IN (
  'businesses','business_memberships','profiles','products','orders',
  'order_items','business_payment_methods','business_content_pages',
- 'business_expenses','order_cancellation_requests','job_applications'
+ 'business_expenses','order_cancellation_requests','access_block_requests','job_applications'
  ))
  OR (schemaname='storage' AND tablename='objects')
 ORDER BY schemaname,tablename,cmd,policyname;
