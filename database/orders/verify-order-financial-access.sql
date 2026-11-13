@@ -37,6 +37,14 @@ BEGIN
     RAISE EXCEPTION 'FALLO: el RPC financiero no debe ser ejecutable por anon ni PUBLIC.';
   END IF;
 
+  IF NOT has_function_privilege('authenticated', 'private.customer_owns_order(uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: falta EXECUTE del helper privado de propiedad de pedidos.';
+  END IF;
+
+  IF has_function_privilege('anon', 'private.customer_owns_order(uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: anon no debe ejecutar el helper privado de propiedad de pedidos.';
+  END IF;
+
   IF NOT has_function_privilege('authenticated', 'public.mark_order_payment_received(uuid,text,text,text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'FALLO: falta EXECUTE del RPC de confirmación de pago.';
   END IF;
