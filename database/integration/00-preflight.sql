@@ -119,6 +119,6 @@ ORDER BY schemaname,tablename,cmd,policyname;
 SELECT table_schema,table_name,grantee,privilege_type
 FROM information_schema.role_table_grants
 WHERE table_schema IN ('public','storage')
-  AND table_name IN ('orders','order_items','business_memberships','profiles','objects')
+  AND table_name IN ('businesses','products','orders','order_items','business_memberships','profiles','objects')
   AND grantee IN ('anon','authenticated','service_role')
 ORDER BY table_schema,table_name,grantee,privilege_type;
