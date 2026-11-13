@@ -101,7 +101,7 @@
         await logPanel(businessId, panel, 'panel_open');
         notice.textContent = `Acceso validado para ${businessName}. Los permisos se aplican en la base de datos.`;
         notice.className = 'notice';
-        if (panel === 'business_admin') { await loadBusinessAdmin(); await initBusinessSettings(); await loadBlockTargetUsers(); }
+        if (panel === 'business_admin') { await loadBusinessAdmin(); await initBusinessSettings(); await initBusinessAi(); await loadBlockTargetUsers(); }
         else { await loadEmployeeOrders(); await showSupportLink(); }
       }
     } catch (error) {
@@ -561,36 +561,48 @@
   }
 
   async function initPlatformAi() {
-    const form = document.querySelector('#platformAiForm'); if (!form) return;
-    const aiResult = await db.from('platform_ai_settings')
-      .select('enabled,assistant_name,system_instructions,settings').eq('id', true).maybeSingle();
-    if (aiResult.error) {
-      document.querySelector('#platformAiMessage').textContent = 'No se pudo leer la configuración de IA: ' + aiResult.error.message;
-      return;
-    }
-    const data = aiResult.data;
-    let settings = {};
+    const form = document.querySelector('#platformAiForm');
+    if (!form) return;
+    const message = document.querySelector('#platformAiMessage');
+    let aiSettings = {};
+    let publicSettings = {};
     try {
-      const publicResult = await callTechnicalFunction({ action: 'get_platform_public_settings' });
-      settings = publicResult?.settings || {};
+      const [aiResult, publicResult] = await Promise.all([
+        callTechnicalFunction({ action: 'get_platform_ai_settings' }),
+        callTechnicalFunction({ action: 'get_platform_public_settings' })
+      ]);
+      aiSettings = aiResult?.settings || {};
+      publicSettings = publicResult?.settings || {};
     } catch (error) {
-      const message = document.querySelector('#platformAiMessage');
-      if (message) message.textContent = 'La configuración pública global requiere aplicar su migración y desplegar la función técnica: ' + (error.message || 'No disponible todavía.');
+      if (message) {
+        message.textContent = 'No se pudo cargar toda la configuración general. Comprueba que las migraciones y la función técnica estén actualizadas: ' + (error.message || 'Error de consulta.');
+        message.className = 'message error';
+      }
     }
-    form.elements.site_name.value = settings.site_name || 'MiEje Market';
-    form.elements.site_description.value = settings.site_description || '';
-    form.elements.logo_url.value = settings.logo_url || '';
-    form.elements.hero_image_url.value = settings.hero_image_url || '';
-    form.elements.support_whatsapp.value = settings.support_whatsapp || '';
-    form.elements.assistant_name.value = data?.assistant_name || 'Asistente general de MiEje Market';
-    form.elements.system_instructions.value = data?.system_instructions || '';
-    form.elements.enabled.checked = Boolean(data?.enabled);
+    form.elements.site_name.value = publicSettings.site_name || 'MiEje Market';
+    form.elements.site_description.value = publicSettings.site_description || '';
+    form.elements.logo_url.value = publicSettings.logo_url || '';
+    form.elements.hero_image_url.value = publicSettings.hero_image_url || '';
+    form.elements.support_whatsapp.value = publicSettings.support_whatsapp || '';
+    form.elements.assistant_name.value = aiSettings.assistant_name || 'Asistente general de MiEje Market';
+    form.elements.system_instructions.value = aiSettings.system_instructions || '';
+    form.elements.enabled.checked = Boolean(aiSettings.enabled);
   }
 
   async function savePlatformAi(event) {
-    event.preventDefault(); const form = event.currentTarget, message = document.querySelector('#platformAiMessage');
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#platformAiMessage');
     const support = form.elements.support_whatsapp.value.replace(/[^0-9]/g, '').slice(0, 18);
+    let aiSaved = false;
     try {
+      await callTechnicalFunction({
+        action: 'update_platform_ai_settings',
+        enabled: form.elements.enabled.checked,
+        assistant_name: form.elements.assistant_name.value.trim(),
+        system_instructions: form.elements.system_instructions.value.trim()
+      });
+      aiSaved = true;
       const publicResult = await callTechnicalFunction({
         action: 'update_platform_public_settings',
         site_name: form.elements.site_name.value.trim(),
@@ -599,13 +611,12 @@
         hero_image_url: form.elements.hero_image_url.value.trim(),
         support_whatsapp: support
       });
-      const payload = { id: true, enabled: form.elements.enabled.checked, assistant_name: form.elements.assistant_name.value.trim(), system_instructions: form.elements.system_instructions.value.trim(), updated_by: currentUser.id, updated_at: new Date().toISOString() };
-      const { error } = await db.from('platform_ai_settings').upsert(payload, { onConflict: 'id' });
-      if (error) throw error;
       message.textContent = publicResult.message || 'Configuración general guardada.';
       message.className = 'message success';
     } catch (error) {
-      message.textContent = error.message || 'No se pudo guardar la configuración general.';
+      message.textContent = aiSaved
+        ? 'La configuración del asistente se guardó, pero no se completó la configuración pública: ' + (error.message || 'Error desconocido.')
+        : (error.message || 'No se pudo guardar la configuración general.');
       message.className = 'message error';
     }
   }
@@ -658,15 +669,7 @@
       const message = document.querySelector('#storeSettingsMessage');
       if (message) { message.textContent = 'No se pudieron cargar los métodos de pago: ' + methodsResult.error.message; message.className = 'message error'; }
     }
-    const pending = [
-      ['ia-negocio', 'IA exclusiva del negocio', 'La configuración de IA por negocio aún no está implementada en la base independiente.'],
-      ['solicitudes-bloqueo', 'Solicitudes de bloqueo', 'Las solicitudes de bloqueo desde el panel del negocio todavía no están implementadas en el servidor.']
-    ];
     await Promise.all([loadBusinessContent(), loadJobApplications()]);
-    for (const [id, heading, message] of pending) {
-      const section = document.getElementById(id);
-      if (section) section.innerHTML = `<div class="section-heading"><div><h2>${heading}</h2></div></div><div class="empty">${message}</div>`;
-    }
   }
 
   async function saveStoreSettings(event) {
@@ -907,6 +910,26 @@
       else alert('Postulación actualizada.');
       button.disabled = false;
     }));
+  }
+
+  async function initBusinessAi() {
+    const form = document.querySelector('#businessAiForm');
+    if (!form) return;
+    const message = document.querySelector('#businessAiMessage');
+    const { data, error } = await db.from('business_ai_settings')
+      .select('enabled,assistant_name,instructions')
+      .eq('business_id', businessId)
+      .maybeSingle();
+    if (error) {
+      if (message) {
+        message.textContent = 'No se pudo cargar la configuración de IA de este negocio: ' + error.message;
+        message.className = 'message error';
+      }
+      return;
+    }
+    form.elements.enabled.checked = Boolean(data?.enabled);
+    form.elements.assistant_name.value = data?.assistant_name || 'Asistente del negocio';
+    form.elements.instructions.value = data?.instructions || '';
   }
 
   async function saveBusinessAi(event) {
