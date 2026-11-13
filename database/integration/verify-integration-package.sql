@@ -21,6 +21,41 @@ BEGIN
     RAISE EXCEPTION 'FALLO: falta una tabla de clientes, checkout o configuración global.';
   END IF;
 
+  IF to_regclass('public.access_block_requests') IS NULL
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_class c
+       JOIN pg_namespace n ON n.oid=c.relnamespace
+       WHERE n.nspname='public' AND c.relname='access_block_requests'
+         AND c.relrowsecurity
+     ) THEN
+    RAISE EXCEPTION 'FALLO: falta access_block_requests o RLS no está habilitado.';
+  END IF;
+
+  IF has_table_privilege('anon','public.access_block_requests','SELECT')
+     OR has_table_privilege('anon','public.access_block_requests','INSERT')
+     OR has_table_privilege('authenticated','public.access_block_requests','SELECT')
+     OR has_table_privilege('authenticated','public.access_block_requests','UPDATE')
+     OR has_table_privilege('authenticated','public.access_block_requests','DELETE')
+     OR NOT has_any_column_privilege('authenticated','public.access_block_requests','INSERT') THEN
+    RAISE EXCEPTION 'FALLO: los permisos directos de access_block_requests no respetan el modelo esperado.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='access_block_requests'
+      AND policyname='access_block_requests_admin_submit'
+      AND cmd='INSERT'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: falta la política de solicitud exclusiva del administrador del negocio.';
+  END IF;
+
+  IF to_regprocedure('public.resolve_access_block_request(uuid,text,text,uuid)') IS NULL
+     OR NOT has_function_privilege('service_role','public.resolve_access_block_request(uuid,text,text,uuid)','EXECUTE')
+     OR has_function_privilege('anon','public.resolve_access_block_request(uuid,text,text,uuid)','EXECUTE')
+     OR has_function_privilege('authenticated','public.resolve_access_block_request(uuid,text,text,uuid)','EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: la RPC de resolución de bloqueos no tiene permisos exclusivos de servidor.';
+  END IF;
+
   IF NOT EXISTS (
     SELECT 1 FROM pg_class c
     JOIN pg_namespace n ON n.oid=c.relnamespace
