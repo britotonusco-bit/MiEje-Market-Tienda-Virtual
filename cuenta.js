@@ -45,7 +45,7 @@
     const { data, error } = await client.rpc("get_customer_order_history");
     if (activeUserId !== userId) return;
     if (error) {
-      target.textContent = "No fue posible cargar el historial. Comprueba que la migración de clientes esté aplicada.";
+      target.textContent = "No fue posible cargar el historial. Comprueba que las migraciones de clientes y acceso financiero estén aplicadas.";
       console.warn("Customer order history:", error);
       return;
     }
