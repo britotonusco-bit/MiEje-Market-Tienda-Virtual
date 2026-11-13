@@ -608,7 +608,7 @@ ALTER TABLE public.business_memberships
 -- del negocio; no se concede escritura directa de membresías.
 GRANT SELECT (job_title) ON TABLE public.business_memberships TO authenticated;
 
-DO $
+DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
