@@ -574,3 +574,34 @@ Se corrigió el borrador `database/security/business-admin-boundaries.sql`:
 La política live `audit_logs_owner_or_business_admin_select` permite al propietario técnico consultar auditoría global, coherente con su función de supervisión, y a administradores consultar auditoría de su negocio. Los registros de auditoría no tienen permiso de escritura directa para `authenticated`; los eventos se generan desde funciones/operaciones controladas. La política de membresías live todavía conserva un bypass técnico y el borrador lo sustituye por lectura propia o del equipo del negocio para el administrador. La revisión de las funciones técnicas con service role y sus controles de autorización continúa pendiente.
 
 Comprobaciones estáticas del nuevo bloque de gastos: 9/9 aprobadas. No se ejecutó SQL ni se modificaron gastos live.
+
+
+## Auditoría de Edge Function técnica y operaciones con service_role — 13 de noviembre de 2026
+
+Se comparó la función activa `technical-business-management` (versión 6) con la versión preparada en la rama `correcciones-funcionales`.
+
+### Hallazgo crítico en la versión activa
+
+La versión live 6 verifica la sesión, el perfil, el bloqueo y `platform_role='platform_owner'` para acciones técnicas, pero **no comprueba el nivel MFA/AAL2**. La rama incorpora `auth.mfa.getAuthenticatorAssuranceLevel(token)` y rechaza toda acción del propietario cuando `currentLevel !== 'aal2'`. La función live no se ha reemplazado; el refuerzo todavía no está activo en producción.
+
+La Edge Function está configurada con `verify_jwt=true`. En la rama, el token también se valida con `auth.getUser(token)` antes de crear el cliente con `SUPABASE_SERVICE_ROLE_KEY`. Después se consulta el perfil y se rechazan perfiles inexistentes o bloqueados. Todas las acciones técnicas, salvo `log_login` que tiene autorización por panel/membresía, pasan por la comprobación del propietario.
+
+### Controles comprobados en la rama
+
+- El propietario técnico debe tener AAL2 antes de ejecutar acciones, incluida la lectura de datos técnicos.
+- Las acciones de invitación solo aceptan roles `business_admin` y `employee`; no permiten asignar `platform_owner`.
+- La invitación comprueba que el negocio esté activo y que el usuario no tenga ya una membresía en ese negocio.
+- Los cambios de rol/cargo y las suspensiones comprueban el último administrador activo; además, los updates usan valores anteriores en el filtro para detectar cambios concurrentes. El trigger SQL preparado protege el último administrador frente a carreras, pero sigue sin estar aplicado en live.
+- La creación de negocio inserta solo los datos base (nombre, categoría, slug y creador); la configuración comercial queda para el administrador.
+- Las operaciones técnicas registran auditoría y reportan advertencias si una operación se completó pero el evento de auditoría falló.
+- Se corrigió `log_login` para exigir que el negocio también esté activo antes de registrar como válido el acceso de un administrador o empleado. Antes se verificaba la membresía activa, pero no el estado del negocio.
+
+### Capacidad de eliminación pendiente
+
+La Edge Function de esta rama no tiene acciones `delete_business` ni `delete_member`. La suspensión/cierre de negocio y suspensión de membresía sí están implementados. Por tanto, la eliminación real de negocios o cuentas no debe darse por disponible. Antes de agregarla hay que definir si será eliminación lógica/archivo o borrado físico y qué datos históricos deben conservarse; pedidos, transacciones y auditoría no deberían desaparecer por borrar una membresía.
+
+### Pruebas pendientes y estado
+
+Se aprobaron 14/14 verificaciones estáticas de autenticación, AAL2, roles, negocio activo, control de último administrador, auditoría y ausencia de acciones de borrado no implementadas. Son comprobaciones de código, no pruebas dinámicas con usuarios.
+
+No se desplegó la nueva Edge Function, no se cambió la configuración de Auth y no se envió ninguna invitación. La versión live continúa en v6 sin el requisito AAL2.
