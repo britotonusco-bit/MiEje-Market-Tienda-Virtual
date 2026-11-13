@@ -247,32 +247,29 @@ Deno.serve(async (req: Request) => {
       const recordId = textValue(body.record_id, 80);
       const decision = textValue(body.decision, 20);
       const paymentReference = textValue(body.payment_reference, 160) || null;
-      if (!/^[0-9a-f-]{36}$/i.test(recordId)) return reply(400, { error: "Identificador de nómina no válido." });
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(recordId)) {
+        return reply(400, { error: "Identificador de nómina no válido." });
+      }
       if (!["paid", "cancelled"].includes(decision)) return reply(400, { error: "Estado de nómina no válido." });
-      const { data, error } = await admin.from("payroll_records").update({
-        status: decision,
-        paid_at: decision === "paid" ? new Date().toISOString() : null,
-        payment_reference: decision === "paid" ? paymentReference : null,
-        updated_by: user.id,
-        updated_at: new Date().toISOString(),
-      }).eq("id", recordId).eq("status", "pending")
-        .select("id,business_id,payee_name,description,amount,currency,status,paid_at,payment_reference,updated_at")
-        .maybeSingle();
-      if (error) throw error;
-      if (!data) return reply(409, { error: "El registro ya fue resuelto o no existe. Actualiza la lista antes de continuar." });
-      const { error: auditError } = await admin.from("audit_logs").insert({
-        business_id: data.business_id,
-        actor_id: user.id,
-        action: decision === "paid" ? "platform.payroll_marked_paid" : "platform.payroll_cancelled",
-        entity_type: "payroll_record",
-        entity_id: data.id,
-        details: { amount: data.amount, currency: data.currency, payment_reference: data.payment_reference },
+      const { data, error } = await admin.rpc("resolve_platform_payroll_record", {
+        p_record_id: recordId,
+        p_decision: decision,
+        p_payment_reference: paymentReference,
+        p_actor_id: user.id,
       });
+      if (error) {
+        const message = error.message || "No se pudo resolver el registro de nómina.";
+        if (message.includes("ya fue resuelto")) return reply(409, { error: message });
+        if (message.includes("no existe")) return reply(404, { error: message });
+        throw error;
+      }
       return reply(200, {
         ok: true,
-        record: data,
-        message: decision === "paid" ? "Pago registrado en el control interno." : "Registro de nómina cancelado.",
-        audit_warning: auditError ? "El cambio se guardó, pero no se pudo registrar la auditoría." : null,
+        record: data?.payroll ?? null,
+        financial_record_id: data?.financial_record_id ?? null,
+        message: decision === "paid"
+          ? "Pago marcado en el control interno y gasto financiero registrado de forma conjunta."
+          : "Registro de nómina cancelado.",
       });
     }
 
