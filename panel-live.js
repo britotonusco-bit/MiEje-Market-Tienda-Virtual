@@ -208,6 +208,9 @@
       ['Productos con poco stock', number(products.filter(p => p.is_active && Number(p.inventory || 0) <= 5).length), 'Cinco unidades o menos']
     ]);
     await Promise.all([loadBusinessOrders(), loadCancellationRequests(), loadRefundableOrders(), loadProducts(), loadAccessEvents(businessId, '#accessContainer'), loadAuditEvents(businessId, '#auditContainer')]);
+    const inventoryRefreshButton = document.querySelector('#refreshInventoryMovements');
+    if (inventoryRefreshButton) inventoryRefreshButton.onclick = loadInventoryMovements;
+    await loadInventoryMovements();
     initializeProfitReport();
     await loadBusinessExpenses();
   }
@@ -652,6 +655,42 @@
       }).join('') + '</tbody></table></div>';
     target.querySelectorAll('[data-edit-product]').forEach(button => button.addEventListener('click', () => editProduct(button.dataset.editProduct)));
     target.querySelectorAll('[data-toggle-product]').forEach(button => button.addEventListener('click', () => toggleProductStatus(button.dataset.toggleProduct, button)));
+  }
+
+  async function loadInventoryMovements() {
+    const target = document.querySelector('#inventoryMovementsContainer');
+    if (!target) return;
+    target.innerHTML = '<div class="empty">Cargando historial de inventario…</div>';
+    const { data, error } = await db.from('inventory_movements')
+      .select('id,product_id,movement_type,quantity_before,quantity_after,quantity_delta,reason,created_at')
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error) return showError(target, error);
+    const productNames = new Map(cachedProducts.map(product => [product.id, product.name]));
+    const labels = {
+      initial: 'Inventario inicial',
+      adjustment: 'Ajuste manual',
+      sale: 'Venta',
+      cancellation_return: 'Devolución por cancelación'
+    };
+    if (!data?.length) {
+      target.innerHTML = '<div class="empty">Todavía no hay movimientos registrados. Los movimientos aparecerán cuando se cree un producto o cambien sus existencias.</div>';
+      return;
+    }
+    target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th>Antes</th><th>Después</th><th>Variación</th><th>Motivo</th></tr></thead><tbody>' +
+      data.map(row => {
+        const delta = Number(row.quantity_delta);
+        const deltaText = (delta > 0 ? '+' : '') + number(delta);
+        const dateText = new Date(row.created_at).toLocaleString('es-CO', {
+          dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Bogota'
+        });
+        return '<tr><td>' + esc(dateText) + '</td><td>' +
+          esc(productNames.get(row.product_id) || 'Producto') + '</td><td>' +
+          esc(labels[row.movement_type] || row.movement_type) + '</td><td>' +
+          number(row.quantity_before) + '</td><td>' + number(row.quantity_after) +
+          '</td><td>' + esc(deltaText) + '</td><td>' + esc(row.reason) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
   }
 
   async function loadTechnical() {
