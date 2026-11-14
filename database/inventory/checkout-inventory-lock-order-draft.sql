@@ -83,7 +83,15 @@ BEGIN
     SELECT 1
     FROM JSONB_ARRAY_ELEMENTS(p_items) AS item(value)
     WHERE COALESCE(value->>'product_id','')
-        !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
+        !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+       OR COALESCE(value->>'quantity','') !~ '^[1-9][0-9]*$'
+  ) THEN
+    RAISE EXCEPTION 'Producto o cantidad inválidos.';
+  END IF;
+
+  -- Bloquear productos siempre por UUID ascendente. Dos carritos que contengan
+  -- los mismos productos en distinto orden adquieren los locks en el mismo orden.
+  FOR v_item IN
     SELECT value
     FROM JSONB_ARRAY_ELEMENTS(p_items)
     ORDER BY (value->>'product_id')::uuid
