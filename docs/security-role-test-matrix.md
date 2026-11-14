@@ -1163,3 +1163,45 @@ El verificador de integración ahora comprueba: existencia de la relación `cust
 - Probar rutas mal formadas, carpetas adicionales, nombres no UUID, archivos MIME/extensión inconsistentes, archivos superiores a 5 MB y tokens de carga vencidos/reutilizados.
 - Incorporar análisis antivirus/validación de contenido real para documentos antes de considerarlos seguros.
 - No hay archivos ni postulaciones reales de ensayo para probar los flujos completos. No se ejecutaron migraciones ni cambios de Storage en Supabase live.
+
+
+## Auditoría de cuentas, invitaciones y recuperación de acceso (14 nov 2026)
+
+### Estado observado en Supabase activo
+- profiles tiene RLS y una política de lectura propia o del propietario técnico. business_memberships tiene RLS y su política SELECT también permite al propietario técnico leer asignaciones globales.
+- La inspección de privilegios efectivos confirma que authenticated solo tiene SELECT general en profiles y business_memberships; no tiene INSERT/UPDATE/DELETE general en membresías ni UPDATE general de perfiles. No se concedió UPDATE de platform_role, is_blocked ni blocked_reason. Por tanto, en el esquema live consultado no se encontró una vía directa por Data API para que un usuario se autoasigne el rol técnico o altere su bloqueo.
+- private.has_business_role consulta en cada autorización la membresía activa y profiles.is_blocked = false. Al suspender una membresía, las operaciones RLS que dependen de ese helper dejan de autorizar ese negocio aunque el JWT de la sesión siga vigente.
+- La Edge Function technical-business-management desplegada está en versión 6. Su código live no contiene la comprobación de MFA AAL2 que sí aparece en la rama correcciones-funcionales. La pantalla de inicio de sesión puede pedir MFA en el navegador, pero la función live no lo exige en el servidor; una llamada directa con JWT de propietario podría omitir el paso de interfaz. Este es un hallazgo de seguridad pendiente de despliegue controlado.
+- La función live resolve-my-access verifica que el perfil exista y no esté bloqueado, y devuelve solo membresías activas de negocios activos.
+- La tabla access_block_requests y la RPC resolve_access_block_request todavía no existen en el esquema live inspeccionado. El bloqueo solicitado por administradores no está listo en producción.
+
+### Correcciones presentes en la rama correcciones-funcionales
+- technical-business-management/index.ts exige en el servidor currentLevel === 'aal2' para cualquier acción técnica del propietario, no solo en la interfaz.
+- invite_member limita los roles internos a business_admin y employee, valida el negocio activo, evita volver a invitar a usuarios que ya tienen una membresía para ese negocio y establece redirectTo en aceptar-invitacion.html.
+- La invitación requiere nombre completo y cargo; job_title se guarda en business_memberships, no en el perfil global.
+- La Edge Function comprueba el perfil bloqueado y verifica el JWT con auth.getUser. La función técnica es privada (verify_jwt = true).
+- business-admin-boundaries.sql revoca INSERT/UPDATE/DELETE directos sobre business_memberships; para profiles deja al usuario actualizar únicamente display_name, avatar_url y phone. También elimina la lectura global del propietario por Data API.
+- access-block-requests-draft.sql limita la creación de solicitudes a administradores activos del negocio y reserva la resolución al service_role mediante RPC. La resolución bloquea solo la membresía del negocio indicado, conserva el acceso de la persona a otros negocios y registra auditoría.
+- Un trigger transaccional impide retirar o degradar al último administrador activo, incluso ante operaciones concurrentes.
+
+### Sesiones y revocación de acceso
+- La suspensión de una membresía es por negocio, no una eliminación global de la cuenta. La autorización de RLS se vuelve a comprobar contra el estado actual de la membresía en cada consulta protegida; el JWT puede seguir autenticando la sesión, pero no debe conservar acceso a los datos de ese negocio.
+- La rama no realiza cierre global de sesiones Auth al suspender una sola membresía. Esto es intencional para no cerrar el acceso del usuario a otros negocios donde tenga una membresía válida. Si se bloquea el perfil global (is_blocked), los helpers de rol rechazan todas las membresías; el token Auth puede permanecer vigente hasta expirar, pero no debe habilitar operaciones protegidas.
+- La prueba de revocación debe verificar con una sesión ya abierta que las consultas y mutaciones del negocio suspendido fallan inmediatamente, mientras las de otro negocio asignado continúan funcionando. No basta con comprobar que el usuario no puede iniciar sesión de nuevo.
+
+### Pruebas pendientes antes de habilitar
+1. Llamar directamente a technical-business-management con sesión AAL1 de propietario: debe responder MFA_REQUIRED; repetir con AAL2 y confirmar que solo las acciones autorizadas funcionan.
+2. Admin, empleado y cliente intentan INSERT/UPDATE/DELETE de membresías y cambiar profiles.platform_role, is_blocked o blocked_reason: todas las operaciones deben fallar.
+3. Técnico invita a una cuenta nueva: comprobar correo, redirect, activación y membresía correcta.
+4. Técnico intenta invitar una cuenta ya asignada, incluso si la membresía está suspendida: debe responder conflicto y no duplicar membresía ni correo.
+5. Simular error después del envío del correo y antes de crear la membresía: el sistema debe dejar un estado recuperable, informar que no se debe repetir a ciegas y permitir completar la asignación sin duplicados.
+6. Admin A solicita bloquear a un empleado de A; empleado A, cliente y Admin B intentan solicitudes no autorizadas.
+7. Técnico resuelve una solicitud dos veces o simultáneamente: solo una resolución debe aplicarse y quedar auditada.
+8. Suspender un usuario con sesión abierta: A pierde acceso al negocio A inmediatamente; si también tiene membresía activa en B, conserva acceso a B.
+9. Suspender o degradar al último administrador: debe rechazarse incluso bajo concurrencia.
+10. Probar enlace de invitación vencido/reutilizado, cambio de contraseña y recuperación desde un navegador sin sesión previa; una sesión ordinaria no debe habilitar la pantalla de activación o recuperación.
+
+### Estado de integración
+- Las comprobaciones SQL nuevas quedaron añadidas a verify-integration-package.sql; se ejecutarán solo cuando las migraciones estén aplicadas en un entorno de prueba.
+- Auditoría estática de código, esquema, políticas y privilegios completada para este bloque. No se enviaron invitaciones reales ni se hicieron pruebas con usuarios reales.
+- No se aplicó SQL, no se desplegó la función Edge, no se fusionó el PR, no se modificó main ni se publicó GitHub Pages. El despliegue live sigue sin la exigencia MFA del servidor y sin la tabla/RPC de solicitudes de bloqueo.
