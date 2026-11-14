@@ -1008,3 +1008,44 @@ El verificador de integración ahora comprueba: existencia de la relación `cust
 9. Los reportes por día/mes/año se calculan con la fecha del movimiento financiero, separando ingresos, reembolsos y gastos; no se deben inferir desde `orders.created_at`.
 
 **Estado:** revisión estática y correcciones preparadas en `correcciones-funcionales`. No se han aplicado migraciones ni desplegado funciones en el proyecto activo.
+## Auditoría de inventario, costos y ganancias — 14/11/2026
+
+### Hallazgos en Supabase activo
+
+- `products` contiene precio de venta e inventario, pero el costo se guarda por separado en `product_costs` (costo vigente) y `order_item_costs` (costo histórico por línea de pedido).
+- `create_public_order()` consulta `product_costs`, copia el costo a `order_item_costs` y descuenta existencias dentro de la misma transacción que crea el pedido. Los productos se bloquean con `FOR UPDATE`; una compra sin existencias suficientes falla.
+- `order_item_costs.unit_cost` permite NULL. Si un negocio no registra el costo, el pedido igualmente puede completarse y su costo histórico queda desconocido. El reporte no debe presentar esa operación como ganancia real; debe marcarla como costo pendiente.
+- El formulario de productos no tenía un campo para ingresar el costo y `panel-live.js` no consultaba ni guardaba `product_costs`. La base podía capturarlo, pero el administrador no tenía una forma integrada en el panel para mantenerlo.
+- Las políticas activas de `product_costs` y `order_item_costs` permiten lectura del propietario técnico mediante `private.is_platform_owner()`. Esto contradice la separación acordada: los costos de cada negocio pertenecen a su administrador.
+- `business_expenses` registra gastos por separado, con estado pendiente/pagado y anulación conservada. No deben sumarse como costo de producto ni confundirse con ventas.
+- El panel presenta sumas de pedidos pagados, pero no calcula una utilidad neta verificable. Tampoco debe usarse `orders.created_at` como fecha de caja: el reporte financiero debe usar la fecha del movimiento confirmado.
+
+### Correcciones preparadas en la rama
+
+- `business-admin-boundaries.sql` reemplaza las políticas de `product_costs` y `order_item_costs` para que solo el administrador activo del negocio pueda consultar costos. El propietario técnico deja de tener acceso directo a costos de cada tienda.
+- El formulario de productos incorpora costo unitario privado. El panel consulta los costos separados, los guarda en `product_costs` y muestra costo y margen bruto unitario; el costo no se agrega a la tabla pública `products`.
+- Cuando no existe costo registrado, el panel lo muestra como pendiente y no inventa un margen. El checkout conserva el costo histórico disponible en `order_item_costs` al crear cada pedido.
+- El verificador comprueba RLS en ambas tablas, políticas administrativas sin bypass técnico, ausencia de acceso anónimo y ausencia de escritura directa sobre el histórico de costos.
+
+### Reglas para los reportes
+
+- **Ventas:** importe de productos vendidos, separado de domicilios y reembolsos.
+- **Costo de ventas:** suma de `unit_cost × quantity` de las líneas, usando el costo histórico guardado al comprar.
+- **Ganancia bruta:** ventas de productos menos costo de ventas.
+- **Gastos operativos:** gastos activos pagados, sin mezclar los pendientes ni los anulados.
+- **Ganancia neta estimada:** ganancia bruta menos gastos operativos y otros cargos registrados por el negocio.
+- Si alguna línea no tiene `unit_cost`, el reporte debe mostrar las ventas con costo pendiente y no etiquetar el resultado como utilidad real completa.
+- Los reportes por día, mes y año deben basarse en la fecha del movimiento o del pedido según el indicador y explicar cuál fecha se usa. Los reembolsos reducen el ingreso neto, no se cuentan como ventas positivas.
+
+### Pruebas obligatorias en ensayo
+
+1. Guardar y editar costo de un producto sin exponerlo al catálogo público.
+2. Administrador A no puede consultar costos del negocio B; empleados y propietario técnico tampoco pueden leerlos directamente.
+3. Un pedido guarda el costo histórico aunque después cambie el costo vigente del producto.
+4. Un pedido con costo ausente queda marcado como costo pendiente, sin utilidad inventada.
+5. Una compra concurrente no puede dejar inventario negativo ni vender más unidades que las disponibles.
+6. Una cancelación aprobada restaura existencias una sola vez; un reembolso no vuelve a sumar inventario.
+7. Los gastos pendientes no se descuentan como egresos pagados; los anulados quedan fuera de los reportes.
+8. Ventas, costo de ventas, ganancia bruta, gastos y ganancia neta coinciden con movimientos de prueba conocidos.
+
+**Estado:** correcciones de interfaz, políticas y verificador preparadas en `correcciones-funcionales`. No se aplicaron migraciones ni se desplegaron funciones. La utilidad neta y los reportes completos siguen pendientes de implementación y pruebas; no se consideran listos para producción.
