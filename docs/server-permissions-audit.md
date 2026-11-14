@@ -811,3 +811,47 @@ Estado live consultado:
 **Pendientes antes de activar:** probar en staging la misma clave con igual contenido, la misma clave con contenido distinto, dos solicitudes simultáneas, pérdida de respuesta después de confirmar el pedido, error de inventario y límite de 10 solicitudes por IP. También comprobar que el proxy de producción entrega una IP de origen confiable en `cf-connecting-ip` o `x-forwarded-for`; no debe confiarse en una cabecera de IP que el cliente pueda controlar.
 
 **Resultado:** idempotencia y reserva de límite revisadas y reforzadas en la rama. La protección todavía no está activa en Supabase live; la compra real no puede probarse porque la base sigue sin productos ni pedidos de prueba.
+
+
+### 12. Revisión de métodos de pago, conciliación y separación financiera
+
+**Alcance:** lectura de `panel-live.js`, Edge Function de checkout, borradores de permisos/finanzas y consultas de solo lectura al proyecto Supabase Independiente.
+
+#### Configuración de métodos por negocio
+
+- El panel administrador lee y modifica `business_payment_methods` filtrando por el `businessId` de la membresía activa.
+- Los métodos se clasifican en códigos generales `cash`, `transfer`, `card` y `other`. Esto permite que un negocio tenga varios métodos del mismo tipo, por ejemplo Nequi y Bancolombia, pero ambos quedan clasificados como `transfer`.
+- La interfaz actual identifica filas existentes por `method_code` y conserva sus IDs en el orden en que aparecen. La clasificación no representa por sí sola la cuenta específica elegida.
+- El checkout Edge valida que el ID enviado pertenezca al negocio y que el método exista. Para pedidos nuevos exige que siga habilitado.
+- El pedido almacena actualmente el código general en `orders.payment_method`, no el ID del método ni una copia inmutable de su nombre/instrucciones. Por eso, si un negocio ofrece varios métodos de transferencia, el pedido y la vista administrativa no permiten distinguir con certeza cuál cuenta o billetera seleccionó el cliente después de registrar la compra.
+
+**Pendiente funcional importante:** agregar a los pedidos una referencia segura al método elegido y un snapshot del nombre visible (sin copiar datos bancarios sensibles innecesarios). La referencia debe conservar el histórico aunque el administrador desactive o renombre el método después. El cambio debe coordinarse con `create_public_order`, `create_public_order_idempotent`, el checkout Edge, el panel y la consulta pública del pedido; no se debe resolver concatenando el nombre dinámico en las notas de entrega porque alteraría la huella de idempotencia.
+
+#### Confirmación y conciliación de pagos
+
+- `mark_order_payment_received` está preparado para que solo el administrador activo del negocio confirme un pago realmente recibido.
+- La función bloquea el pedido, valida que no esté cancelado/reembolsado, exige estado de pago pendiente, registra el movimiento financiero, actualiza `orders.payment_status` y escribe auditoría dentro de la misma transacción.
+- Para métodos distintos de efectivo exige una referencia o comprobante. No realiza cobros ni se conecta a bancos o pasarelas.
+- Un índice único parcial impide más de un movimiento completado de tipo `payment_received` por pedido.
+- El reembolso preparado es total y manual: requiere pedido cancelado, un único ingreso conciliado por el total exacto, solicitud de cancelación aprobada y referencia del reembolso. No ejecuta una transferencia.
+
+#### Separación de permisos observada
+
+Consultas live confirmaron que `authenticated` todavía tiene privilegio de lectura sobre `orders.total` y `financial_transactions.amount`. La política live de pedidos permite lectura a administradores y empleados del negocio, de modo que el GRANT de columna actual puede exponer importes a empleados. El borrador `order-financial-access-draft.sql` revoca esos importes y entrega finanzas al administrador mediante RPC.
+
+También se confirmó que las políticas live de `business_payment_methods` y `financial_transactions` incluyen al propietario técnico global. El borrador `business-admin-boundaries.sql` sustituye esas políticas por acceso del administrador activo del negocio, manteniendo la administración técnica mediante Edge Functions autorizadas.
+
+El borrador de confirmación de pagos `mark_order_payment_received` no está instalado en live. Las funciones de consulta financiera y reembolso asociadas tampoco deben considerarse activas hasta aplicar y probar sus migraciones.
+
+#### Estado live y límites
+
+- `business_payment_methods`, `financial_transactions` y sus columnas principales existen.
+- Los métodos de pago no tienen lectura pública directa por `anon`; el flujo de tienda pública consulta la información mediante su función de servidor.
+- Los privilegios actuales de `authenticated` todavía permiten consultar importes de pedidos y movimientos financieros según las políticas live existentes.
+- No están instaladas las RPC de confirmación/consulta financiera verificadas en esta revisión.
+- No hay pedidos ni transacciones de prueba con los que verificar conciliación real.
+- No se modificó SQL live ni se desplegaron funciones.
+
+**Acciones pendientes antes de activar:** incorporar snapshot del método seleccionado al pedido; aplicar en staging los límites de permisos de administrador/empleado/técnico; probar que un empleado no puede leer importes ni registrar pagos; probar que el administrador del negocio A no ve métodos, pedidos ni transacciones de B; verificar pago duplicado/concurrente, cancelación y reembolso; y confirmar que la interfaz no presenta un pago como recibido antes de que el RPC confirme la transacción.
+
+**Resultado:** el flujo de configuración y confirmación manual está preparado parcialmente, pero falta identificar de forma persistente el método concreto elegido en cada pedido y activar las restricciones financieras. No se cambió producción.
