@@ -225,6 +225,10 @@ BEGIN
     RAISE EXCEPTION 'FALLO: el propietario técnico conserva lectura directa global de finanzas de negocios.';
   END IF;
 
+  IF to_regclass('public.refund_details') IS NULL
+     OR to_regclass('public.financial_transactions') IS NULL THEN
+    RAISE EXCEPTION 'FALLO: faltan tablas necesarias para conciliar reembolsos.';
+  END IF;
   IF to_regprocedure('public.complete_order_refund(uuid,text,text,text,text)') IS NULL
      OR NOT has_function_privilege('authenticated',
        'public.complete_order_refund(uuid,text,text,text,text)','EXECUTE')
