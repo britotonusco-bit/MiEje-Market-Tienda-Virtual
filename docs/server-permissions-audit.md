@@ -153,3 +153,12 @@ Durante la comprobación de compatibilidad del panel se detectó que, si el pane
 - No se cambió la función de cierre de sesión voluntario del usuario.
 
 Esta corrección evita que la falta de AAL2 en una sesión del panel técnico cierre accidentalmente otras sesiones del usuario.
+
+
+## Hallazgo funcional adicional: bloqueo global de una cuenta
+
+La función técnica contiene acciones `block_member` y `unblock_member`, pero ambas modifican el estado de una **membresía concreta** en `business_memberships`. No se encontró una acción técnica para establecer o retirar `profiles.is_blocked` a nivel global.
+
+Esto significa que el control global ya se aplica cuando `profiles.is_blocked = true`, pero la función técnica revisada no ofrece actualmente una operación para activar ese bloqueo global desde el panel. No debe confundirse la suspensión de una membresía con el bloqueo de toda la cuenta.
+
+**Pendiente de decisión funcional:** definir si el panel técnico necesita una acción separada de bloqueo global de cuenta, con motivo obligatorio, confirmación de impacto, auditoría y revocación de sesiones apropiada. No se añadió esa acción en esta revisión para no ampliar privilegios ni alterar cuentas sin especificación aprobada.
