@@ -140,3 +140,16 @@ El borrador reduce privilegios directos de columnas en las tablas `businesses`, 
 No se encontró una política de escritura de productos que permita al propietario técnico modificar el catálogo directamente. Sí se confirmó que las políticas actuales de lectura y varias tablas operativas le permiten consultar datos globales. El borrador aborda esas rutas y restringe los privilegios por columna.
 
 **La migración sigue clasificada como borrador pendiente de ensayo.** La revisión estática reduce la incertidumbre, pero no reemplaza las pruebas de SQL, RLS, Edge Functions y flujos completos. No se aplicó ningún cambio en Supabase.
+
+
+## Corrección adicional detectada en el flujo MFA del panel técnico
+
+Durante la comprobación de compatibilidad del panel se detectó que, si el panel técnico no alcanzaba AAL2, el cliente llamaba a `auth.signOut()` sin especificar alcance. Se cambió a `auth.signOut({ scope: 'local' })` para cerrar solo la sesión actual y no revocar otras sesiones válidas del mismo usuario en otros dispositivos.
+
+- Archivo: `panel-live.js`
+- Cambio guardado en la rama: `correcciones-funcionales`
+- Commit: `ecc7eaaab5d31a44f3fbdf57792a01552bf0aa1a`
+- Verificación: lectura posterior del archivo confirma el cierre local en la comprobación AAL2.
+- No se cambió la función de cierre de sesión voluntario del usuario.
+
+Esta corrección evita que la falta de AAL2 en una sesión del panel técnico cierre accidentalmente otras sesiones del usuario.
