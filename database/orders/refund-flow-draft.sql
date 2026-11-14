@@ -28,6 +28,8 @@ DECLARE
   v_order public.orders%ROWTYPE;
   v_request_id uuid;
   v_transaction_id uuid;
+  v_payment_count integer := 0;
+  v_paid_amount numeric(14,2) := 0;
   v_method text := pg_catalog.btrim(p_refund_method);
   v_provider text := NULLIF(pg_catalog.btrim(p_provider), '');
   v_reference text := NULLIF(pg_catalog.btrim(p_reference), '');
@@ -76,6 +78,21 @@ BEGIN
   -- llegue al INSERT y falle con una restricción genérica de la tabla.
   IF v_order.total <= 0 THEN
     RAISE EXCEPTION 'Este pedido no tiene un importe pagado que pueda reembolsarse.' USING ERRCODE = '23514';
+  END IF;
+
+  -- Conciliar contra el movimiento de entrada real. El estado "paid" del
+  -- pedido por sí solo no demuestra que exista un ingreso financiero registrado.
+  SELECT count(*)::integer, COALESCE(sum(ft.amount),0)::numeric(14,2)
+  INTO v_payment_count, v_paid_amount
+  FROM public.financial_transactions ft
+  WHERE ft.business_id = v_order.business_id
+    AND ft.order_id = v_order.id
+    AND ft.transaction_type = 'payment_received'
+    AND ft.status = 'completed'
+    AND ft.currency = 'COP';
+
+  IF v_payment_count <> 1 OR v_paid_amount <> v_order.total THEN
+    RAISE EXCEPTION 'No se puede reembolsar: el pedido no tiene exactamente un pago completado que coincida con su total. Revisa la conciliación financiera.' USING ERRCODE = '23514';
   END IF;
 
   SELECT r.id INTO v_request_id
@@ -165,4 +182,5 @@ GRANT EXECUTE ON FUNCTION public.complete_order_refund(uuid, text, text, text, t
 -- - un segundo reembolso para el mismo pedido recibe rechazo;
 -- - financial_transactions, refund_details, orders y audit_logs cambian
 --   dentro de una sola transacción;
--- - comprobar que no se marcan como refunded pedidos cuyo pago estaba pendiente.
+-- - comprobar que no se marcan como refunded pedidos cuyo pago estaba pendiente;
+-- - rechazar pago ausente, duplicado o cuyo importe/moneda no coincida con el pedido.
