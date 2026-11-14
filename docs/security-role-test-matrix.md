@@ -1122,3 +1122,5 @@ El verificador de integración ahora comprueba: existencia de la relación `cust
 
 - Se añadieron índices parciales para pagos/reembolsos completados, cancelaciones aprobadas y gastos pagados. Los filtros de fecha ahora usan intervalos de marcas de tiempo en hora Bogotá, en lugar de convertir cada fila a fecha; así pueden aprovechar los índices.
 - El verificador comprueba la existencia de esos índices y la lógica de reversión de costo.
+
+- Se aclaró el tratamiento de domicilios: el movimiento de pago contiene el total del pedido (productos más domicilio). El reporte ahora separa el valor de domicilios cobrados sin sumarlo dos veces y el panel lo etiqueta como componente incluido en los cobros. Si el negocio paga a un domiciliario, ese costo debe registrarse como gasto para que el resultado estimado no lo sobrestime.
