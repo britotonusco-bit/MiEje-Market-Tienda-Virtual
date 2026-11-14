@@ -758,3 +758,24 @@ Se buscaron referencias a existencias en los archivos JavaScript/TypeScript y en
 - Los cambios de existencias previstos quedan concentrados en checkout, ajuste administrativo y restitución de cancelación, todos con bloqueo de filas y trigger de movimientos cuando las migraciones estén instaladas.
 
 No se encontró otra escritura directa de inventario en los archivos revisados de esta rama. Esta búsqueda está limitada al código y SQL versionados en la rama, no a scripts externos ni a funciones que pudieran existir fuera del repositorio.
+
+
+### 9. Verificación de sintaxis de las consultas de bloqueo
+
+Se ejecutaron consultas `EXPLAIN` de solo lectura en Supabase para validar las dos consultas críticas:
+
+- La consulta de cancelación con `JOIN`, agrupación de productos, `ORDER BY p.id` y `FOR UPDATE OF p` fue aceptada por PostgreSQL y produjo un plan con `LockRows`.
+- La consulta de checkout que ordena los elementos JSON por UUID fue aceptada y produjo un plan con ordenamiento por `product_id`.
+
+Estas comprobaciones validan la sintaxis y el plan de las consultas aisladas. No ejecutan el cuerpo de las funciones ni demuestran ausencia total de deadlocks bajo carga concurrente.
+
+También se confirmó que la función live `create_public_order` sigue siendo `SECURITY DEFINER`, mantiene `search_path` vacío y su ACL permite ejecución a `service_role` (además del propietario de la función), no a `anon` ni `authenticated`. El borrador conserva explícitamente ese modelo de permisos.
+
+### 10. Estado actual de Security Advisor
+
+La consulta de seguridad más reciente mantiene los avisos ya documentados:
+
+- `auth_leaked_password_protection`: protección contra contraseñas filtradas desactivada (WARN).
+- `rls_enabled_no_policy`: tres tablas internas/de control con RLS y sin políticas: `private.checkout_rate_limits`, `public.job_application_rate_limits` y `public.job_application_upload_sessions` (INFO).
+
+No se modificaron estos ajustes durante la revisión de inventario. Las tablas de rate limit y sesiones se mantienen sin políticas de acceso directo porque sus operaciones se realizan mediante funciones de servicio; no se deben añadir políticas genéricas para silenciar el aviso.
