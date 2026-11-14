@@ -1163,7 +1163,14 @@
         });
         const retained = new Set();
         for (const method of methods) {
-          const old = byCode.get(method.methodCode)?.shift();
+          const candidates = byCode.get(method.methodCode) || [];
+          const exactIndex = candidates.findIndex(row =>
+            String(row.display_name || '').trim().toLocaleLowerCase()
+              === method.displayName.trim().toLocaleLowerCase()
+          );
+          // Conservar el ID de la misma cuenta/método incluso si el negocio
+          // reordena la lista; solo usar otro ID del mismo tipo al renombrarlo.
+          const old = exactIndex >= 0 ? candidates.splice(exactIndex, 1)[0] : candidates.shift();
           if (old) {
             const { data: updatedMethod, error } = await db.from('business_payment_methods').update({
               display_name: method.displayName, public_instructions: method.publicInstructions || null, is_enabled: true, sort_order: method.sortOrder, updated_at: new Date().toISOString()
