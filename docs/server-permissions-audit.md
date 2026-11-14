@@ -162,3 +162,32 @@ La función técnica contiene acciones `block_member` y `unblock_member`, pero a
 Esto significa que el control global ya se aplica cuando `profiles.is_blocked = true`, pero la función técnica revisada no ofrece actualmente una operación para activar ese bloqueo global desde el panel. No debe confundirse la suspensión de una membresía con el bloqueo de toda la cuenta.
 
 **Pendiente de decisión funcional:** definir si el panel técnico necesita una acción separada de bloqueo global de cuenta, con motivo obligatorio, confirmación de impacto, auditoría y revocación de sesiones apropiada. No se añadió esa acción en esta revisión para no ampliar privilegios ni alterar cuentas sin especificación aprobada.
+
+
+## Tercera revisión: consultas de auditoría de los paneles
+
+Se revisaron las consultas de `panel-live.js` frente a la migración de límites de administrador.
+
+### Hallazgo y corrección preparada
+
+El panel técnico ya usaba la Edge Function para listar negocios, miembros, finanzas, moderación y solicitudes de bloqueo. Sin embargo, todavía consultaba `audit_logs` directamente mediante el Data API para obtener el contador y para cargar la tabla global de auditoría. También resolvía los nombres de los actores consultando `profiles` directamente. Esa última consulta deja de ser global cuando se aplica la política de perfiles restringida.
+
+Se ajustó el código de la rama para que:
+
+1. El contador de auditoría del panel técnico use `list_audit_logs` en la Edge Function.
+2. La tabla global de auditoría del panel técnico use la misma acción privilegiada y no dependa de SELECT directo sobre `audit_logs` ni `profiles`.
+3. La Edge Function agregue `actor_name` a cada evento consultando perfiles desde el contexto `service_role` y devuelva `audit_count` con el conteo exacto.
+4. Los paneles de negocio mantengan consultas de auditoría filtradas al negocio propio y la resolución de nombres permitida por la política de perfiles del administrador.
+
+### Compatibilidad restante observada
+
+- `loadSelectedBusiness()` no consulta pedidos, productos ni clientes desde el panel técnico; muestra expresamente que la información comercial solo se administra desde el panel de cada negocio.
+- La administración técnica de miembros continúa usando `list_business_members` en la Edge Function, compatible con retirar escrituras directas de membresías al rol `authenticated`.
+- El panel administrador consulta las columnas comerciales de `businesses` que el borrador concede y actualiza únicamente el subconjunto autorizado.
+- El panel administrador consulta y modifica métodos de pago mediante las políticas y columnas previstas en el borrador.
+- El panel empleado consulta pedidos y actualiza únicamente `status` y `delivery_tracking`; no se encontraron consultas a costos, gastos, pagos ni a la bandeja de decisiones de cancelación en su ruta de inicio.
+- El administrador consulta costos, gastos, solicitudes de cancelación y postulaciones, áreas que el borrador limita al administrador activo del negocio.
+
+### Estado de validación
+
+Los cambios se guardaron únicamente en la rama `correcciones-funcionales`. La Edge Function no se desplegó y la migración no se ejecutó. Se requiere validación de sintaxis TypeScript/JavaScript y prueba integrada en un entorno de ensayo antes de considerar el flujo operativo.
