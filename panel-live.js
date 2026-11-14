@@ -164,7 +164,15 @@
         notice.textContent = error.message || 'Tu acceso dejó de estar autorizado. Inicia sesión nuevamente.';
         notice.className = 'notice error';
       }
-      try { await db.auth.signOut({ scope: 'local' }); } catch (_) {}
+      // Primero revoca todas las sesiones del usuario en Supabase.
+      // Si falla la revocación remota, al menos limpia esta sesión local.
+      const { error: globalSignOutError } = await db.auth.signOut({ scope: 'global' });
+      if (globalSignOutError) {
+        console.error('No fue posible revocar todas las sesiones en Supabase:', globalSignOutError);
+        try { await db.auth.signOut({ scope: 'local' }); } catch (localSignOutError) {
+          console.error('Tampoco fue posible cerrar la sesión local:', localSignOutError);
+        }
+      }
       window.location.replace('login.html');
     } finally {
       accessCheckInProgress = false;
@@ -172,7 +180,7 @@
   }
 
   function startAccessRevalidation() {
-    window.setInterval(() => { void revalidatePanelAccess(); }, 60000);
+    window.setInterval(() => { void revalidatePanelAccess(); }, 30000);
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') void revalidatePanelAccess();
     });
