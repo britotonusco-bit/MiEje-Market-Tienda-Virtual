@@ -939,3 +939,40 @@ Por tanto, las pantallas y botones que llaman a esas RPC no deben considerarse o
 - La rama incluye la RPC en `database/orders/order-financial-access-draft.sql`. Esta valida que el actor sea el administrador activo del negocio, bloquea la fila del pedido, evita pagos duplicados, exige referencia para métodos distintos de efectivo, registra el movimiento financiero y cambia `payment_status` a `paid` en la misma transacción.
 - El panel no debe afirmar que el pago fue cobrado automáticamente: es una confirmación manual de dinero que el negocio ya recibió por fuera de MiEje Market.
 - El verificador de integración ahora comprueba que `mark_order_payment_received` permita ejecución a `authenticated` y la niegue a `anon`.
+
+
+## Auditoría de cuentas e historial de compras — 14/11/2026
+
+### Estado observado en Supabase activo
+
+- `orders` no contiene `customer_user_id`; por tanto, los pedidos actuales no quedan vinculados a una cuenta autenticada.
+- `customer_favorites` no existe y `get_customer_order_history()` tampoco está instalada. La pantalla `cuenta.html` puede iniciar sesión/registro, pero no puede mostrar historial ni favoritos en este proyecto hasta aplicar las migraciones.
+- El trigger `on_auth_user_created` sí crea un perfil al registrar una cuenta y copia el nombre de `raw_user_meta_data.display_name`. No asigna roles internos.
+- `order_items` conserva `product_name`, `quantity`, `unit_price`, `line_total` y `created_at`, por lo que existe información suficiente para mostrar el detalle histórico sin depender del catálogo actual.
+- Los pedidos de invitados no se asocian por correo al registrarse posteriormente. Esto evita atribuciones automáticas inseguras; la vinculación futura de pedidos invitados requeriría un proceso de verificación de titularidad separado.
+
+### Diseño preparado en la rama
+
+- `customer-account-migration.sql` agrega `orders.customer_user_id` con FK `ON DELETE SET NULL`; elimina la relación con la cuenta si esta se elimina, pero conserva el pedido.
+- La Edge Function `create-public-order` valida el JWT con Auth, comprueba que exista el perfil y que no esté bloqueado, y solo entonces asigna el identificador autenticado al pedido. Sin sesión, conserva `customer_user_id = NULL`.
+- `get_customer_order_history()` filtra por `auth.uid()`, devuelve como máximo 50 pedidos recientes y sus líneas, importes y negocio. No acepta un identificador de cliente suministrado por el navegador.
+- `customer_favorites` usa RLS para que cada cliente consulte, agregue y elimine únicamente sus propios favoritos. No permite UPDATE ni acceso anónimo.
+- La pantalla de cuenta escapa los datos textuales antes de insertarlos en HTML y verifica que la sesión siga siendo la misma antes de actualizar resultados.
+- El orden de migración está documentado: migración de clientes → idempotencia del checkout → acceso financiero e historial.
+
+### Verificaciones añadidas
+
+El verificador de integración ahora comprueba: existencia de la relación `customer_user_id`, RLS de favoritos, permisos de SELECT/INSERT/DELETE solo para `authenticated`, ausencia de UPDATE en favoritos, ejecución del historial solo para usuarios autenticados y FK `ON DELETE SET NULL`.
+
+### Pruebas pendientes en un entorno de ensayo
+
+1. Cliente A crea cuenta, realiza un pedido y lo ve en su historial; cliente B no puede verlo aunque conozca su UUID.
+2. Un invitado realiza un pedido: `customer_user_id` queda NULL y el seguimiento por token continúa funcionando.
+3. Una sesión caducada o un JWT inválido no puede vincular un pedido a una cuenta.
+4. Una cuenta bloqueada no puede crear pedidos ni consultar historial.
+5. Cliente A no puede consultar, insertar ni borrar favoritos de B; tampoco puede guardar un producto inactivo.
+6. Borrar una cuenta conserva pedidos históricos y deja `customer_user_id` en NULL.
+7. Un pedido histórico conserva nombre, cantidad y precios aunque el producto cambie de nombre o deje de estar publicado.
+8. Los pedidos antiguos anteriores a la migración no se vinculan automáticamente por coincidencia de correo.
+
+**Estado:** revisión de código y verificaciones estáticas preparadas en `correcciones-funcionales`. La base activa no ha recibido migraciones; no se ha probado registro, compra autenticada ni historial de extremo a extremo.
