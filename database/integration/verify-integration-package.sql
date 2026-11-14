@@ -484,6 +484,8 @@ BEGIN
       AND qual ILIKE '%job-applications-private%'
       AND qual ILIKE '%has_business_role%'
       AND qual ILIKE '%business_admin%'
+      AND qual ILIKE '%array_length%'
+      AND qual ILIKE '%storage.filename%'
   ) OR EXISTS (
     SELECT 1 FROM pg_policies
     WHERE schemaname='storage' AND tablename='objects'
@@ -503,6 +505,9 @@ BEGIN
       AND qual ILIKE '%has_business_role%'
       AND qual ILIKE '%business_admin%'
       AND qual ILIKE '%business_expenses%'
+      AND qual ILIKE '%array_length%'
+      AND qual ILIKE '%storage.filename%'
+      AND qual ILIKE '%voided%'
   ) OR NOT EXISTS (
     SELECT 1 FROM pg_policies
     WHERE schemaname='storage' AND tablename='objects'
@@ -514,6 +519,9 @@ BEGIN
       AND with_check ILIKE '%business_admin%'
       AND with_check ILIKE '%status%'
       AND with_check ILIKE '%active%'
+      AND with_check NOT ILIKE '%voided%'
+      AND with_check ILIKE '%array_length%'
+      AND with_check ILIKE '%storage.filename%'
   ) THEN
     RAISE EXCEPTION 'FALLO: comprobantes de gastos sin políticas privadas de lectura/carga para el administrador activo.';
   END IF;
