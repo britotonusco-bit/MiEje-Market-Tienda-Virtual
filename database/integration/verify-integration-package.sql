@@ -509,7 +509,10 @@ BEGIN
     RAISE EXCEPTION 'FALLO: las políticas de costos permiten acceso técnico global o faltan.';
   END IF;
 
-  IF has_table_privilege('anon','public.product_costs','SELECT')
+  IF NOT has_table_privilege('authenticated','public.product_costs','SELECT')
+     OR NOT has_table_privilege('authenticated','public.product_costs','INSERT')
+     OR NOT has_table_privilege('authenticated','public.product_costs','UPDATE')
+     OR has_table_privilege('anon','public.product_costs','SELECT')
      OR has_table_privilege('anon','public.order_item_costs','SELECT')
      OR has_table_privilege('authenticated','public.order_item_costs','INSERT')
      OR has_table_privilege('authenticated','public.order_item_costs','UPDATE')
