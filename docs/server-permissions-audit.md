@@ -217,7 +217,7 @@ Se contrastaron las llamadas de `panel-live.js` con las funciones SQL preparadas
 
 ### Diferencia de vocabulario del flujo de pedidos pendiente de decisión
 
-El código actual y los borradores coinciden entre sí en estos estados: `pending → confirmed → preparing → ready → out_for_delivery → delivered`, además de `cancelled`. Esto no coincide literalmente con la nomenclatura funcional solicitada anteriormente (`received` y `on_the_way`). No se cambió el flujo en esta revisión porque implica actualizar conjuntamente creación del pedido, restricciones de base de datos, trigger, etiquetas, filtros, seguimiento e historial. Debe normalizarse en una corrección dedicada antes de pruebas finales para evitar estados incompatibles.
+La rama `correcciones-funcionales` normaliza el ciclo a `received → confirmed → preparing → ready → on_the_way → delivered`, además de `cancelled`. La migración actualiza los registros antiguos (`pending` → `received`; `out_for_delivery` → `on_the_way`), cambia el valor predeterminado y la restricción CHECK, y conserva los registros de auditoría existentes. Los estados `pending` de pagos y solicitudes de cancelación no se modifican. Esta normalización está preparada en la rama, no aplicada en Supabase.
 
 ### Estado
 
@@ -623,9 +623,7 @@ Si una restitución falla, PostgreSQL revierte también la aprobación y el camb
 
 ### 6. Estados y consistencia funcional
 
-Los estados live son `pending`, `confirmed`, `preparing`, `ready`, `out_for_delivery`, `delivered` y `cancelled`. El trigger impide saltos de estado no autorizados y permite cancelar solo con una solicitud aprobada.
-
-Hay una diferencia con el flujo solicitado para MiEje Market: el nombre funcional pedido fue `received` y `on_the_way`, mientras la base usa `pending` y `out_for_delivery`. Antes de cambiarlo debe definirse una equivalencia uniforme entre base, Edge Functions, paneles y seguimiento público; no renombrar estados solo en la interfaz.
+Los estados live continúan siendo `pending`, `confirmed`, `preparing`, `ready`, `out_for_delivery`, `delivered` y `cancelled`, porque la migración aún no se ha ejecutado. En la rama se preparó la conversión a `received`, `confirmed`, `preparing`, `ready`, `on_the_way`, `delivered` y `cancelled`, junto con el cambio de trigger, valor predeterminado, etiquetas de paneles, seguimiento público e historial de clientes.
 
 ### 7. Estado de datos y pruebas
 
@@ -966,7 +964,7 @@ Dependencias determinantes:
 - Ejecutar el paquete completo en staging y corregir cualquier error real de PostgreSQL.
 - Revisar grants y RLS después de todas las migraciones, no archivo por archivo de forma aislada.
 - Probar concurrencia del checkout, inventario, idempotencia, cancelación y reembolso.
-- Resolver la diferencia entre los estados solicitados por el producto (`received`, `on_the_way`) y los valores actuales del código (`pending`, `out_for_delivery`).
+- Aplicar en un entorno de pruebas la migración de estados y verificar cada transición, cancelación, historial y seguimiento.
 - Desplegar Edge Functions solo después de que las firmas RPC instaladas coincidan con sus llamadas.
 
 **Estado:** las dos correcciones fueron guardadas y verificadas en `correcciones-funcionales`. Supabase Independiente permanece sin cambios: no se ejecutó SQL, no se desplegaron Edge Functions y no se modificó `main` ni GitHub Pages.
