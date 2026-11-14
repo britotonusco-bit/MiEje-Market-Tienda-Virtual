@@ -79,8 +79,10 @@ Deno.serve(async (req: Request) => {
     }
 
     const paymentMethod = enabledMethod.method_code;
-    const paymentMethodLabel = enabledMethod.display_name;
-    const finalDeliveryNotes = [deliveryNotes, `Forma de pago seleccionada: ${paymentMethodLabel}`].filter(Boolean).join(" | ").slice(0, 1000);
+    // El método de pago ya se guarda en orders.payment_method. No duplicar
+    // su etiqueta variable dentro de delivery_notes: si el negocio cambia el
+    // nombre visible, un reintento legítimo debe conservar el mismo hash.
+    const finalDeliveryNotes = deliveryNotes || null;
 
     const normalizedItems = items.map((item: any) => ({
       product_id: textValue(item?.product_id, 80),
