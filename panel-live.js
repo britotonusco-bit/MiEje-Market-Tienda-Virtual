@@ -188,9 +188,10 @@
       return;
     }
     const rows=[
-      ['Ventas con pago confirmado',money(data.sales)],
+      ['Cobros confirmados (productos + domicilio)',money(data.sales)],
+      ['Domicilios cobrados (incluidos en cobros)',money(data.delivery_fees_collected)],
       ['Reembolsos confirmados',money(data.refunds)],
-      ['Ventas netas',money(data.net_sales)],
+      ['Cobros netos',money(data.net_sales)],
       ['Costo de productos vendidos',money(data.gross_cost_of_sales)],
       ['Reversión de costo por cancelaciones',money(data.inventory_cost_reversals)],
       ['Costo neto de ventas',money(data.cost_of_sales)],
