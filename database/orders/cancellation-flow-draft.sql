@@ -23,6 +23,9 @@ WHERE status = 'pending';
 CREATE UNIQUE INDEX IF NOT EXISTS order_cancellation_one_approved_per_order
 ON public.order_cancellation_requests (business_id, order_id)
 WHERE status = 'approved';
+CREATE INDEX IF NOT EXISTS idx_cancellation_approved_business_decided
+ON public.order_cancellation_requests (business_id, decided_at)
+WHERE status = 'approved' AND decided_at IS NOT NULL;
 
 CREATE OR REPLACE FUNCTION public.request_order_cancellation(
   p_business_id uuid,
