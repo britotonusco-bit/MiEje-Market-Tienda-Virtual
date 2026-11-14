@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS public.inventory_movements (
   product_id uuid NOT NULL,
   actor_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   movement_type text NOT NULL CHECK (
-    movement_type IN ('initial', 'adjustment')
+    movement_type IN ('initial', 'adjustment', 'sale', 'cancellation_return')
   ),
   quantity_before integer NOT NULL CHECK (quantity_before >= 0),
   quantity_after integer NOT NULL CHECK (quantity_after >= 0),
@@ -57,6 +57,7 @@ DECLARE
   v_before integer;
   v_after integer;
   v_reason text;
+  v_type text;
 BEGIN
   IF TG_OP = 'INSERT' THEN
     -- No registrar un movimiento de cero unidades: la tabla exige delta distinto de cero.
@@ -80,9 +81,17 @@ BEGIN
       ),
       ''
     );
+    v_type := NULLIF(
+      pg_catalog.current_setting('app.inventory_movement_type', true),
+      ''
+    );
 
     IF v_reason IS NULL THEN
       v_reason := 'Cambio de existencias (origen no especificado)';
+    END IF;
+
+    IF v_type IS NULL OR v_type NOT IN ('adjustment', 'sale', 'cancellation_return') THEN
+      v_type := 'adjustment';
     END IF;
   END IF;
 
@@ -91,7 +100,7 @@ BEGIN
     quantity_before, quantity_after, quantity_delta, reason
   ) VALUES (
     NEW.business_id, NEW.id, auth.uid(),
-    CASE WHEN TG_OP = 'INSERT' THEN 'initial' ELSE 'adjustment' END,
+    CASE WHEN TG_OP = 'INSERT' THEN 'initial' ELSE v_type END,
     v_before, v_after, v_after - v_before, v_reason
   );
 
@@ -188,6 +197,9 @@ BEGIN
 
   PERFORM pg_catalog.set_config(
     'app.inventory_movement_reason', v_reason, true
+  );
+  PERFORM pg_catalog.set_config(
+    'app.inventory_movement_type', 'adjustment', true
   );
 
   UPDATE public.products
