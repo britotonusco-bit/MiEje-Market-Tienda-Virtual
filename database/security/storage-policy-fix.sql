@@ -25,6 +25,13 @@ WITH CHECK (
       AND b.status = 'active'
       AND private.has_business_role(b.id, ARRAY['business_admin']::text[])
   )
+  AND EXISTS (
+    SELECT 1
+    FROM public.job_applications AS ja
+    WHERE ja.id = ((storage.foldername(objects.name))[2])::uuid
+      AND ja.business_id = ((storage.foldername(objects.name))[1])::uuid
+      AND ja.resume_path = objects.name
+  )
 );
 
 DROP POLICY IF EXISTS business_assets_admin_read ON storage.objects;
