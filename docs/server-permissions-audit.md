@@ -700,10 +700,12 @@ La restitución sigue siendo parte de la misma transacción que aprueba la cance
 
 Orden recomendado para staging, una vez que exista un entorno disponible:
 
-1. `database/inventory/inventory-movements-draft.sql`
-2. `database/inventory/checkout-inventory-lock-order-draft.sql`
-3. `database/orders/checkout-idempotency-draft.sql` (después de revisar dependencias y firmas de Edge Function).
-4. `database/orders/cancellation-flow-draft.sql`.
+1. Revisar y aplicar en staging `database/security/business-admin-boundaries.sql` junto con el resto de sus cambios de permisos.
+2. `database/inventory/inventory-movements-draft.sql` para crear el libro, trigger y RPC de ajuste.
+3. `database/inventory/checkout-inventory-lock-order-draft.sql` para el bloqueo determinista y el registro de ventas.
+4. `database/orders/checkout-idempotency-draft.sql` (después de revisar dependencias y firmas de Edge Function).
+5. `database/orders/cancellation-flow-draft.sql` para la restitución y su registro.
+6. Desplegar `panel-live.js` y `panel-negocio.html` después de que las migraciones requeridas estén instaladas.
 
 No aplicar esta secuencia directamente en producción sin pruebas. En particular, la cancelación depende del registro de movimientos para que la devolución quede en el historial.
 
