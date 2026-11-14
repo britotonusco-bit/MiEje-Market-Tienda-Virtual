@@ -57,7 +57,7 @@
       <article class="security-note">
         <strong>Pedido #${escapeHtml(order.order_number)} · ${escapeHtml(order.business_name || "Negocio")}</strong>
         <p>${escapeHtml(date(order.created_at))} · ${escapeHtml(status(order.status))}</p>
-        <p>Total: <strong>${money(order.total)}</strong> · Pago: ${escapeHtml(order.payment_status)}</p>
+        <p>Total: <strong>${money(order.total)}</strong> · Pago: ${escapeHtml(order.payment_status)} · Método: ${escapeHtml(order.payment_method_name || "No disponible")}</p>
         <ul>${(order.items || []).map(item => `<li>${escapeHtml(item.product_name)} × ${Number(item.quantity)} — ${money(item.line_total ?? Number(item.unit_price) * Number(item.quantity))}</li>`).join("")}</ul>
       </article>`).join("");
   }
