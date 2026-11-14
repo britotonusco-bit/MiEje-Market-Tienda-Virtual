@@ -167,7 +167,8 @@ BEGIN
       'currency', 'COP',
       'payment_method', v_order.payment_method,
       'provider', v_provider,
-      'reference', v_reference
+      'reference', v_reference,
+      'notes', v_notes
     )
   );
 
