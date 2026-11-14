@@ -423,3 +423,50 @@ El bucket `business-expense-receipts` todavía no existe. Su creación está con
 - SQL aplicado o bucket nuevo creado: **no**.
 - Pruebas de carga y descarga con cuentas de distintos negocios: **pendientes**.
 - Validación antimalware y de firma binaria: **pendiente**.
+
+
+## Octava revisión: Edge Functions, enlaces firmados y acceso a documentos
+
+**Fecha:** 14 de noviembre de 2026  
+**Alcance:** flujo de descarga de hojas de vida, acceso a comprobantes, autorización de paneles, RLS de postulaciones y RPC de asociación de comprobantes.
+
+### 1. Hojas de vida: el acceso se genera desde el panel administrador
+
+La interfaz `panel-live.js` carga postulaciones únicamente cuando `panel === 'business_admin'`. Antes de cargar el panel valida la membresía devuelta por `resolve-my-access`, exige rol `business_admin` y fija el `businessId` a partir de esa membresía. El panel de empleados no ejecuta `loadJobApplications()`.
+
+La consulta de postulaciones filtra por `business_id`, y la política RLS instalada `job_applications_business_admin_read` exige `private.has_business_role(business_id, ['business_admin'])`. La política de actualización también exige administrador del negocio y negocio activo. Por tanto, el filtro del navegador no es la única barrera: la autorización efectiva se realiza en la base de datos.
+
+Para cada postulación, el panel solicita un enlace firmado de cinco minutos mediante Storage. El enlace no lo genera una Edge Function propia; lo genera Supabase Storage a partir de la sesión autenticada. La autorización depende de la política SELECT de `storage.objects`. En la política instalada, esa lectura comprueba el negocio y el rol administrador, pero no relaciona el objeto con la postulación exacta. El borrador `database/security/storage-policy-fix.sql` corrige esa brecha exigiendo coincidencia entre el segundo segmento de la ruta, `job_applications.id`, `business_id` y `resume_path`.
+
+**Conclusión:** el panel restringe correctamente la consulta de postulaciones al administrador y el negocio asignado; la descarga de CV seguirá necesitando la corrección de Storage antes de considerarse aislada por documento.
+
+### 2. Comprobantes de gastos: validación por RLS y ruta
+
+La interfaz obtiene el comprobante asociado consultando `business_expenses` por `id` y `business_id`, y genera un enlace firmado de cinco minutos. Para cargarlo, construye una ruta con el negocio, el gasto y un UUID aleatorio, usa `upsert: false` y después llama a `attach_business_expense_receipt`.
+
+La migración borrador `database/finance/expense-receipts-storage-draft.sql` crea el bucket privado y permite lectura/carga solo si el objeto está asociado a un gasto cuyo `id` y `business_id` coinciden con los dos segmentos de la ruta. La carga requiere administrador activo y gasto activo; la lectura conserva acceso administrativo a gastos activos o anulados para auditoría. No crea políticas UPDATE ni DELETE.
+
+El borrador `database/finance/business-expense-audit-draft.sql` valida en `attach_business_expense_receipt` que el gasto pertenezca al administrador autenticado, que la ruta tenga el prefijo exacto negocio/gasto y que el objeto exista en el bucket. También impide asociar un segundo comprobante cuando ya existe uno.
+
+**Limitación importante:** en el proyecto Supabase consultado no existe todavía el bucket `business-expense-receipts`, y la RPC `attach_business_expense_receipt` no está instalada. El código de interfaz y las migraciones están preparados, pero esa parte no puede funcionar en el proyecto live hasta aplicar y probar las migraciones.
+
+### 3. Revisión de Edge Functions
+
+En el proyecto independiente se encontraron activas las funciones `technical-business-management`, `create-public-order`, `track-public-order`, `resolve-my-access`, `get-public-storefront` y `create-job-application`. No existe una Edge Function independiente para emitir enlaces firmados de CV o comprobantes. El diseño actual utiliza Storage directamente con la sesión del usuario y políticas RLS, lo cual es válido si las políticas de lectura están correctamente limitadas.
+
+La Edge Function `create-job-application` usa `service_role` para crear sesiones de carga y registrar postulaciones. Antes de operar, valida que el negocio esté activo y que la página de empleo pertenezca a ese mismo negocio, sea una vacante publicada y esté aprobada. La RPC de registro repite la relación entre página y negocio, y consume la sesión de carga vinculada al mismo negocio y página. Sus privilegios efectivos están limitados a `service_role`; no permiten ejecución directa a `anon` ni a `authenticated`.
+
+### 4. Hallazgos y acciones pendientes
+
+- **Confirmado:** los empleados no cargan la bandeja de postulaciones desde el panel; solo la rama de administrador lo hace.
+- **Confirmado:** RLS de postulaciones limita lectura/actualización a administradores del negocio.
+- **Pendiente de aplicar:** política de Storage que vincula el archivo CV con la postulación exacta.
+- **Confirmado:** la emisión de enlaces firmados se hace desde el cliente autenticado y depende de RLS; no hay una Edge Function separada de descarga.
+- **Pendiente de desplegar:** bucket privado de comprobantes y RPC `attach_business_expense_receipt`.
+- **Pendiente:** validar firma binaria y analizar malware en documentos recibidos.
+- **Pendiente de pruebas:** intentar acceder a un CV o comprobante de otro negocio manipulando IDs y rutas, con cuentas reales separadas.
+- **Pendiente:** comprobar el comportamiento de enlaces firmados ya emitidos después de suspender una membresía; la expiración corta limita su vigencia, pero no revoca inmediatamente un enlace ya emitido.
+
+### Resultado
+
+Esta revisión fue de lectura del código en `correcciones-funcionales` y consultas de solo lectura al proyecto Supabase independiente. No se emitieron enlaces reales, no se cargaron archivos, no se probaron cuentas de dos negocios, no se ejecutó SQL y no se desplegaron Edge Functions.
