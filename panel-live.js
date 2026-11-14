@@ -164,14 +164,10 @@
         notice.textContent = error.message || 'Tu acceso dejó de estar autorizado. Inicia sesión nuevamente.';
         notice.className = 'notice error';
       }
-      // Primero revoca todas las sesiones del usuario en Supabase.
-      // Si falla la revocación remota, al menos limpia esta sesión local.
-      const { error: globalSignOutError } = await db.auth.signOut({ scope: 'global' });
-      if (globalSignOutError) {
-        console.error('No fue posible revocar todas las sesiones en Supabase:', globalSignOutError);
-        try { await db.auth.signOut({ scope: 'local' }); } catch (localSignOutError) {
-          console.error('Tampoco fue posible cerrar la sesión local:', localSignOutError);
-        }
+      // Solo se cierra esta sesión: el usuario podría conservar acceso a otros negocios.
+      // La autorización de cada operación sigue verificándose en servidor/RLS.
+      try { await db.auth.signOut({ scope: 'local' }); } catch (signOutError) {
+        console.error('No fue posible cerrar la sesión local:', signOutError);
       }
       window.location.replace('login.html');
     } finally {
