@@ -216,28 +216,6 @@ USING (
 );
 
 
--- Normalizar el vocabulario del ciclo de vida de pedidos.
--- Los estados de pago y de solicitudes de cancelación conservan sus propios valores.
--- La auditoría de pedidos permanece activa y registrará las conversiones históricas.
-BEGIN;
-ALTER TABLE public.orders DROP CONSTRAINT IF EXISTS orders_status_check;
-ALTER TABLE public.orders DISABLE TRIGGER orders_enforce_status_transition;
-UPDATE public.orders
-SET status = CASE status
-  WHEN 'pending' THEN 'received'
-  WHEN 'out_for_delivery' THEN 'on_the_way'
-  ELSE status
-END
-WHERE status IN ('pending','out_for_delivery');
-ALTER TABLE public.orders ENABLE TRIGGER orders_enforce_status_transition;
-ALTER TABLE public.orders ALTER COLUMN status SET DEFAULT 'received';
-ALTER TABLE public.orders
-  ADD CONSTRAINT orders_status_check
-  CHECK (status = ANY (ARRAY[
-    'received','confirmed','preparing','ready','on_the_way','delivered','cancelled'
-  ]::text[]));
-COMMIT;
-
 -- El trigger también bloquea cambios de estado cuando el negocio está suspendido
 -- y elimina el bypass del propietario técnico.
 CREATE OR REPLACE FUNCTION private.enforce_order_status_transition()
@@ -291,11 +269,11 @@ BEGIN
   END IF;
 
   IF NOT (
-    (OLD.status = 'received' AND NEW.status = 'confirmed') OR
+    (OLD.status = 'pending' AND NEW.status = 'confirmed') OR
     (OLD.status = 'confirmed' AND NEW.status = 'preparing') OR
     (OLD.status = 'preparing' AND NEW.status = 'ready') OR
-    (OLD.status = 'ready' AND NEW.status = 'on_the_way') OR
-    (OLD.status = 'on_the_way' AND NEW.status = 'delivered')
+    (OLD.status = 'ready' AND NEW.status = 'out_for_delivery') OR
+    (OLD.status = 'out_for_delivery' AND NEW.status = 'delivered')
   ) THEN
     RAISE EXCEPTION 'Cambio de estado no permitido: % -> %.', OLD.status, NEW.status
       USING ERRCODE = '23514';
