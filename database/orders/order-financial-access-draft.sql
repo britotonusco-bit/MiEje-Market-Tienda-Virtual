@@ -322,6 +322,15 @@ GRANT SELECT (
 
 
 
+-- Índices parciales para reportes por fecha real de movimiento (no created_at).
+CREATE INDEX IF NOT EXISTS idx_financial_completed_business_type_date
+ON public.financial_transactions (business_id, transaction_type, completed_at)
+WHERE status = 'completed' AND completed_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_business_expenses_paid_at
+ON public.business_expenses (business_id, paid_at)
+WHERE status = 'active' AND payment_status = 'paid' AND paid_at IS NOT NULL;
+
 CREATE OR REPLACE FUNCTION public.get_business_admin_profit_report(
   p_business_id uuid, p_start_date date, p_end_date date
 )
@@ -344,7 +353,8 @@ BEGIN
     FROM public.financial_transactions ft
     WHERE ft.business_id=p_business_id AND ft.transaction_type='payment_received'
       AND ft.status='completed'
-      AND (ft.completed_at AT TIME ZONE 'America/Bogota')::date BETWEEN p_start_date AND p_end_date
+      AND ft.completed_at >= (p_start_date::timestamp AT TIME ZONE 'America/Bogota')
+      AND ft.completed_at < ((p_end_date + 1)::timestamp AT TIME ZONE 'America/Bogota')
     GROUP BY ft.order_id
   ),
   period_refunds AS (
@@ -352,7 +362,8 @@ BEGIN
     FROM public.financial_transactions ft
     WHERE ft.business_id=p_business_id AND ft.transaction_type='refund'
       AND ft.status='completed'
-      AND (ft.completed_at AT TIME ZONE 'America/Bogota')::date BETWEEN p_start_date AND p_end_date
+      AND ft.completed_at >= (p_start_date::timestamp AT TIME ZONE 'America/Bogota')
+      AND ft.completed_at < ((p_end_date + 1)::timestamp AT TIME ZONE 'America/Bogota')
   ),
   cost_movements AS (
     SELECT oi.id AS order_item_id, oic.unit_cost, oi.quantity, 1::integer AS direction
@@ -390,7 +401,8 @@ BEGIN
     FROM public.business_expenses be
     WHERE be.business_id=p_business_id AND be.status='active'
       AND be.payment_status='paid' AND be.paid_at IS NOT NULL
-      AND (be.paid_at AT TIME ZONE 'America/Bogota')::date BETWEEN p_start_date AND p_end_date
+      AND be.paid_at >= (p_start_date::timestamp AT TIME ZONE 'America/Bogota')
+      AND be.paid_at < ((p_end_date + 1)::timestamp AT TIME ZONE 'America/Bogota')
   ),
   totals AS (
     SELECT
