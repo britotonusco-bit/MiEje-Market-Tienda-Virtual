@@ -129,6 +129,10 @@ BEGIN
     RAISE EXCEPTION 'El pedido no tiene un importe positivo para registrar como recibido.' USING ERRCODE = '23514';
   END IF;
 
+  -- Si el administrador no escribe un proveedor, conservar el nombre del
+  -- método que el cliente eligió al comprar, no solo el código genérico.
+  v_provider := COALESCE(v_provider, NULLIF(v_order.payment_method_name, ''));
+
   IF v_order.payment_method <> 'cash' AND v_reference IS NULL THEN
     RAISE EXCEPTION 'Para pagos que no son en efectivo debes registrar una referencia o comprobante.' USING ERRCODE = '22023';
   END IF;
@@ -303,7 +307,7 @@ REVOKE SELECT (
 GRANT SELECT (
   id, business_id, order_number, customer_name, customer_phone,
   delivery_address, delivery_notes, status, delivery_tracking,
-  created_at, updated_at
+  payment_method_name, created_at, updated_at
 ) ON TABLE public.orders TO authenticated;
 
 -- Los importes y el método de pago no se exponen mediante consultas directas.
