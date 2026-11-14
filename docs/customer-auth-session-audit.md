@@ -47,3 +47,14 @@ Este informe se guarda únicamente en `correcciones-funcionales`. No se aplicó 
 - La función de acceso devuelve únicamente membresías activas asociadas a negocios activos; la verificación del panel se apoya en esa lista ya filtrada.
 - Esta medida reduce el tiempo durante el cual una interfaz abierta puede permanecer visible después de una suspensión. No equivale a revocar en servidor todos los refresh tokens ni invalida por sí sola un JWT ya emitido. Las operaciones de datos continúan dependiendo de RLS y de las validaciones del servidor.
 - La revalidación se añadió en `panel-live.js` en la rama `correcciones-funcionales`; requiere que la versión correspondiente de `resolve-my-access` esté desplegada junto con el código antes de publicarse.
+
+
+## Ajuste de revocación de sesiones
+
+- La revalidación del panel ahora se ejecuta cada 30 segundos y también cuando el usuario vuelve a la pestaña.
+- Cuando detecta pérdida de autorización, intenta `db.auth.signOut({ scope: "global" })`, que solicita a Supabase invalidar las sesiones/refresh tokens de la cuenta. Si falla, intenta cerrar al menos la sesión local y registra el error en consola.
+- La revocación global solo ocurre cuando ese navegador detecta que el usuario perdió acceso. No se ejecuta directamente desde el panel técnico al pulsar suspender; por eso puede tardar hasta el siguiente chequeo del panel activo. Si no hay ningún panel abierto, la sesión remota se revoca cuando el usuario vuelva a usar la aplicación y se detecte el bloqueo.
+- Supabase documenta que los access tokens JWT ya emitidos no se invalidan instantáneamente: pueden seguir verificándose hasta su expiración. Las operaciones sensibles deben seguir verificando usuario, perfil y membresía en servidor/RLS.
+- No se añadieron consultas ni escrituras directas a `auth.sessions`, ni se almacenan JWT de terceros.
+- La corrección está en la rama `correcciones-funcionales`; requiere desplegar la versión correspondiente de la página para entrar en vigor. No se ha probado con sesiones reales ni se ha desplegado.
+
