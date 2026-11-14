@@ -58,3 +58,39 @@ Este informe se guarda únicamente en `correcciones-funcionales`. No se aplicó 
 - No se añadieron consultas ni escrituras directas a `auth.sessions`, ni se almacenan JWT de terceros.
 - La corrección está en la rama `correcciones-funcionales`; requiere desplegar la versión correspondiente de la página para entrar en vigor. No se ha probado con sesiones reales ni se ha desplegado.
 
+
+
+## Revisión de configuración y flujos de Auth (14 Nov 2026)
+
+### Código cliente revisado
+- `cuenta.js`: registro con `emailRedirectTo` relativo a `cuenta.html`, confirmación de correo contemplada y mensaje cuando Supabase no entrega sesión hasta confirmar. Inicio de sesión por contraseña. La validación de longitud mínima de 10 caracteres está en frontend y debe complementarse con la política de Auth del proyecto.
+- `recuperar-clave.js`: usa `resetPasswordForEmail` con destino relativo a `actualizar-clave.html`. El mensaje de éxito es genérico y no confirma si la dirección está registrada.
+- `actualizar-clave.js`: no permite cambiar la contraseña solo por tener una sesión ordinaria guardada; exige el evento `PASSWORD_RECOVERY`. Tras el cambio intenta cerrar la sesión.
+- `aceptar-invitacion.js`: exige que el enlace tenga tipo `invite`, verifica el token cuando llega como `token_hash`, exige sesión y limpia la URL antes de solicitar contraseña.
+- Los destinos relativos de registro y recuperación se resuelven bajo la URL actual de la página; deben probarse desde la URL final de GitHub Pages. La Edge Function de invitaciones usa un destino absoluto a `https://britotonusco-bit.github.io/MiEje-Market-Tienda-Virtual/aceptar-invitacion.html`.
+
+### Configuración del proyecto que no se pudo verificar
+La conexión disponible permite consultar estado del proyecto y asesores de seguridad, pero no leer de forma segura la configuración de Auth del Dashboard ni las plantillas/allowlist actuales. Por tanto, no se afirma que estos ajustes estén configurados:
+- Confirmación de correo habilitada.
+- Site URL y Redirect URLs correctas.
+- Plantillas de confirmación, recuperación e invitación.
+- SMTP personalizado y remitente verificado.
+- Duración del JWT y opciones de sesión.
+- CAPTCHA y límites de envío.
+- Política de contraseñas configurada en el servidor.
+
+### Recomendaciones antes de producción
+1. En Auth > Providers > Email, mantener habilitada la confirmación de correo. La configuración de Auth es la autoridad; la comprobación de 10 caracteres en JavaScript no reemplaza la política del servidor.
+2. En Auth > URL Configuration, configurar como Site URL la dirección base de GitHub Pages: `https://britotonusco-bit.github.io/MiEje-Market-Tienda-Virtual/`. Añadir una Redirect URL restringida al mismo directorio del sitio, por ejemplo `https://britotonusco-bit.github.io/MiEje-Market-Tienda-Virtual/**`. No usar comodines globales como `**` sin dominio/ruta restringidos. Revisar también localhost solo si se usa en desarrollo.
+3. Revisar las plantillas de Confirm signup, Reset password e Invite user. Mantener el enlace de confirmación estándar `{{ .ConfirmationURL }}`, salvo que se implemente y pruebe un flujo personalizado compatible con la página estática.
+4. Configurar SMTP personalizado antes de invitar usuarios externos. El SMTP compartido predeterminado de Supabase es solo para pruebas y restringe los destinatarios a miembros autorizados de la organización; no es un servicio de entrega para clientes generales.
+5. Mantener habilitada la protección de contraseñas filtradas. El asesor de seguridad volvió a reportar `auth_leaked_password_protection` como WARN el 14-Nov-2026.
+6. La documentación actual de Supabase indica que el control de duración máxima, inactividad y sesión única está disponible desde el plan Pro. La organización del proyecto está en Free; no activar ni presupuestar funciones que el plan actual no ofrece. No se recomienda imponer una sola sesión sin evaluar el uso legítimo en varios dispositivos.
+7. Revisar CAPTCHA y límites de Auth antes de abrir registro público a gran escala.
+
+### Estado de verificación
+- Auditoría de código: completada estáticamente para los cuatro flujos anteriores.
+- Configuración del Dashboard: pendiente de revisión manual por el propietario del proyecto; no accesible mediante las herramientas de solo lectura disponibles.
+- Pruebas reales de correo: pendientes. No se enviaron mensajes ni se modificó SMTP, plantillas o URL Configuration.
+- Asesor de seguridad actual: un aviso WARN de protección de contraseñas filtradas deshabilitada y tres avisos INFO de RLS sin políticas (tablas de uso interno previamente revisadas).
+- No se cambió Auth, no se ejecutó SQL, no se desplegó Edge Function ni se publicó GitHub Pages.
