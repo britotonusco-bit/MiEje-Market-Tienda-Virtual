@@ -473,6 +473,23 @@
       return;
     }
     const id = form.elements.id.value;
+    const existingProduct = id ? cachedProducts.find(item => item.id === id) : null;
+    if (id && !existingProduct) {
+      message.textContent = 'No se encontró el producto en la lista actual. Recarga los productos antes de editarlo.';
+      message.className = 'message error';
+      return;
+    }
+    let inventoryReason = null;
+    if (id && inventory !== Number(existingProduct.inventory)) {
+      inventoryReason = window.prompt('Explica el motivo del ajuste de existencias (por ejemplo: ingreso de mercancía, corrección de conteo o merma):');
+      if (inventoryReason === null) return;
+      inventoryReason = inventoryReason.trim();
+      if (inventoryReason.length < 3 || inventoryReason.length > 500) {
+        message.textContent = 'El motivo del ajuste debe tener entre 3 y 500 caracteres.';
+        message.className = 'message error';
+        return;
+      }
+    }
     const button = form.querySelector('button[type="submit"]');
     let uploadedImage = null;
     button.disabled = true;
@@ -485,17 +502,30 @@
         category: form.elements.category.value.trim() || null,
         description: form.elements.description.value.trim() || null,
         price,
-        inventory,
         image_url: uploadedImage?.publicUrl || externalImageUrl || null,
         is_active: form.elements.is_active.checked,
         updated_at: new Date().toISOString()
       };
       const result = id
         ? await db.from('products').update(payload).eq('id', id).eq('business_id', businessId).select('id').maybeSingle()
-        : await db.from('products').insert({ ...payload, business_id: businessId }).select('id').single();
+        : await db.from('products').insert({ ...payload, inventory, business_id: businessId }).select('id').single();
       if (result.error || !result.data) {
         await removeUploadedBusinessImage(uploadedImage?.path);
         throw new Error(result.error?.message || 'No se guardó ningún producto. Comprueba que tienes permisos sobre este negocio.');
+      }
+      if (id && inventoryReason !== null) {
+        const inventoryResult = await db.rpc('adjust_business_inventory', {
+          p_business_id: businessId,
+          p_product_id: id,
+          p_new_inventory: inventory,
+          p_reason: inventoryReason
+        });
+        if (inventoryResult.error) {
+          message.textContent = 'Los datos del producto se guardaron, pero no se modificaron las existencias. Motivo: ' + inventoryResult.error.message;
+          message.className = 'message error';
+          await loadProducts();
+          return;
+        }
       }
       if (costPrice !== null) {
         const costResult = await db.from('product_costs').upsert({
