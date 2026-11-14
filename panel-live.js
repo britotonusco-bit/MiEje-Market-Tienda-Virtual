@@ -184,8 +184,11 @@
     const name = form.elements.name.value.trim();
     const price = Number(form.elements.price.value);
     const inventory = Number(form.elements.inventory.value);
-    if (!name || !Number.isFinite(price) || price < 0 || !Number.isInteger(inventory) || inventory < 0) {
-      message.textContent = 'Revisa el nombre, el precio y las existencias. El precio debe ser igual o mayor que cero y las existencias un número entero.';
+    const costRaw = form.elements.cost_price.value.trim();
+    const costPrice = costRaw === '' ? null : Number(costRaw);
+    if (!name || !Number.isFinite(price) || price < 0 || !Number.isInteger(inventory) || inventory < 0
+      || (costPrice !== null && (!Number.isFinite(costPrice) || costPrice < 0))) {
+      message.textContent = 'Revisa nombre, precio, costo y existencias. Los valores monetarios no pueden ser negativos y las existencias deben ser un número entero.';
       message.className = 'message error';
       return;
     }
@@ -221,9 +224,25 @@
         await removeUploadedBusinessImage(uploadedImage?.path);
         throw new Error(result.error?.message || 'No se guardó ningún producto. Comprueba que tienes permisos sobre este negocio.');
       }
+      if (costPrice !== null) {
+        const costResult = await db.from('product_costs').upsert({
+          product_id: result.data.id,
+          business_id: businessId,
+          cost_price: costPrice,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'product_id' });
+        if (costResult.error) {
+          message.textContent = 'El producto se guardó, pero no se pudo guardar su costo: ' + costResult.error.message;
+          message.className = 'message error';
+          await loadProducts();
+          return;
+        }
+      }
       form.reset();
       form.elements.id.value = '';
-      message.textContent = id ? 'Producto actualizado.' : 'Producto creado.';
+      message.textContent = costPrice === null
+        ? (id ? 'Producto actualizado. El costo sigue pendiente de registrar.' : 'Producto creado. Registra su costo para calcular el margen.')
+        : (id ? 'Producto y costo actualizados.' : 'Producto y costo guardados.');
       message.className = 'message success';
       await loadProducts();
     } catch (error) {
@@ -243,6 +262,7 @@
     form.elements.category.value = product.category || '';
     form.elements.description.value = product.description || '';
     form.elements.price.value = product.price ?? 0;
+    form.elements.cost_price.value = product.cost_price ?? '';
     form.elements.inventory.value = product.inventory ?? 0;
     form.elements.image_url.value = product.image_url || '';
     if (form.elements.image_file) form.elements.image_file.value = '';
@@ -300,11 +320,32 @@
 
   async function loadProducts() {
     const target = document.querySelector('#productsContainer');
-    const { data, error } = await db.from('products').select('id,name,category,description,price,inventory,image_url,is_active').eq('business_id', businessId).order('name').limit(250);
-    if (error) return showError(target, error);
-    cachedProducts = data || [];
+    const [productsResult, costsResult] = await Promise.all([
+      db.from('products').select('id,name,category,description,price,inventory,image_url,is_active').eq('business_id', businessId).order('name').limit(250),
+      db.from('product_costs').select('product_id,cost_price').eq('business_id', businessId)
+    ]);
+    if (productsResult.error) return showError(target, productsResult.error);
+    if (costsResult.error) return showError(target, costsResult.error);
+    const costsByProduct = new Map((costsResult.data || []).map(row => [row.product_id, Number(row.cost_price)]));
+    cachedProducts = (productsResult.data || []).map(product => ({
+      ...product,
+      cost_price: costsByProduct.has(product.id) ? costsByProduct.get(product.id) : null
+    }));
     if (!cachedProducts.length) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene productos registrados. Puedes crear el primero en el formulario.</div>'; return; }
-    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Categoría</th><th>Precio</th><th>Existencias</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${cachedProducts.map(p => `<tr><td><strong>${esc(p.name)}</strong>${p.image_url && /^https?:\/\//i.test(p.image_url) ? `<br><a href="${esc(p.image_url)}" target="_blank" rel="noopener"><img src="${esc(p.image_url)}" alt="Imagen de ${esc(p.name)}" loading="lazy" style="width:54px;height:54px;object-fit:cover;border-radius:10px;vertical-align:middle"> Ver imagen</a>` : ''}<br><small>${esc(p.description || '')}</small></td><td>${esc(p.category || '—')}</td><td>${money(p.price)}</td><td>${number(p.inventory)}</td><td><span class="pill ${p.is_active ? 'green':'red'}">${p.is_active ? 'Activo':'Inactivo'}</span></td><td><button class="small-button" data-edit-product="${esc(p.id)}">Editar</button> <button class="small-button" data-toggle-product="${esc(p.id)}">${p.is_active ? 'Desactivar':'Activar'}</button></td></tr>`).join('')}</tbody></table></div>`;
+    target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Categoría</th><th>Precio</th><th>Costo unitario</th><th>Margen bruto unitario</th><th>Existencias</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>' +
+      cachedProducts.map(p => {
+        const hasCost = p.cost_price !== null && Number.isFinite(p.cost_price);
+        const margin = hasCost ? Number(p.price) - p.cost_price : null;
+        return '<tr><td><strong>' + esc(p.name) + '</strong>' +
+          (p.image_url && /^https?:\/\//i.test(p.image_url) ? '<br><a href="' + esc(p.image_url) + '" target="_blank" rel="noopener"><img src="' + esc(p.image_url) + '" alt="Imagen de ' + esc(p.name) + '" loading="lazy" style="width:54px;height:54px;object-fit:cover;border-radius:10px;vertical-align:middle"> Ver imagen</a>' : '') +
+          '<br><small>' + esc(p.description || '') + '</small></td><td>' + esc(p.category || '—') + '</td><td>' + money(p.price) +
+          '</td><td>' + (hasCost ? money(p.cost_price) : '<span class="pill red">Sin registrar</span>') +
+          '</td><td>' + (hasCost ? money(margin) : 'Pendiente de costo') +
+          '</td><td>' + number(p.inventory) + '</td><td><span class="pill ' + (p.is_active ? 'green':'red') + '">' +
+          (p.is_active ? 'Activo':'Inactivo') + '</span></td><td><button class="small-button" data-edit-product="' + esc(p.id) +
+          '">Editar</button> <button class="small-button" data-toggle-product="' + esc(p.id) + '">' +
+          (p.is_active ? 'Desactivar':'Activar') + '</button></td></tr>';
+      }).join('') + '</tbody></table></div>';
     target.querySelectorAll('[data-edit-product]').forEach(button => button.addEventListener('click', () => editProduct(button.dataset.editProduct)));
     target.querySelectorAll('[data-toggle-product]').forEach(button => button.addEventListener('click', () => toggleProductStatus(button.dataset.toggleProduct, button)));
   }
