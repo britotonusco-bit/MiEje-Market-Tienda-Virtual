@@ -7,7 +7,7 @@ ALTER TABLE public.orders
   ADD COLUMN IF NOT EXISTS payment_method_id uuid,
   ADD COLUMN IF NOT EXISTS payment_method_name text;
 
-DO $
+DO $payment_method_fk$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
@@ -21,7 +21,7 @@ BEGIN
       ON DELETE SET NULL;
   END IF;
 END;
-$;
+$payment_method_fk$;
 
 CREATE INDEX IF NOT EXISTS orders_business_payment_method_idx
   ON public.orders (business_id, payment_method_id)
