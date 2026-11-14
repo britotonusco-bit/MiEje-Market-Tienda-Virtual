@@ -182,7 +182,46 @@
   let selectedCategory = "Todas";
   let currentBusinessId = null;
   let cart = [];
+  let pendingCheckoutRequest = null;
   let toastTimer;
+  const checkoutSessionKey = "mieje:checkout-pending:v1";
+
+  async function getCheckoutFingerprint(payload) {
+    const bytes = new TextEncoder().encode(JSON.stringify(payload));
+    const digest = await window.crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  function restorePendingCheckout(fingerprint) {
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(checkoutSessionKey) || "null");
+      if (saved?.fingerprint === fingerprint
+          && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(saved.idempotencyKey || "")) {
+        return { fingerprint, idempotencyKey: saved.idempotencyKey };
+      }
+      window.sessionStorage.removeItem(checkoutSessionKey);
+    } catch (error) {
+      console.warn("No se pudo recuperar la clave temporal del checkout.", error);
+    }
+    return null;
+  }
+
+  function savePendingCheckout(request) {
+    try {
+      window.sessionStorage.setItem(checkoutSessionKey, JSON.stringify(request));
+    } catch (error) {
+      console.warn("No se pudo guardar la clave temporal del checkout.", error);
+    }
+  }
+
+  function clearPendingCheckout() {
+    pendingCheckoutRequest = null;
+    try {
+      window.sessionStorage.removeItem(checkoutSessionKey);
+    } catch (error) {
+      console.warn("No se pudo limpiar la clave temporal del checkout.", error);
+    }
+  }
 
   const getBusiness = id => businesses.find(business => business.id === id);
   const getProduct = (business, productId) =>
@@ -193,8 +232,8 @@
       if (!window.supabase || !window.MIEJE_SUPABASE_URL || !window.MIEJE_SUPABASE_PUBLISHABLE_KEY) return;
       const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
       const { data: rows, error } = await client.from("businesses")
-        .select("id,name,slug,business_type,category,description,tagline,city,contact_phone,whatsapp_support,opening_hours,logo_url,status,suspension_reason,public_suspension_message,delivery_fee,minimum_order_amount")
-        .order("created_at", { ascending: false }).limit(200);
+        .select("id,name,slug,business_type,category,description,tagline,city,contact_phone,whatsapp_support,opening_hours,logo_url,status,public_suspension_message,delivery_fee,minimum_order_amount")
+        .order("name", { ascending: true }).limit(200);
       if (error) throw error;
       if (!rows?.length) return;
       const activeBusinessIds = rows.filter(row => row.status === "active").map(row => row.id);
@@ -250,7 +289,6 @@
         phone: row.contact_phone || "",
         rating: "Nuevo",
         isActive: row.status === "active",
-        suspensionReason: row.suspension_reason || "",
         publicSuspensionMessage: row.public_suspension_message || "Esta tienda no está disponible temporalmente.",
         storeSettings: {
           whatsapp_number: row.whatsapp_support || "",
@@ -384,6 +422,45 @@
     showView("listing");
   }
 
+  async function toggleFavorite(productId, button) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(productId)) {
+      showToast("Este producto no está disponible para guardarse como favorito.");
+      return;
+    }
+    if (!window.supabase || !window.MIEJE_SUPABASE_URL || !window.MIEJE_SUPABASE_PUBLISHABLE_KEY) {
+      showToast("No fue posible conectar con tu cuenta.");
+      return;
+    }
+    button.disabled = true;
+    try {
+      const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
+      const { data: userData, error: userError } = await client.auth.getUser();
+      if (userError || !userData.user) {
+        window.location.href = "cuenta.html";
+        return;
+      }
+      const { data: existing, error: lookupError } = await client.from("customer_favorites")
+        .select("id").eq("user_id", userData.user.id).eq("product_id", productId).maybeSingle();
+      if (lookupError) throw lookupError;
+      if (existing) {
+        const { error } = await client.from("customer_favorites").delete().eq("id", existing.id);
+        if (error) throw error;
+        button.textContent = "♡ Guardar";
+        showToast("Producto retirado de tus favoritos.");
+      } else {
+        const { error } = await client.from("customer_favorites").insert({ user_id:userData.user.id, product_id:productId });
+        if (error) throw error;
+        button.textContent = "♥ Guardado";
+        showToast("Producto agregado a tus favoritos.");
+      }
+    } catch (error) {
+      console.warn("No se pudo actualizar el favorito.", error);
+      showToast(error.message || "No fue posible actualizar tus favoritos.");
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   function productCard(business, product) {
     const canOrder = business.isRegistered === true && business.isActive !== false && Number(product.inventory || 0) > 0;
     const buttonText = !business.isRegistered ? "Demostración" : Number(product.inventory || 0) > 0 ? "+ Agregar" : "Agotado";
@@ -399,6 +476,7 @@
               data-action="add"
               data-business="${escapeHtml(business.id)}"
               data-product="${escapeHtml(product.id)}">${buttonText}</button>
+            ${business.isRegistered === true ? `<button type="button" class="add-button" data-action="favorite" data-product="${escapeHtml(product.id)}">♡ Guardar</button>` : ""}
           </div>
         </div>
       </article>`;
@@ -815,6 +893,10 @@
         addToCart(actionButton.dataset.business, actionButton.dataset.product);
       }
 
+      if (action === "favorite") {
+        void toggleFavorite(actionButton.dataset.product, actionButton);
+      }
+
       if (action === "quantity") {
         const item = cart.find(entry => entry.key === actionButton.dataset.key);
 
@@ -973,21 +1055,32 @@
     button.disabled = true;
     button.textContent = "Registrando pedido…";
     try {
+      if (!window.crypto?.randomUUID) throw new Error("Este navegador no permite validar de forma segura el intento de compra. Actualiza el navegador e inténtalo de nuevo.");
+      const checkoutPayload = {
+        business_id: business.id,
+        customer_name: customerName,
+        customer_phone: customerPhone,
+        delivery_address: address,
+        delivery_notes: `Método de entrega: ${deliveryMethod === "delivery" ? "Domicilio" : deliveryMethod}`,
+        payment_method_id: paymentMethodId,
+        items: cart.map(item => ({ product_id: item.productId, quantity: item.quantity }))
+      };
+      const requestFingerprint = await getCheckoutFingerprint(checkoutPayload);
+      if (!pendingCheckoutRequest || pendingCheckoutRequest.fingerprint !== requestFingerprint) {
+        pendingCheckoutRequest = restorePendingCheckout(requestFingerprint) || {
+          fingerprint: requestFingerprint,
+          idempotencyKey: window.crypto.randomUUID()
+        };
+        savePendingCheckout(pendingCheckoutRequest);
+      }
       const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
       const { data, error } = await client.functions.invoke("create-public-order", {
-        body: {
-          business_id: business.id,
-          customer_name: customerName,
-          customer_phone: customerPhone,
-          delivery_address: address,
-          delivery_notes: `Método de entrega: ${deliveryMethod === "delivery" ? "Domicilio" : deliveryMethod}`,
-          payment_method_id: paymentMethodId,
-          items: cart.map(item => ({ product_id: item.productId, quantity: item.quantity }))
-        }
+        body: { ...checkoutPayload, idempotency_key: pendingCheckoutRequest.idempotencyKey }
       });
       if (error) throw new Error(error.message || "No se pudo registrar el pedido.");
       if (!data?.ok || !data.order) throw new Error(data?.error || "El servidor no confirmó el registro del pedido.");
       const order = data.order;
+      clearPendingCheckout();
       const tracking = order.public_tracking_token ? `\nCódigo privado de seguimiento: ${order.public_tracking_token}` : "";
       window.alert(`Pedido registrado correctamente.\nNúmero de pedido: #${order.order_number}\nTotal: ${money(order.total)}${tracking}\n\nGuarda el código de seguimiento para consultar el estado de tu pedido.`);
       cart = [];
@@ -1032,6 +1125,48 @@
     if (event.key === "Escape") closeCart();
   });
 
+
+  async function loadPlatformBranding() {
+    if (!window.supabase || !window.MIEJE_SUPABASE_URL || !window.MIEJE_SUPABASE_PUBLISHABLE_KEY) return;
+    try {
+      const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
+      const { data, error } = await client.functions.invoke("get-platform-public-settings", { body: {} });
+      if (error || !data?.ok) return;
+      const settings = data.settings || {};
+      const siteName = String(settings.site_name || "MiEje Market").slice(0, 120);
+      const description = String(settings.site_description || "").slice(0, 2000);
+      document.title = siteName + " | Tienda virtual";
+      const brandText = document.querySelector(".logo > span:last-child");
+      if (brandText) {
+        brandText.textContent = siteName;
+        const tagline = document.createElement("small");
+        tagline.textContent = "Lo nuestro, más cerca";
+        brandText.append(tagline);
+      }
+      const footerBrand = document.querySelector("#platformFooterLogo");
+      if (footerBrand) footerBrand.textContent = siteName;
+      const heroDescription = document.querySelector("#platformHeroDescription");
+      if (heroDescription && description) heroDescription.textContent = description;
+      const logoMark = document.querySelector("#platformLogoMark");
+      if (logoMark && settings.logo_url) {
+        logoMark.textContent = "";
+        logoMark.style.backgroundImage = 'url("' + String(settings.logo_url).replace(/["\\\\]/g, "") + '")';
+        logoMark.style.backgroundSize = "contain";
+        logoMark.style.backgroundPosition = "center";
+        logoMark.style.backgroundRepeat = "no-repeat";
+      }
+      const hero = document.querySelector("#platformHero");
+      if (hero && settings.hero_image_url) {
+        hero.style.backgroundImage = 'linear-gradient(90deg, rgba(8,18,24,.88), rgba(8,18,24,.28)), url("' + String(settings.hero_image_url).replace(/["\\\\]/g, "") + '")';
+        hero.style.backgroundSize = "cover";
+        hero.style.backgroundPosition = "center";
+      }
+    } catch (error) {
+      console.warn("No se pudo cargar la identidad pública de MiEje Market.", error);
+    }
+  }
+
+  loadPlatformBranding();
   loadRegisteredBusinesses().finally(() => {
     renderFeatured();
     renderListing();

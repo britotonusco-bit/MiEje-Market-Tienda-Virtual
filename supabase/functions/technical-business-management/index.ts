@@ -115,6 +115,16 @@ Deno.serve(async (req: Request) => {
         if (membershipError || !membership || membership.status !== "active" || membership.role !== expectedRole) {
           return reply(403, { error: "No tienes permiso para entrar a este panel." });
         }
+
+        const { data: business, error: businessError } = await admin
+          .from("businesses")
+          .select("id,status")
+          .eq("id", businessId)
+          .maybeSingle();
+        if (businessError) throw businessError;
+        if (!business || business.status !== "active") {
+          return reply(403, { error: "El negocio no está activo. No se puede registrar un acceso válido al panel." });
+        }
       }
 
       const { error: auditError } = await admin.from("audit_logs").insert({
@@ -131,9 +141,240 @@ Deno.serve(async (req: Request) => {
 
     if (!isOwner) return reply(403, { error: "Solo el administrador técnico puede realizar esta acción." });
 
+    if (action === "list_platform_finance") {
+      const [financeResult, payrollResult] = await Promise.all([
+        admin.from("platform_financial_records")
+          .select("id,business_id,record_type,description,amount,currency,occurred_at,reference,created_at")
+          .order("occurred_at", { ascending: false }).limit(100),
+        admin.from("payroll_records")
+          .select("id,business_id,payee_name,description,amount,currency,status,due_date,paid_at,payment_reference,created_at,updated_at")
+          .order("created_at", { ascending: false }).limit(100),
+      ]);
+      if (financeResult.error) throw financeResult.error;
+      if (payrollResult.error) throw payrollResult.error;
+      return reply(200, {
+        ok: true,
+        financial_records: financeResult.data ?? [],
+        payroll_records: payrollResult.data ?? [],
+      });
+    }
+
+    if (action === "create_platform_financial_record") {
+      const recordType = textValue(body.record_type, 20);
+      const description = textValue(body.description, 500);
+      const amount = Number(body.amount);
+      const currency = (textValue(body.currency, 3) || "COP").toUpperCase();
+      const reference = textValue(body.reference, 160) || null;
+      const businessId = textValue(body.business_id, 80) || null;
+      const occurredAtInput = textValue(body.occurred_at, 40);
+      const allowedTypes = ["income", "expense", "refund", "adjustment"];
+      if (!allowedTypes.includes(recordType)) return reply(400, { error: "Tipo de movimiento no válido." });
+      if (description.length < 3 || !Number.isFinite(amount) || amount <= 0) {
+        return reply(400, { error: "La descripción debe tener al menos 3 caracteres y el importe debe ser mayor que cero." });
+      }
+      if (!/^[A-Z]{3}$/.test(currency)) return reply(400, { error: "La moneda debe usar un código de tres letras, por ejemplo COP." });
+      if (businessId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(businessId)) {
+        return reply(400, { error: "Identificador de negocio no válido." });
+      }
+      if (occurredAtInput && Number.isNaN(Date.parse(occurredAtInput))) {
+        return reply(400, { error: "La fecha del movimiento no es válida." });
+      }
+      const occurredAt = occurredAtInput ? new Date(occurredAtInput).toISOString() : new Date().toISOString();
+      const { data, error } = await admin.from("platform_financial_records").insert({
+        business_id: businessId,
+        record_type: recordType,
+        description,
+        amount,
+        currency,
+        occurred_at: occurredAt,
+        reference,
+        created_by: user.id,
+      }).select("id,business_id,record_type,description,amount,currency,occurred_at,reference,created_at").single();
+      if (error) throw error;
+      const { error: auditError } = await admin.from("audit_logs").insert({
+        business_id: businessId,
+        actor_id: user.id,
+        action: "platform.finance_record_created",
+        entity_type: "platform_financial_record",
+        entity_id: data.id,
+        details: { record_type: recordType, amount, currency, description },
+      });
+      return reply(200, {
+        ok: true,
+        record: data,
+        audit_warning: auditError ? "El movimiento se guardó, pero no se pudo registrar la auditoría." : null,
+      });
+    }
+
+    if (action === "create_payroll_record") {
+      const payeeName = textValue(body.payee_name, 160);
+      const description = textValue(body.description, 500);
+      const amount = Number(body.amount);
+      const currency = (textValue(body.currency, 3) || "COP").toUpperCase();
+      const businessId = textValue(body.business_id, 80) || null;
+      const dueDate = textValue(body.due_date, 10) || null;
+      if (payeeName.length < 2 || description.length < 3 || !Number.isFinite(amount) || amount <= 0) {
+        return reply(400, { error: "Beneficiario, descripción e importe son obligatorios; el importe debe ser mayor que cero." });
+      }
+      if (!/^[A-Z]{3}$/.test(currency)) return reply(400, { error: "La moneda debe usar un código de tres letras, por ejemplo COP." });
+      if (businessId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(businessId)) {
+        return reply(400, { error: "Identificador de negocio no válido." });
+      }
+      if (dueDate) {
+        const parsedDueDate = new Date(dueDate + "T00:00:00.000Z");
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate) || Number.isNaN(parsedDueDate.getTime()) || parsedDueDate.toISOString().slice(0, 10) !== dueDate) {
+          return reply(400, { error: "La fecha límite no es válida." });
+        }
+      }
+      const { data, error } = await admin.from("payroll_records").insert({
+        business_id: businessId,
+        payee_name: payeeName,
+        description,
+        amount,
+        currency,
+        status: "pending",
+        due_date: dueDate,
+        created_by: user.id,
+        updated_by: user.id,
+      }).select("id,business_id,payee_name,description,amount,currency,status,due_date,created_at").single();
+      if (error) throw error;
+      const { error: auditError } = await admin.from("audit_logs").insert({
+        business_id: businessId,
+        actor_id: user.id,
+        action: "platform.payroll_created",
+        entity_type: "payroll_record",
+        entity_id: data.id,
+        details: { payee_name: payeeName, amount, currency, due_date: dueDate },
+      });
+      return reply(200, {
+        ok: true,
+        record: data,
+        audit_warning: auditError ? "El registro de nómina se guardó, pero no se pudo registrar la auditoría." : null,
+      });
+    }
+
+    if (action === "resolve_payroll_record") {
+      const recordId = textValue(body.record_id, 80);
+      const decision = textValue(body.decision, 20);
+      const paymentReference = textValue(body.payment_reference, 160) || null;
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(recordId)) {
+        return reply(400, { error: "Identificador de nómina no válido." });
+      }
+      if (!["paid", "cancelled"].includes(decision)) return reply(400, { error: "Estado de nómina no válido." });
+      const { data, error } = await admin.rpc("resolve_platform_payroll_record", {
+        p_record_id: recordId,
+        p_decision: decision,
+        p_payment_reference: paymentReference,
+        p_actor_id: user.id,
+      });
+      if (error) {
+        const message = error.message || "No se pudo resolver el registro de nómina.";
+        if (message.includes("ya fue resuelto")) return reply(409, { error: message });
+        if (message.includes("no existe")) return reply(404, { error: message });
+        throw error;
+      }
+      return reply(200, {
+        ok: true,
+        record: data?.payroll ?? null,
+        financial_record_id: data?.financial_record_id ?? null,
+        message: decision === "paid"
+          ? "Pago marcado en el control interno y gasto financiero registrado de forma conjunta."
+          : "Registro de nómina cancelado.",
+      });
+    }
+
+    if (action === "get_platform_public_settings") {
+      const { data, error } = await admin.from("platform_public_settings")
+        .select("site_name,site_description,logo_url,hero_image_url,support_whatsapp,updated_at")
+        .eq("id", true).maybeSingle();
+      if (error) throw error;
+      return reply(200, { ok: true, settings: data ?? {} });
+    }
+
+    if (action === "get_platform_ai_settings") {
+      const { data, error } = await admin.from("platform_ai_settings")
+        .select("enabled,assistant_name,system_instructions,updated_at")
+        .eq("id", true).maybeSingle();
+      if (error) throw error;
+      return reply(200, { ok: true, settings: data ?? {
+        enabled: false,
+        assistant_name: "Asistente general de MiEje Market",
+        system_instructions: "",
+      } });
+    }
+
+    if (action === "update_platform_ai_settings") {
+      if (typeof body.enabled !== "boolean") {
+        return reply(400, { error: "Indica si la configuración del asistente general estará habilitada." });
+      }
+      const assistantName = textValue(body.assistant_name, 120);
+      const instructions = textValue(body.system_instructions, 8000);
+      if (assistantName.length < 2) {
+        return reply(400, { error: "El nombre del asistente debe tener al menos dos caracteres." });
+      }
+      const { data, error } = await admin.from("platform_ai_settings").upsert({
+        id: true,
+        enabled: body.enabled,
+        assistant_name: assistantName,
+        system_instructions: instructions,
+        updated_by: user.id,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "id" })
+        .select("enabled,assistant_name,system_instructions,updated_at")
+        .single();
+      if (error) throw error;
+
+      const { error: auditError } = await admin.from("audit_logs").insert({
+        business_id: null,
+        actor_id: user.id,
+        action: "platform.ai_settings_updated",
+        entity_type: "platform_ai_settings",
+        entity_id: null,
+        details: { enabled: body.enabled, assistant_name: assistantName },
+      });
+      if (auditError) console.error("Platform AI settings saved but audit insert failed:", auditError);
+      return reply(200, {
+        ok: true,
+        settings: data,
+        audit_warning: auditError ? "La configuración se guardó, pero no se pudo registrar el evento de auditoría." : null,
+        message: auditError
+          ? "La configuración del asistente general se guardó, pero falta registrar la auditoría."
+          : "Configuración del asistente general guardada. Esto no activa por sí solo un proveedor de IA.",
+      });
+    }
+
+    if (action === "update_platform_public_settings") {
+      const siteName = textValue(body.site_name, 120);
+      const siteDescription = textValue(body.site_description, 2000);
+      const logoUrl = textValue(body.logo_url, 2048);
+      const heroImageUrl = textValue(body.hero_image_url, 2048);
+      const supportWhatsapp = textValue(body.support_whatsapp, 30).replace(/[^0-9]/g, "").slice(0, 18);
+      const validImageUrl = (value: string) => {
+        if (!value) return true;
+        try { return new URL(value).protocol === "https:"; } catch { return false; }
+      };
+      if (!siteName || !validImageUrl(logoUrl) || !validImageUrl(heroImageUrl) || (supportWhatsapp && supportWhatsapp.length < 10)) {
+        return reply(400, { error: "Revisa el nombre, las direcciones HTTPS de las imágenes y el número de WhatsApp." });
+      }
+      const { data, error } = await admin.from("platform_public_settings").upsert({
+        id: true, site_name: siteName, site_description: siteDescription,
+        logo_url: logoUrl || null, hero_image_url: heroImageUrl || null,
+        support_whatsapp: supportWhatsapp || null, updated_by: user.id,
+        updated_at: new Date().toISOString()
+      }, { onConflict: "id" }).select("site_name,site_description,logo_url,hero_image_url,support_whatsapp,updated_at").single();
+      if (error) throw error;
+      const { error: auditError } = await admin.from("audit_logs").insert({
+        business_id: null, actor_id: user.id, action: "platform.public_settings_updated",
+        entity_type: "platform_settings", entity_id: null,
+        details: { site_name: siteName, logo_changed: Boolean(logoUrl), hero_image_changed: Boolean(heroImageUrl), support_updated: Boolean(supportWhatsapp) }
+      });
+      if (auditError) throw auditError;
+      return reply(200, { ok: true, settings: data, message: "Configuración pública de MiEje Market guardada." });
+    }
+
     if (action === "list_businesses") {
       const { data, error } = await admin.from("businesses")
-        .select("id,name,slug,category,description,tagline,city,contact_phone,whatsapp_support,opening_hours,business_type,logo_url,status,suspension_reason,public_suspension_message,delivery_fee,minimum_order_amount,created_by,created_at,updated_at")
+        .select("id,name,slug,category,status,suspension_reason,public_suspension_message,created_at")
         .order("created_at", { ascending: false });
       if (error) throw error;
       return reply(200, { ok: true, businesses: data ?? [] });
@@ -153,15 +394,30 @@ Deno.serve(async (req: Request) => {
       return reply(200, { ok: true, audit_logs: data ?? [] });
     }
 
+    if (action === "list_content_moderation") {
+      const limitValue = Number(body.limit ?? 100);
+      const limit = Number.isInteger(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 100;
+      const { data, error } = await admin.from("business_content_pages")
+        .select("id,business_id,content_type,title,body,is_published,moderation_status,created_at,businesses(name)")
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (error) throw error;
+      return reply(200, { ok: true, contents: data ?? [] });
+    }
+
     if (action === "list_business_members") {
       const businessId = textValue(body.business_id, 80);
       if (!businessId) return reply(400, { error: "Falta el identificador del negocio." });
       const { data, error } = await admin.from("business_memberships")
-        .select("id,business_id,user_id,role,status,blocked_reason,created_at,profiles(display_name,phone)")
+        .select("id,business_id,user_id,role,status,job_title,blocked_reason,created_at,profiles(display_name,avatar_url,phone)")
         .eq("business_id", businessId)
         .order("created_at", { ascending: false });
       if (error) throw error;
-      return reply(200, { ok: true, members: data ?? [] });
+      const members = await Promise.all((data ?? []).map(async (membership: any) => {
+        const { data: authUser } = await admin.auth.admin.getUserById(membership.user_id);
+        return { ...membership, email: authUser?.user?.email ?? null };
+      }));
+      return reply(200, { ok: true, members });
     }
 
     if (action === "create_business") {
@@ -176,20 +432,15 @@ Deno.serve(async (req: Request) => {
         return reply(400, { error: "Nombre, categoría y slug válido son obligatorios." });
       }
 
+      // El panel técnico crea únicamente el registro base del negocio.
+      // La descripción, horarios, logo, contacto, pagos y demás datos comerciales
+      // se configuran después desde el panel de su administrador.
       const { data: business, error: createError } = await admin.from("businesses").insert({
         name,
         category,
         slug,
-        description: textValue(body.description, 3000) || null,
-        tagline: textValue(body.tagline, 250) || null,
-        city: textValue(body.city, 160) || "Pereira, Risaralda",
-        contact_phone: textValue(body.contact_phone, 50) || null,
-        whatsapp_support: textValue(body.whatsapp_support, 50) || null,
-        opening_hours: body.opening_hours && typeof body.opening_hours === "object" ? body.opening_hours : {},
-        business_type: textValue(body.business_type, 60) || "store",
-        logo_url: textValue(body.logo_url, 1000) || null,
         created_by: user.id,
-      }).select("id, name, slug, status, created_at").single();
+      }).select("id, name, slug, category, status, created_at").single();
 
       if (createError) {
         if (createError.code === "23505") return reply(409, { error: "Ya existe un negocio con ese slug." });
@@ -204,7 +455,17 @@ Deno.serve(async (req: Request) => {
         entity_id: business.id,
         details: { name: business.name, slug: business.slug },
       });
-      if (auditError) throw auditError;
+      // El negocio ya fue creado. No responder como si la creación hubiera
+      // fallado si únicamente falló el registro de auditoría: eso provocaría
+      // reintentos engañosos y errores de slug duplicado.
+      if (auditError) {
+        console.error("Business created but audit insert failed:", auditError);
+        return reply(201, {
+          ok: true,
+          business,
+          audit_warning: "El negocio se creó, pero no se pudo guardar su evento de auditoría. Revisa los registros del servidor.",
+        });
+      }
       return reply(201, { ok: true, business });
     }
 
@@ -213,8 +474,9 @@ Deno.serve(async (req: Request) => {
       const email = textValue(body.email, 254).toLowerCase();
       const role = textValue(body.role, 40);
       const displayName = textValue(body.display_name, 160);
-      if (!businessId || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !["business_admin", "employee"].includes(role)) {
-        return reply(400, { error: "Negocio, correo válido y rol permitido son obligatorios." });
+      const jobTitle = textValue(body.job_title, 100) || (role === "business_admin" ? "Administrador del negocio" : "");
+      if (!businessId || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !["business_admin", "employee"].includes(role) || displayName.length < 3 || jobTitle.length < 2) {
+        return reply(400, { error: "Negocio, nombre completo, correo, rol y cargo válido son obligatorios." });
       }
 
       const { data: business, error: businessError } = await admin
@@ -223,42 +485,72 @@ Deno.serve(async (req: Request) => {
       if (business.status !== "active") return reply(409, { error: "No se pueden asignar usuarios a un negocio suspendido o cerrado." });
 
       let targetUser = await findUserByEmail(admin, email);
+
+      // Si el usuario ya existe, comprobar la membresía antes de enviar
+      // cualquier correo o modificar su perfil. Así evitamos invitaciones
+      // duplicadas cuando ya tiene acceso al mismo negocio.
+      if (targetUser?.id) {
+        const { data: existingMembership, error: existingMembershipError } = await admin.from("business_memberships")
+          .select("id, role, status")
+          .eq("business_id", businessId)
+          .eq("user_id", targetUser.id)
+          .maybeSingle();
+        if (existingMembershipError) throw existingMembershipError;
+        if (existingMembership) {
+          return reply(409, {
+            error: existingMembership.status === "active"
+              ? "Ese usuario ya tiene acceso activo a este negocio."
+              : "Ese usuario ya tiene una asignación suspendida. Reactiva su acceso desde la gestión de usuarios.",
+          });
+        }
+      }
+
       let invitationSent = false;
       if (!targetUser) {
         const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
           data: displayName ? { display_name: displayName } : {},
+          redirectTo: "https://britotonusco-bit.github.io/MiEje-Market-Tienda-Virtual/aceptar-invitacion.html",
         });
         if (inviteError) {
-          targetUser = await findUserByEmail(admin, email);
-          if (!targetUser) {
-            return reply(400, { error: "No fue posible invitar ese correo. Comprueba si ya está registrado y revisa la configuración de correo de Supabase." });
-          }
-        } else {
-          targetUser = inviteData.user;
-          invitationSent = true;
+          console.error("inviteUserByEmail failed:", inviteError);
+          return reply(502, {
+            error: "Supabase no confirmó el envío de la invitación. No se asignó el acceso. Revisa la configuración de correo y el estado del usuario antes de volver a intentarlo."
+          });
         }
+        targetUser = inviteData.user;
+        invitationSent = true;
       }
 
       if (!targetUser?.id) return reply(500, { error: "Supabase no devolvió el usuario de destino." });
 
-      const { error: profileUpsertError } = await admin.from("profiles").upsert({
-        id: targetUser.id,
-        display_name: displayName || null,
-      }, { onConflict: "id", ignoreDuplicates: true });
-      if (profileUpsertError) throw profileUpsertError;
-
-      const { data: existingMembership } = await admin.from("business_memberships")
-        .select("id").eq("business_id", businessId).eq("user_id", targetUser.id).maybeSingle();
-      if (existingMembership) return reply(409, { error: "Ese usuario ya tiene acceso asignado a este negocio." });
+      const { data: existingProfile, error: profileReadError } = await admin.from("profiles")
+        .select("id,display_name").eq("id", targetUser.id).maybeSingle();
+      if (profileReadError) throw profileReadError;
+      if (!existingProfile) {
+        const { error: profileInsertError } = await admin.from("profiles").insert({
+          id: targetUser.id, display_name: displayName
+        });
+        if (profileInsertError && profileInsertError.code !== "23505") throw profileInsertError;
+      } else if (!existingProfile.display_name) {
+        const { error: profileUpdateError } = await admin.from("profiles")
+          .update({ display_name: displayName }).eq("id", targetUser.id);
+        if (profileUpdateError) throw profileUpdateError;
+      }
 
       const { data: membership, error: membershipError } = await admin.from("business_memberships").insert({
         business_id: businessId,
         user_id: targetUser.id,
         role,
+        job_title: jobTitle,
         status: "active",
         created_by: user.id,
-      }).select("id, business_id, user_id, role, status").single();
-      if (membershipError) throw membershipError;
+      }).select("id, business_id, user_id, role, status, job_title").single();
+      if (membershipError) {
+        if (membershipError.code === "23505") {
+          return reply(409, { error: "Ese usuario ya recibió acceso a este negocio. Actualiza la lista de cuentas." });
+        }
+        throw membershipError;
+      }
 
       const { error: auditError } = await admin.from("audit_logs").insert({
         business_id: businessId,
@@ -268,13 +560,59 @@ Deno.serve(async (req: Request) => {
         entity_id: membership.id,
         details: { target_user_id: targetUser.id, role, invitation_sent: invitationSent },
       });
-      if (auditError) throw auditError;
+      if (auditError) console.error("Membership created but audit insert failed:", auditError);
 
       return reply(201, {
         ok: true,
         membership,
         invitation_sent: invitationSent,
-        message: invitationSent ? "Invitación enviada al correo." : "Usuario existente asignado al negocio.",
+        audit_warning: auditError ? "La asignación se creó, pero no se pudo guardar su evento de auditoría. No repitas la invitación; revisa los registros técnicos." : null,
+        message: auditError
+          ? (invitationSent ? "La invitación se envió y la asignación se creó." : "El usuario existente quedó asignado al negocio.")
+          : (invitationSent ? "Invitación enviada al correo." : "Usuario existente asignado al negocio."),
+      });
+    }
+
+    if (action === "update_member_assignment") {
+      const membershipId = textValue(body.membership_id, 80);
+      const role = textValue(body.role, 40);
+      const jobTitle = textValue(body.job_title, 100);
+      if (!membershipId || !["business_admin", "employee"].includes(role) || jobTitle.length < 2) {
+        return reply(400, { error: "Selecciona una membresía, un rol válido y un cargo de al menos dos caracteres." });
+      }
+      const { data: before, error: readError } = await admin.from("business_memberships")
+        .select("id,business_id,user_id,role,status,job_title")
+        .eq("id", membershipId).maybeSingle();
+      if (readError) throw readError;
+      if (!before) return reply(404, { error: "No se encontró la membresía." });
+      if (before.role === "business_admin" && role !== "business_admin" && before.status === "active") {
+        const { count, error: countError } = await admin.from("business_memberships")
+          .select("id", { count: "exact", head: true })
+          .eq("business_id", before.business_id).eq("role", "business_admin").eq("status", "active");
+        if (countError) throw countError;
+        if ((count ?? 0) <= 1) return reply(409, { error: "No se puede retirar el rol del último administrador activo del negocio." });
+      }
+      const { data: membership, error: updateError } = await admin.from("business_memberships")
+        .update({ role, job_title: jobTitle })
+        .eq("id", membershipId)
+        .eq("business_id", before.business_id)
+        .eq("role", before.role)
+        .eq("status", before.status)
+        .select("id,business_id,user_id,role,status,job_title").maybeSingle();
+      if (updateError) throw updateError;
+      if (!membership) return reply(409, { error: "La membresía cambió durante la operación. Actualiza la lista." });
+      const { error: auditError } = await admin.from("audit_logs").insert({
+        business_id: membership.business_id, actor_id: user.id,
+        action: "business.member_assignment_updated", entity_type: "business_membership",
+        entity_id: membership.id,
+        details: { target_user_id: membership.user_id, previous_role: before.role, role, previous_job_title: before.job_title, job_title: jobTitle }
+      });
+      if (auditError) console.error("Membership assignment updated but audit insert failed:", auditError);
+      return reply(200, {
+        ok: true,
+        membership,
+        audit_warning: auditError ? "El rol y el cargo se actualizaron, pero no se pudo guardar el evento de auditoría." : null,
+        message: auditError ? "El rol y el cargo se actualizaron." : "Rol y cargo actualizados y registrados en auditoría.",
       });
     }
 
@@ -314,13 +652,36 @@ Deno.serve(async (req: Request) => {
       const reason = textValue(body.reason, 2000);
       if (!membershipId || !reason) return reply(400, { error: "La membresía y el motivo son obligatorios." });
 
+      const { data: before, error: readError } = await admin.from("business_memberships")
+        .select("id,business_id,user_id,role,status")
+        .eq("id", membershipId)
+        .maybeSingle();
+      if (readError) throw readError;
+      if (!before) return reply(404, { error: "No se encontró esa asignación de usuario." });
+      if (before.status === "suspended") {
+        return reply(200, { ok: true, membership: before, message: "La cuenta ya estaba suspendida en este negocio." });
+      }
+
+      if (before.role === "business_admin") {
+        const { count, error: adminsError } = await admin.from("business_memberships")
+          .select("id", { count: "exact", head: true })
+          .eq("business_id", before.business_id)
+          .eq("role", "business_admin")
+          .eq("status", "active");
+        if (adminsError) throw adminsError;
+        if ((count ?? 0) <= 1) {
+          return reply(409, { error: "No se puede suspender al último administrador activo del negocio. Asigna primero otro administrador." });
+        }
+      }
+
       const { data: membership, error: updateError } = await admin.from("business_memberships").update({
         status: "suspended",
         blocked_reason: reason,
-      }).eq("id", membershipId).select("id, business_id, user_id, role, status").maybeSingle();
+      }).eq("id", membershipId).eq("status", "active")
+        .select("id, business_id, user_id, role, status").maybeSingle();
 
       if (updateError) throw updateError;
-      if (!membership) return reply(404, { error: "No se encontró esa asignación de usuario." });
+      if (!membership) return reply(409, { error: "El acceso cambió mientras se procesaba la solicitud. Actualiza la lista e inténtalo de nuevo." });
 
       const { error: auditError } = await admin.from("audit_logs").insert({
         business_id: membership.business_id,
@@ -330,8 +691,13 @@ Deno.serve(async (req: Request) => {
         entity_id: membership.id,
         details: { target_user_id: membership.user_id, role: membership.role, reason },
       });
-      if (auditError) throw auditError;
-      return reply(200, { ok: true, membership });
+      if (auditError) console.error("Membership suspended but audit insert failed:", auditError);
+      return reply(200, {
+        ok: true,
+        membership,
+        audit_warning: auditError ? "El acceso se suspendió, pero no se pudo guardar el evento de auditoría." : null,
+        message: auditError ? "El acceso se suspendió." : "Acceso suspendido y registrado en auditoría.",
+      });
     }
 
     if (action === "unblock_member") {
@@ -358,9 +724,12 @@ Deno.serve(async (req: Request) => {
       const { data: membership, error: updateError } = await admin.from("business_memberships").update({
         status: "active",
         blocked_reason: null,
-      }).eq("id", membershipId).select("id,business_id,user_id,role,status").maybeSingle();
+      }).eq("id", membershipId).eq("status", "suspended")
+        .select("id,business_id,user_id,role,status").maybeSingle();
       if (updateError) throw updateError;
-      if (!membership) return reply(404, { error: "No se encontró esa asignación de usuario." });
+      if (!membership) {
+        return reply(409, { error: "El acceso cambió mientras se procesaba la reactivación. Actualiza la lista antes de continuar." });
+      }
 
       const { error: auditError } = await admin.from("audit_logs").insert({
         business_id: membership.business_id,
@@ -370,8 +739,13 @@ Deno.serve(async (req: Request) => {
         entity_id: membership.id,
         details: { target_user_id: membership.user_id, role: membership.role, reason },
       });
-      if (auditError) throw auditError;
-      return reply(200, { ok: true, membership, message: "Acceso reactivado y registrado en auditoría." });
+      if (auditError) console.error("Membership reactivated but audit insert failed:", auditError);
+      return reply(200, {
+        ok: true,
+        membership,
+        audit_warning: auditError ? "El acceso se reactivó, pero no se pudo guardar el evento de auditoría." : null,
+        message: auditError ? "El acceso se reactivó." : "Acceso reactivado y registrado en auditoría.",
+      });
     }
 
     if (action === "moderate_business_content") {
@@ -418,6 +792,66 @@ Deno.serve(async (req: Request) => {
         ok: true,
         content: updated,
         message: decision === "approved" ? "Publicación aprobada." : "Publicación rechazada y retirada de la vista pública."
+      });
+    }
+
+    if (action === "list_block_requests") {
+      if (!isOwner) return reply(403, { error: "Solo el propietario técnico puede consultar estas solicitudes." });
+      const { data: requests, error: requestError } = await admin
+        .from("access_block_requests")
+        .select("id,business_id,requested_by,target_user_id,reason,status,technician_note,resolved_by,resolved_at,created_at,businesses(name)")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (requestError) throw requestError;
+
+      const userIds = [...new Set((requests ?? []).flatMap((request: any) =>
+        [request.requested_by, request.target_user_id].filter(Boolean)
+      ))];
+      const { data: profiles, error: profilesError } = userIds.length
+        ? await admin.from("profiles").select("id,display_name").in("id", userIds)
+        : { data: [], error: null };
+      if (profilesError) throw profilesError;
+      const names = new Map((profiles ?? []).map((profile: any) => [profile.id, profile.display_name]));
+
+      return reply(200, {
+        ok: true,
+        requests: (requests ?? []).map((request: any) => ({
+          ...request,
+          requested_by_name: names.get(request.requested_by) ?? null,
+          target_user_name: names.get(request.target_user_id) ?? null,
+        })),
+      });
+    }
+
+    if (action === "resolve_block_request") {
+      if (!isOwner) return reply(403, { error: "Solo el propietario técnico puede resolver estas solicitudes." });
+      const requestId = textValue(body.request_id, 80);
+      const decision = textValue(body.decision, 20);
+      const technicianNote = textValue(body.technician_note, 2000);
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)
+          || !["approved", "rejected"].includes(decision)) {
+        return reply(400, { error: "Solicitud y decisión válida son obligatorias." });
+      }
+
+      const { data: result, error: resolveError } = await admin.rpc("resolve_access_block_request", {
+        p_request_id: requestId,
+        p_decision: decision,
+        p_technician_note: technicianNote,
+        p_technician_id: user.id,
+      });
+      if (resolveError) {
+        console.error("Access block request resolution failed:", resolveError);
+        const message = resolveError.message || "No se pudo resolver la solicitud.";
+        const status = /no se encontró|ya fue resuelta|último administrador|membresía activa|cambió durante/i.test(message) ? 409 : 400;
+        return reply(status, { error: message });
+      }
+
+      return reply(200, {
+        ok: true,
+        result,
+        message: decision === "approved"
+          ? "Solicitud aprobada. Se suspendió el acceso de esa cuenta únicamente en el negocio indicado."
+          : "Solicitud rechazada. El acceso de la cuenta no fue modificado.",
       });
     }
 

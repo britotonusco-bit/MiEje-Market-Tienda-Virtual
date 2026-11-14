@@ -32,6 +32,23 @@
       currentProfile = access.profile;
       const profile = access.profile;
       document.querySelector('#userName').textContent = profile.display_name || currentUser.email || 'Usuario';
+      const emailNode = document.querySelector('#userEmail');
+      if (emailNode) emailNode.textContent = currentUser.email || '';
+      const panelNode = document.querySelector('#profilePanel');
+      if (panelNode) panelNode.textContent = panel === 'technical' ? 'Panel técnico superior' : (panel === 'business_admin' ? 'Panel de administrador' : 'Panel de empleados');
+      const roleNode = document.querySelector('#profileRole');
+      if (roleNode) roleNode.textContent = panel === 'technical' ? 'Propietario de la plataforma' : (panel === 'business_admin' ? 'Administrador del negocio' : 'Empleado del negocio');
+      const statusNode = document.querySelector('#profileStatus');
+      if (statusNode) statusNode.textContent = profile.account_status === 'active' ? 'Cuenta activa' : 'Cuenta suspendida';
+      const titleNode = document.querySelector('#profileBusinessTitle');
+      if (titleNode) titleNode.textContent = panel === 'technical' ? 'Control general de MiEje Market' : '';
+      const avatarNode = document.querySelector('#profileAvatar');
+      if (avatarNode && profile.avatar_url) {
+        avatarNode.textContent = '';
+        avatarNode.style.backgroundImage = 'url("' + String(profile.avatar_url).replace(/["\\\\]/g, '') + '")';
+        avatarNode.style.backgroundSize = 'cover';
+        avatarNode.style.backgroundPosition = 'center';
+      }
       document.querySelector('#logoutBtn').addEventListener('click', signOut);
       document.querySelector('#refreshTechnicalBtn')?.addEventListener('click', refreshTechnical);
       document.querySelector('#createBusinessForm')?.addEventListener('submit', createBusiness);
@@ -40,14 +57,26 @@
       document.querySelector('#businessSelect')?.addEventListener('change', event => loadSelectedBusiness(event.currentTarget.value));
       document.querySelector('#suspensionForm')?.addEventListener('submit', saveSuspension);
       document.querySelector('#memberStatusForm')?.addEventListener('submit', saveMemberStatus);
-      document.querySelector('#memberBusinessSelect')?.addEventListener('change', event => loadTechnicalMembers(event.currentTarget.value));
+      document.querySelector('#assignmentBusinessSelect')?.addEventListener('change', event => loadTechnicalMembers(event.currentTarget.value, '#assignmentMemberSelect'));
+      document.querySelector('#assignmentMemberSelect')?.addEventListener('change', fillMemberAssignment);
+      document.querySelector('#memberAssignmentForm')?.addEventListener('submit', saveMemberAssignment);
+      document.querySelector('#memberBusinessSelect')?.addEventListener('change', event => loadTechnicalMembers(event.currentTarget.value, '#memberTargetSelect'));
       document.querySelector('#platformAiForm')?.addEventListener('submit', savePlatformAi);
+      document.querySelector('#platformFinanceForm')?.addEventListener('submit', createPlatformFinancialRecord);
+      document.querySelector('#payrollForm')?.addEventListener('submit', createPayrollRecord);
       document.querySelector('#storeSettingsForm')?.addEventListener('submit', saveStoreSettings);
       document.querySelector('#productForm')?.addEventListener('submit', saveProduct);
+      document.querySelector('#profitReportForm')?.addEventListener('submit', loadProfitReport);
+      document.querySelector('#businessExpenseForm')?.addEventListener('submit', saveBusinessExpense);
+      document.querySelector('#refreshExpenses')?.addEventListener('click', loadBusinessExpenses);
+      document.querySelector('#businessExpensesContainer')?.addEventListener('click', handleExpenseAction);
+      document.querySelector('#businessExpensesContainer')?.addEventListener('change', handleExpenseControlChange);
       document.querySelector('#businessContentForm')?.addEventListener('submit', saveBusinessContent);
       document.querySelector('#businessAiForm')?.addEventListener('submit', saveBusinessAi);
       document.querySelector('#blockRequestForm')?.addEventListener('submit', submitBlockRequest);
       document.querySelector('#refreshOrders')?.addEventListener('click', () => panel === 'business_admin' ? loadBusinessOrders() : loadEmployeeOrders());
+      document.querySelector('#refreshCancellations')?.addEventListener('click', loadCancellationRequests);
+      document.querySelector('#refreshRefunds')?.addEventListener('click', loadRefundableOrders);
 
       if (panel === 'technical') {
         if (!access.is_platform_owner || profile.platform_role !== 'platform_owner') throw new Error('Esta sección es exclusiva del propietario técnico autorizado.');
@@ -58,6 +87,7 @@
           return;
         }
         await logPanel(null, 'technical', 'panel_open');
+         await showSupportLink();
         notice.textContent = 'Acceso validado. Consultando datos disponibles del proyecto independiente.';
         notice.className = 'notice';
         await loadTechnical();
@@ -71,11 +101,14 @@
         businessId = match.business_id;
         businessName = match.business.name;
         isBusinessOwner = match.role === 'business_admin';
+        if (roleNode) roleNode.textContent = match.role_label || (match.role === 'business_admin' ? 'Administrador del negocio' : 'Empleado del negocio');
+        if (titleNode) titleNode.textContent = match.job_title || '';
+
         document.querySelector('#businessName').textContent = businessName;
         await logPanel(businessId, panel, 'panel_open');
         notice.textContent = `Acceso validado para ${businessName}. Los permisos se aplican en la base de datos.`;
         notice.className = 'notice';
-        if (panel === 'business_admin') { await loadBusinessAdmin(); await initBusinessSettings(); }
+        if (panel === 'business_admin') { await loadBusinessAdmin(); await initBusinessSettings(); await initBusinessAi(); await loadBlockTargetUsers(); }
         else { await loadEmployeeOrders(); await showSupportLink(); }
       }
     } catch (error) {
@@ -96,7 +129,11 @@
 
   async function loadBusinessAdmin() {
     const [ordersResult, productsResult] = await Promise.all([
-      db.from('orders').select('id,total,payment_status,status,created_at').eq('business_id', businessId),
+      db.rpc('get_business_admin_order_financials', {
+        p_business_id: businessId,
+        p_refundable_only: false,
+        p_limit: 10000
+      }),
       db.from('products').select('id,inventory,is_active').eq('business_id', businessId)
     ]);
     if (ordersResult.error) throw ordersResult.error;
@@ -104,14 +141,230 @@
     const orders = ordersResult.data || [], products = productsResult.data || [];
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
     const todayOrders = orders.filter(o => new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) === today && o.status !== 'cancelled');
-    const received = orders.filter(o => o.payment_status === 'paid').reduce((sum,o) => sum + Number(o.total || 0), 0);
+    const todayPaidSales = todayOrders.filter(o => o.payment_status === 'paid')
+      .reduce((sum, o) => sum + Number(o.total || 0), 0);
+    const received = orders.filter(o => o.payment_status === 'paid')
+      .reduce((sum, o) => sum + Number(o.total || 0), 0);
     renderStats([
-      ['Ventas de hoy', money(todayOrders.reduce((sum,o) => sum + Number(o.total || 0), 0)), 'Pedidos creados hoy, sin cancelados'],
-      ['Dinero recibido', money(received), 'Pedidos marcados como pagados'],
+      ['Pedidos de hoy', number(todayOrders.length), 'Pedidos creados hoy, sin cancelados'],
+      ['Pedidos de hoy con pago confirmado', money(todayPaidSales), 'Importe de pedidos creados hoy cuyo pago figura confirmado'],
+      ['Total de pedidos con pago confirmado', money(received), 'Suma de pedidos cuyo estado de pago figura como confirmado'],
       ['Pedidos abiertos', number(orders.filter(o => !['delivered','cancelled'].includes(o.status)).length), 'Pendientes de completar'],
       ['Productos con poco stock', number(products.filter(p => p.is_active && Number(p.inventory || 0) <= 5).length), 'Cinco unidades o menos']
     ]);
-    await Promise.all([loadBusinessOrders(), loadProducts(), loadAccessEvents(businessId, '#accessContainer'), loadAuditEvents(businessId, '#auditContainer')]);
+    await Promise.all([loadBusinessOrders(), loadCancellationRequests(), loadRefundableOrders(), loadProducts(), loadAccessEvents(businessId, '#accessContainer'), loadAuditEvents(businessId, '#auditContainer')]);
+    initializeProfitReport();
+    await loadBusinessExpenses();
+  }
+
+
+  function initializeProfitReport() {
+    const form = document.querySelector('#profitReportForm');
+    if (!form) return;
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+    const expenseForm = document.querySelector('#businessExpenseForm');
+    if (expenseForm) expenseForm.elements.expense_date.value = today;
+    form.elements.start_date.value = today.slice(0,8) + '01';
+    form.elements.end_date.value = today;
+    loadProfitReport();
+  }
+
+  async function loadProfitReport(event) {
+    if (event) event.preventDefault();
+    const form = document.querySelector('#profitReportForm');
+    const target = document.querySelector('#profitReportContainer');
+    if (!form || !target) return;
+    const startDate=form.elements.start_date.value, endDate=form.elements.end_date.value;
+    if (!startDate || !endDate || endDate < startDate) {
+      target.innerHTML='<div class="empty">Revisa las fechas: la fecha final no puede ser anterior a la inicial.</div>';
+      return;
+    }
+    target.innerHTML='<div class="empty">Calculando resultados del periodo…</div>';
+    const {data,error}=await db.rpc('get_business_admin_profit_report',{
+      p_business_id:businessId,p_start_date:startDate,p_end_date:endDate
+    });
+    if(error || !data) {
+      target.innerHTML='<div class="empty">El reporte financiero todavía no está disponible. Comprueba que la migración esté instalada en ensayo. '+esc(error?.message || '')+'</div>';
+      return;
+    }
+    const rows=[
+      ['Ventas con pago confirmado',money(data.sales)],
+      ['Reembolsos confirmados',money(data.refunds)],
+      ['Ventas netas',money(data.net_sales)],
+      ['Costo de productos vendidos',money(data.gross_cost_of_sales)],
+      ['Reversión de costo por cancelaciones',money(data.inventory_cost_reversals)],
+      ['Costo neto de ventas',money(data.cost_of_sales)],
+      ['Ganancia bruta estimada',money(data.gross_profit_estimate)],
+      ['Gastos operativos pagados',money(data.paid_expenses)],
+      ['Resultado neto estimado',money(data.net_profit_estimate)],
+      ['Pedidos con pago confirmado',number(data.paid_orders)],
+      ['Líneas sin costo histórico',number(data.missing_cost_lines)]
+    ];
+    target.innerHTML='<div class="stats">'+rows.map(([label,value])=>
+      '<article class="stat"><span>'+esc(label)+'</span><strong>'+esc(value)+'</strong></article>'
+    ).join('')+'</div>'+(data.complete_cost_data
+      ? '<p class="message success">Todos los movimientos de costo del periodo tienen costo histórico registrado.</p>'
+      : '<p class="message error">Hay productos vendidos sin costo histórico. El resultado no representa la ganancia real completa.</p>'
+    )+'<p class="muted">Periodo: '+esc(data.start_date)+' a '+esc(data.end_date)+'. '+esc(data.basis)+'</p>';
+  }
+
+  async function loadBusinessExpenses() {
+    const target = document.querySelector('#businessExpensesContainer');
+    if (!target || !businessId || panel !== 'business_admin') return;
+    target.innerHTML = '<div class="empty">Cargando gastos…</div>';
+    const { data, error } = await db.from('business_expenses')
+      .select('id,expense_date,category,description,amount,payment_status,payment_method,transaction_reference,supplier,receipt_path,notes,paid_at,status,void_reason,voided_at,created_at')
+      .eq('business_id', businessId)
+      .order('expense_date', { ascending: false })
+      .limit(250);
+    if (error) {
+      target.innerHTML = '<div class="empty">No se pudieron cargar los gastos. Comprueba que las políticas de lectura del administrador estén aplicadas. '+esc(error.message)+'</div>';
+      return;
+    }
+    renderBusinessExpenses(data || []);
+  }
+
+  function renderBusinessExpenses(items) {
+    const target = document.querySelector('#businessExpensesContainer');
+    if (!target) return;
+    if (!items.length) {
+      target.innerHTML = '<div class="empty">Todavía no hay gastos registrados en este negocio.</div>';
+      return;
+    }
+    const rows = items.map(item => {
+      const status = item.status === 'voided' ? 'Anulado' : (item.payment_status === 'paid' ? 'Pagado' : 'Pendiente');
+      const payment = item.payment_method ? ({cash:'Efectivo',transfer:'Transferencia',card:'Tarjeta',other:'Otro'}[item.payment_method] || item.payment_method) : '—';
+      let actions = '';
+      if (item.status === 'active' && item.payment_status === 'pending') {
+        actions = '<div class="form-grid"><label>Método<select class="field" data-expense-method="'+esc(item.id)+'"><option value="cash">Efectivo</option><option value="transfer">Transferencia</option><option value="card">Tarjeta</option><option value="other">Otro</option></select></label><label>Referencia (obligatoria para transferencia/tarjeta)<input class="field" data-expense-reference="'+esc(item.id)+'" maxlength="160"></label><button class="button secondary" type="button" data-expense-action="pay" data-expense-id="'+esc(item.id)+'">Confirmar pago</button><button class="button secondary" type="button" data-expense-action="void" data-expense-id="'+esc(item.id)+'">Anular gasto</button></div>';
+      }
+      const receipt = item.receipt_path
+        ? '<button class="button secondary" type="button" data-expense-action="receipt" data-expense-id="'+esc(item.id)+'">Ver comprobante</button>'
+        : (item.status === 'active' ? '<label>Adjuntar comprobante<input class="field" type="file" data-expense-file="'+esc(item.id)+'" accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"></label>' : '—');
+      return '<tr><td>'+esc(item.expense_date)+'</td><td><strong>'+esc(item.description)+'</strong><br><small>'+esc(item.category)+(item.supplier ? ' · '+esc(item.supplier) : '')+'</small></td><td>'+esc(money(item.amount))+'</td><td>'+esc(status)+'</td><td>'+esc(payment)+(item.transaction_reference ? '<br><small>Ref.: '+esc(item.transaction_reference)+'</small>' : '')+'</td><td>'+receipt+'</td><td>'+actions+(item.status === 'voided' ? '<small>Motivo: '+esc(item.void_reason || '—')+'</small>' : '')+'</td></tr>';
+    });
+    target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Detalle</th><th>Valor</th><th>Estado</th><th>Pago</th><th>Comprobante</th><th>Acciones</th></tr></thead><tbody>'+rows.join('')+'</tbody></table></div><p class="muted">Se muestran hasta 250 registros recientes. Los gastos anulados se conservan en el historial y no se incluyen como gastos pagados en el reporte.</p>';
+  }
+
+  function handleExpenseControlChange(event) {
+    const fileInput = event.target.closest('[data-expense-file]');
+    if (fileInput && fileInput.files?.[0]) uploadExpenseReceipt(fileInput.dataset.expenseFile, fileInput.files[0]);
+  }
+
+  async function handleExpenseAction(event) {
+    const button = event.target.closest('[data-expense-action]');
+    if (!button) return;
+    const id = button.dataset.expenseId;
+    const action = button.dataset.expenseAction;
+    button.disabled = true;
+    try {
+      if (action === 'pay') {
+        const method = document.querySelector('[data-expense-method="'+CSS.escape(id)+'"]')?.value;
+        const reference = document.querySelector('[data-expense-reference="'+CSS.escape(id)+'"]')?.value.trim() || null;
+        if (['transfer','card'].includes(method) && !reference) throw new Error('Debes escribir la referencia para transferencia o tarjeta.');
+        const { error } = await db.rpc('pay_business_expense', {
+          p_expense_id:id, p_payment_method:method, p_transaction_reference:reference
+        });
+        if (error) throw error;
+        await loadBusinessExpenses();
+      } else if (action === 'void') {
+        const reason = window.prompt('Escribe el motivo de anulación (mínimo 3 caracteres):');
+        if (reason === null) return;
+        if (reason.trim().length < 3) throw new Error('El motivo debe tener al menos 3 caracteres.');
+        const { error } = await db.rpc('void_business_expense', { p_expense_id:id, p_void_reason:reason.trim() });
+        if (error) throw error;
+        await loadBusinessExpenses();
+      } else if (action === 'receipt') {
+        const { data, error } = await db.storage.from('business-expense-receipts').createSignedUrl(
+          button.dataset.receiptPath || await getExpenseReceiptPath(id), 300
+        );
+        if (error || !data?.signedUrl) throw error || new Error('No se pudo crear el enlace temporal.');
+        window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+      }
+    } catch (error) {
+      window.alert('No se pudo completar la acción: '+(error.message || 'Error desconocido'));
+      button.disabled = false;
+    }
+  }
+
+  async function getExpenseReceiptPath(id) {
+    const { data, error } = await db.from('business_expenses').select('receipt_path')
+      .eq('id',id).eq('business_id',businessId).maybeSingle();
+    if (error) throw error;
+    if (!data?.receipt_path) throw new Error('Este gasto no tiene comprobante asociado.');
+    return data.receipt_path;
+  }
+
+  async function uploadExpenseReceipt(expenseId, file) {
+    const allowed = new Set(['application/pdf','image/jpeg','image/png','image/webp']);
+    if (!allowed.has(file.type) || file.size > 5*1024*1024) {
+      window.alert('El comprobante debe ser PDF, JPG, PNG o WEBP y no superar 5 MB.');
+      return;
+    }
+    const extension = file.type === 'application/pdf' ? 'pdf' : file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1];
+    const path = businessId+'/'+expenseId+'/'+crypto.randomUUID()+'.'+extension;
+    const { error: uploadError } = await db.storage.from('business-expense-receipts').upload(path,file,{
+      cacheControl:'0',upsert:false,contentType:file.type
+    });
+    if (uploadError) {
+      window.alert('No se pudo subir el comprobante: '+uploadError.message);
+      return;
+    }
+    const { error: attachError } = await db.rpc('attach_business_expense_receipt',{
+      p_expense_id:expenseId,p_receipt_path:path
+    });
+    if (attachError) {
+      window.alert('El archivo quedó cargado pero no se pudo asociar al gasto. No lo vuelvas a subir con otro nombre; requiere revisión técnica. '+attachError.message);
+      return;
+    }
+    await loadBusinessExpenses();
+  }
+
+  async function saveBusinessExpense(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#businessExpenseMessage');
+    const submit = form.querySelector('[type="submit"]');
+    const file = form.elements.receipt.files?.[0] || null;
+    const amount = Number(form.elements.amount.value);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      message.textContent = 'El valor del gasto debe ser mayor que cero.';
+      return;
+    }
+    if (file && (!new Set(['application/pdf','image/jpeg','image/png','image/webp']).has(file.type) || file.size > 5*1024*1024)) {
+      message.textContent = 'El comprobante debe ser PDF, JPG, PNG o WEBP y no superar 5 MB.';
+      return;
+    }
+    submit.disabled = true;
+    message.textContent = 'Registrando gasto…';
+    try {
+      const { data: expenseId, error } = await db.rpc('register_business_expense',{
+        p_business_id:businessId,
+        p_category:form.elements.category.value,
+        p_description:form.elements.description.value.trim(),
+        p_amount:amount,
+        p_expense_date:form.elements.expense_date.value,
+        p_payment_status:'pending',
+        p_payment_method:null,
+        p_supplier:form.elements.supplier.value.trim() || null,
+        p_transaction_reference:form.elements.transaction_reference.value.trim() || null,
+        p_receipt_path:null,
+        p_notes:form.elements.notes.value.trim() || null
+      });
+      if (error) throw error;
+      if (file) {
+        await uploadExpenseReceipt(expenseId,file);
+      }
+      form.reset();
+      form.elements.expense_date.value = new Date().toLocaleDateString('en-CA',{timeZone:'America/Bogota'});
+      message.textContent = 'Gasto registrado como pendiente. Confirma el pago solo después de realizarlo.';
+      await loadBusinessExpenses();
+      await loadProfitReport();
+    } catch (error) {
+      message.textContent = 'No se pudo registrar el gasto: '+(error.message || 'Error desconocido');
+    } finally {
+      submit.disabled = false;
+    }
   }
 
   async function uploadBusinessImage(file, folder) {
@@ -148,8 +401,11 @@
     const name = form.elements.name.value.trim();
     const price = Number(form.elements.price.value);
     const inventory = Number(form.elements.inventory.value);
-    if (!name || !Number.isFinite(price) || price < 0 || !Number.isInteger(inventory) || inventory < 0) {
-      message.textContent = 'Revisa el nombre, el precio y las existencias. El precio debe ser igual o mayor que cero y las existencias un número entero.';
+    const costRaw = form.elements.cost_price.value.trim();
+    const costPrice = costRaw === '' ? null : Number(costRaw);
+    if (!name || !Number.isFinite(price) || price < 0 || !Number.isInteger(inventory) || inventory < 0
+      || (costPrice !== null && (!Number.isFinite(costPrice) || costPrice < 0))) {
+      message.textContent = 'Revisa nombre, precio, costo y existencias. Los valores monetarios no pueden ser negativos y las existencias deben ser un número entero.';
       message.className = 'message error';
       return;
     }
@@ -169,7 +425,6 @@
     try {
       if (imageFile) uploadedImage = await uploadBusinessImage(imageFile, 'products');
       const payload = {
-        business_id: businessId,
         name,
         category: form.elements.category.value.trim() || null,
         description: form.elements.description.value.trim() || null,
@@ -180,15 +435,31 @@
         updated_at: new Date().toISOString()
       };
       const result = id
-        ? await db.from('products').update(payload).eq('id', id).eq('business_id', businessId)
-        : await db.from('products').insert(payload);
-      if (result.error) {
+        ? await db.from('products').update(payload).eq('id', id).eq('business_id', businessId).select('id').maybeSingle()
+        : await db.from('products').insert({ ...payload, business_id: businessId }).select('id').single();
+      if (result.error || !result.data) {
         await removeUploadedBusinessImage(uploadedImage?.path);
-        throw new Error(result.error.message);
+        throw new Error(result.error?.message || 'No se guardó ningún producto. Comprueba que tienes permisos sobre este negocio.');
+      }
+      if (costPrice !== null) {
+        const costResult = await db.from('product_costs').upsert({
+          product_id: result.data.id,
+          business_id: businessId,
+          cost_price: costPrice,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'product_id' });
+        if (costResult.error) {
+          message.textContent = 'El producto se guardó, pero no se pudo guardar su costo: ' + costResult.error.message;
+          message.className = 'message error';
+          await loadProducts();
+          return;
+        }
       }
       form.reset();
       form.elements.id.value = '';
-      message.textContent = id ? 'Producto actualizado.' : 'Producto creado.';
+      message.textContent = costPrice === null
+        ? (id ? 'Producto actualizado. El costo sigue pendiente de registrar.' : 'Producto creado. Registra su costo para calcular el margen.')
+        : (id ? 'Producto y costo actualizados.' : 'Producto y costo guardados.');
       message.className = 'message success';
       await loadProducts();
     } catch (error) {
@@ -208,6 +479,7 @@
     form.elements.category.value = product.category || '';
     form.elements.description.value = product.description || '';
     form.elements.price.value = product.price ?? 0;
+    form.elements.cost_price.value = product.cost_price ?? '';
     form.elements.inventory.value = product.inventory ?? 0;
     form.elements.image_url.value = product.image_url || '';
     if (form.elements.image_file) form.elements.image_file.value = '';
@@ -224,9 +496,9 @@
     const action = product.is_active ? 'desactivar' : 'activar';
     if (!window.confirm(`¿Deseas ${action} el producto "${product.name}"? No se eliminará del historial de pedidos.`)) return;
     button.disabled = true;
-    const { error } = await db.from('products').update({ is_active: !product.is_active, updated_at: new Date().toISOString() }).eq('id', id).eq('business_id', businessId);
-    if (error) {
-      alert('No se pudo cambiar el estado del producto: ' + error.message);
+    const { data: updated, error } = await db.from('products').update({ is_active: !product.is_active, updated_at: new Date().toISOString() }).eq('id', id).eq('business_id', businessId).select('id').maybeSingle();
+    if (error || !updated) {
+      alert('No se pudo cambiar el estado del producto: ' + (error?.message || 'No se encontró el producto o no tienes permiso.'));
       button.disabled = false;
       return;
     }
@@ -236,26 +508,61 @@
   async function loadBusinessOrders() {
     const target = document.querySelector('#ordersContainer');
     target.innerHTML = '<div class="empty">Cargando pedidos…</div>';
-    const { data, error } = await db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,payment_status,status,total,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
-    if (error) return showError(target, error);
-    renderOrders(target, (data || []).map(o => ({ ...o, items: o.order_items || [] })), true);
+    const [ordersResult, financeResult] = await Promise.all([
+      db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,delivery_tracking,status,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100),
+      db.rpc('get_business_admin_order_financials', {
+        p_business_id: businessId,
+        p_refundable_only: false,
+        p_limit: 100
+      })
+    ]);
+    if (ordersResult.error) return showError(target, ordersResult.error);
+    if (financeResult.error) return showError(target, financeResult.error);
+    const financeByOrder = new Map((financeResult.data || []).map(row => [row.order_id, row]));
+    renderOrders(target, (ordersResult.data || []).map(o => ({
+      ...o,
+      ...(financeByOrder.get(o.id) || {}),
+      id: o.id,
+      items: o.order_items || []
+    })), true);
   }
 
   async function loadEmployeeOrders() {
     const target = document.querySelector('#ordersContainer');
     target.innerHTML = '<div class="empty">Cargando pedidos…</div>';
-    const { data, error } = await db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,status,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
+    const { data, error } = await db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,delivery_tracking,status,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
     if (error) return showError(target, error);
     renderOrders(target, (data || []).map(o => ({ ...o, items: o.order_items || [] })), false);
   }
 
   async function loadProducts() {
     const target = document.querySelector('#productsContainer');
-    const { data, error } = await db.from('products').select('id,name,category,description,price,inventory,image_url,is_active').eq('business_id', businessId).order('name').limit(250);
-    if (error) return showError(target, error);
-    cachedProducts = data || [];
+    const [productsResult, costsResult] = await Promise.all([
+      db.from('products').select('id,name,category,description,price,inventory,image_url,is_active').eq('business_id', businessId).order('name').limit(250),
+      db.from('product_costs').select('product_id,cost_price').eq('business_id', businessId)
+    ]);
+    if (productsResult.error) return showError(target, productsResult.error);
+    if (costsResult.error) return showError(target, costsResult.error);
+    const costsByProduct = new Map((costsResult.data || []).map(row => [row.product_id, Number(row.cost_price)]));
+    cachedProducts = (productsResult.data || []).map(product => ({
+      ...product,
+      cost_price: costsByProduct.has(product.id) ? costsByProduct.get(product.id) : null
+    }));
     if (!cachedProducts.length) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene productos registrados. Puedes crear el primero en el formulario.</div>'; return; }
-    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Categoría</th><th>Precio</th><th>Existencias</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${cachedProducts.map(p => `<tr><td><strong>${esc(p.name)}</strong>${p.image_url && /^https?:\/\//i.test(p.image_url) ? `<br><a href="${esc(p.image_url)}" target="_blank" rel="noopener"><img src="${esc(p.image_url)}" alt="Imagen de ${esc(p.name)}" loading="lazy" style="width:54px;height:54px;object-fit:cover;border-radius:10px;vertical-align:middle"> Ver imagen</a>` : ''}<br><small>${esc(p.description || '')}</small></td><td>${esc(p.category || '—')}</td><td>${money(p.price)}</td><td>${number(p.inventory)}</td><td><span class="pill ${p.is_active ? 'green':'red'}">${p.is_active ? 'Activo':'Inactivo'}</span></td><td><button class="small-button" data-edit-product="${esc(p.id)}">Editar</button> <button class="small-button" data-toggle-product="${esc(p.id)}">${p.is_active ? 'Desactivar':'Activar'}</button></td></tr>`).join('')}</tbody></table></div>`;
+    target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Categoría</th><th>Precio</th><th>Costo unitario</th><th>Margen bruto unitario</th><th>Existencias</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>' +
+      cachedProducts.map(p => {
+        const hasCost = p.cost_price !== null && Number.isFinite(p.cost_price);
+        const margin = hasCost ? Number(p.price) - p.cost_price : null;
+        return '<tr><td><strong>' + esc(p.name) + '</strong>' +
+          (p.image_url && /^https?:\/\//i.test(p.image_url) ? '<br><a href="' + esc(p.image_url) + '" target="_blank" rel="noopener"><img src="' + esc(p.image_url) + '" alt="Imagen de ' + esc(p.name) + '" loading="lazy" style="width:54px;height:54px;object-fit:cover;border-radius:10px;vertical-align:middle"> Ver imagen</a>' : '') +
+          '<br><small>' + esc(p.description || '') + '</small></td><td>' + esc(p.category || '—') + '</td><td>' + money(p.price) +
+          '</td><td>' + (hasCost ? money(p.cost_price) : '<span class="pill red">Sin registrar</span>') +
+          '</td><td>' + (hasCost ? money(margin) : 'Pendiente de costo') +
+          '</td><td>' + number(p.inventory) + '</td><td><span class="pill ' + (p.is_active ? 'green':'red') + '">' +
+          (p.is_active ? 'Activo':'Inactivo') + '</span></td><td><button class="small-button" data-edit-product="' + esc(p.id) +
+          '">Editar</button> <button class="small-button" data-toggle-product="' + esc(p.id) + '">' +
+          (p.is_active ? 'Desactivar':'Activar') + '</button></td></tr>';
+      }).join('') + '</tbody></table></div>';
     target.querySelectorAll('[data-edit-product]').forEach(button => button.addEventListener('click', () => editProduct(button.dataset.editProduct)));
     target.querySelectorAll('[data-toggle-product]').forEach(button => button.addEventListener('click', () => toggleProductStatus(button.dataset.toggleProduct, button)));
   }
@@ -263,35 +570,27 @@
   async function loadTechnical() {
     const result = await callTechnicalFunction({ action: 'list_businesses' });
     cachedBusinesses = result.businesses || [];
-    const [productsResult, ordersResult, auditResult] = await Promise.all([
-      db.from('products').select('id', { count: 'exact', head: true }),
-      db.from('orders').select('id,status,total', { count: 'exact' }),
-      db.from('audit_logs').select('id', { count: 'exact', head: true })
-    ]);
-    if (productsResult.error) throw productsResult.error;
-    if (ordersResult.error) throw ordersResult.error;
+    const auditResult = await db.from('audit_logs').select('id', { count: 'exact', head: true });
     if (auditResult.error) throw auditResult.error;
-    const activeOrders = ordersResult.data || [];
     renderStats([
-      ['Negocios', number(cachedBusinesses.length), `${number(cachedBusinesses.filter(b => b.status === 'active').length)} activos`],
-      ['Productos', number(productsResult.count || 0), 'En todos los negocios'],
-      ['Pedidos', number(ordersResult.count || activeOrders.length), `${number(activeOrders.filter(o => !['delivered','cancelled'].includes(o.status)).length)} abiertos`],
-      ['Ventas registradas', money(activeOrders.reduce((sum,o) => sum + Number(o.total || 0), 0)), 'Total de pedidos consultables'],
-      ['Eventos de auditoría', number(auditResult.count || 0), 'Registros en audit_logs']
+      ['Negocios registrados', number(cachedBusinesses.length), 'Administración de la plataforma'],
+      ['Negocios activos', number(cachedBusinesses.filter(b => b.status === 'active').length), 'Con acceso habilitado'],
+      ['Negocios suspendidos', number(cachedBusinesses.filter(b => b.status === 'suspended').length), 'Requieren revisión o reactivación'],
+      ['Eventos de auditoría', number(auditResult.count || 0), 'Registros de actividad']
     ]);
     const options = `<option value="">Todos los negocios</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (inactivo)'}</option>`).join('');
     const select = document.querySelector('#businessSelect'); if (select) select.innerHTML = options;
     const memberSelect = document.querySelector('#memberBusinessSelect'); if (memberSelect) memberSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+    const assignmentBusinessSelect = document.querySelector('#assignmentBusinessSelect'); if (assignmentBusinessSelect) assignmentBusinessSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
     const suspensionSelect = document.querySelector('#suspensionBusinessSelect'); if (suspensionSelect) suspensionSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (suspendido)'}</option>`).join('');
     const inviteSelect = document.querySelector('#inviteBusinessSelect'); if (inviteSelect) inviteSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.filter(b => b.status === 'active').map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
     renderBusinesses();
     await loadSelectedBusiness('');
     await loadAuditEvents(null, '#auditContainer');
-    const finance = document.querySelector('#financeContainer'); if (finance) finance.innerHTML = '<div class="empty">El módulo financiero global y nómina aún no está conectado al esquema independiente.</div>';
-    const blocks = document.querySelector('#blockRequestsContainer'); if (blocks) blocks.innerHTML = '<div class="empty">Las solicitudes de bloqueo no están disponibles en este proyecto todavía.</div>';
+    await loadFinance();
+    await loadBlockRequests();
     await loadContentModeration();
-    const platformAi = document.getElementById('ia-general');
-    if (platformAi) platformAi.innerHTML = '<div class="section-heading"><div><h2>IA general</h2></div></div><div class="empty">La configuración de IA general aún no está conectada al esquema independiente.</div>';
+    await initPlatformAi();
   }
 
   function renderBusinesses() {
@@ -356,20 +655,22 @@
     message.className = 'message';
     message.textContent = 'Creando negocio y guardando auditoría…';
     try {
-      const result = await callTechnicalFunction(payload);
-      message.className = 'message success';
-      message.textContent = `Negocio creado: ${result.business.name}. Identificador público: ${result.business.slug}. Ahora puedes invitar a su administrador y empleados.`;
+      const result = await callTechnicalFunction({
+        action: 'create_business',
+        name: String(payload.name || '').trim(),
+        category: String(payload.category || '').trim()
+      });
+      message.className = result.audit_warning ? 'message error' : 'message success';
+      message.textContent = result.audit_warning
+        ? `Negocio creado: ${result.business.name} (${result.business.slug}), pero falta registrar la auditoría. ${result.audit_warning}`
+        : `Negocio creado: ${result.business.name}. Identificador público: ${result.business.slug}. Ahora puedes invitar a su administrador y empleados.`;
       form.reset();
-      form.elements.city.value = 'Pereira, Risaralda';
       await loadTechnical();
-      const memberBusinessSelect = document.querySelector('#memberBusinessSelect');
-    if (memberBusinessSelect) memberBusinessSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
-    const suspensionSelect = document.querySelector('#suspensionBusinessSelect');
-    if (suspensionSelect) suspensionSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.is_active ? '' : ' (suspendido)'}</option>`).join('');
-    const inviteSelect = document.querySelector('#inviteBusinessSelect');
+      const inviteSelect = document.querySelector('#inviteBusinessSelect');
       if (inviteSelect) inviteSelect.value = result.business.id;
       const filterSelect = document.querySelector('#businessSelect');
       if (filterSelect) filterSelect.value = result.business.id;
+      await loadSelectedBusiness(result.business.id);
     } catch (error) {
       message.className = 'message error';
       message.textContent = error.message || 'No se pudo crear el negocio.';
@@ -383,15 +684,17 @@
     const message = document.querySelector('#inviteMemberMessage');
     const payload = Object.fromEntries(new FormData(form).entries());
     payload.action = 'invite_member';
-    payload.is_business_owner = form.elements.is_business_owner?.checked === true;
-    payload.redirect_to = new URL('aceptar-invitacion.html', window.location.href).href;
     button.disabled = true;
     message.className = 'message';
     message.textContent = 'Creando invitación y registrando la asignación…';
     try {
       const result = await callTechnicalFunction(payload);
-      message.className = 'message success';
-      message.textContent = `Invitación preparada para ${result.email} como ${result.role === 'business_admin' ? 'administrador' : 'empleado'} de ${result.business}. La persona debe abrir el correo y configurar su contraseña.`;
+      message.className = result.audit_warning ? 'message error' : 'message success';
+      const assignedRole = result.membership?.role === 'business_admin' ? 'administrador' : 'empleado';
+      message.textContent = result.message || (result.invitation_sent
+        ? `Invitación enviada para el nuevo usuario como ${assignedRole}.`
+        : `Usuario existente asignado como ${assignedRole} al negocio.`);
+      if (result.audit_warning) message.textContent += ` Advertencia: ${result.audit_warning}`;
       const keepBusiness = form.elements.business_id.value;
       form.reset();
       form.elements.business_id.value = keepBusiness;
@@ -423,26 +726,57 @@
 
   async function loadSelectedBusiness(id) {
     const ordersTarget = document.querySelector('#businessOrdersContainer');
-    if (!id) {
-      if (ordersTarget) ordersTarget.innerHTML = '<div class="empty">Selecciona un negocio para consultar sus pedidos.</div>';
-      return;
-    }
+    if (!ordersTarget) return;
     const business = cachedBusinesses.find(b => b.id === id);
-    if (!business) return;
-    const { data, error } = await db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,payment_status,status,total,created_at,order_items(product_name,quantity)').eq('business_id', id).order('created_at', { ascending: false }).limit(100);
-    if (error) showError(ordersTarget, error);
-    else renderOrders(ordersTarget, (data || []).map(o => ({ ...o, items: o.order_items || [] })), true);
+    ordersTarget.innerHTML = business
+      ? '<div class="empty">El panel técnico administra el negocio y sus accesos. Los pedidos, clientes, productos y movimientos comerciales solo se consultan desde el panel de ese negocio.</div>'
+      : '<div class="empty">Selecciona un negocio para administrar sus usuarios y accesos. La información comercial permanece en su panel administrativo.</div>';
   }
 
-  async function loadTechnicalMembers(id) {
-    const target = document.querySelector('#memberTargetSelect'); if (!target) return;
+  async function loadTechnicalMembers(id, targetSelector = '#memberTargetSelect') {
+    const target = document.querySelector(targetSelector); if (!target) return;
     target.innerHTML = '<option value="">Cargando cuentas…</option>';
     if (!id) { target.innerHTML = '<option value="">Selecciona primero un negocio</option>'; return; }
     try {
       const result = await callTechnicalFunction({ action: 'list_business_members', business_id: id });
       const rows = result.members || [];
-      target.innerHTML = '<option value="">Selecciona una cuenta</option>' + rows.map(m => `<option value="${esc(m.id)}">${esc(m.profiles?.display_name || shortId(m.user_id))} · ${m.role === 'business_admin' ? 'Administrador' : 'Empleado'}${m.status !== 'active' ? ' · Suspendido' : ''}</option>`).join('');
+      target.innerHTML = '<option value="">Selecciona una cuenta</option>' + rows.map(m => `<option value="${esc(m.id)}" data-role="${esc(m.role)}" data-job-title="${esc(m.job_title || '')}">${esc(m.profiles?.display_name || shortId(m.user_id))} · ${esc(m.email || 'sin correo')} · ${m.role === 'business_admin' ? 'Administrador' : 'Empleado'} · ${esc(m.job_title || 'Cargo no registrado')}${m.status !== 'active' ? ' · Suspendido' : ''}</option>`).join('');
     } catch (error) { target.innerHTML = '<option value="">No se pudieron cargar las cuentas</option>'; }
+  }
+
+  function fillMemberAssignment() {
+    const form = document.querySelector('#memberAssignmentForm');
+    const selected = form?.elements.membership_id?.selectedOptions?.[0];
+    if (!form || !selected) return;
+    form.elements.role.value = selected.dataset.role || 'employee';
+    form.elements.job_title.value = selected.dataset.jobTitle || '';
+  }
+
+  async function saveMemberAssignment(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#memberAssignmentMessage');
+    const payload = {
+      action: 'update_member_assignment',
+      membership_id: form.elements.membership_id.value,
+      role: form.elements.role.value,
+      job_title: form.elements.job_title.value.trim()
+    };
+    if (!payload.membership_id || payload.job_title.length < 2) {
+      message.textContent = 'Selecciona una cuenta y escribe el cargo.';
+      message.className = 'message error';
+      return;
+    }
+    try {
+      const result = await callTechnicalFunction(payload);
+      message.textContent = result.message || 'Asignación actualizada.';
+      if (result.audit_warning) message.textContent += ` Advertencia: ${result.audit_warning}`;
+      message.className = result.audit_warning ? 'message error' : 'message success';
+      await loadTechnicalMembers(form.elements.business_id.value, '#assignmentMemberSelect');
+    } catch (error) {
+      message.textContent = error.message || 'No se pudo actualizar la asignación.';
+      message.className = 'message error';
+    }
   }
 
   async function saveMemberStatus(event) {
@@ -463,7 +797,8 @@
         reason
       });
       message.textContent = result.message || (suspended ? 'Acceso suspendido.' : 'Acceso reactivado.');
-      message.className = 'message success';
+      if (result.audit_warning) message.textContent += ` Advertencia: ${result.audit_warning}`;
+      message.className = result.audit_warning ? 'message error' : 'message success';
       await loadTechnicalMembers(form.elements.business_id.value);
     } catch (error) {
       message.textContent = error.message || 'No se pudo cambiar el acceso.';
@@ -486,37 +821,87 @@
   }
 
   async function initPlatformAi() {
-    const form = document.querySelector('#platformAiForm'); if (!form) return;
-    const [aiResult, supportResult] = await Promise.all([
-      db.from('platform_ai_settings').select('enabled,assistant_name,system_instructions,settings').eq('id', true).maybeSingle(),
-      db.from('platform_public_settings').select('support_whatsapp').eq('id', true).maybeSingle()
-    ]);
-    if (aiResult.error) { document.querySelector('#platformAiMessage').textContent = 'No se pudo leer la configuración: ' + aiResult.error.message; return; }
-    const data = aiResult.data;
-    form.elements.support_whatsapp.value = supportResult.data?.support_whatsapp || data?.settings?.support_whatsapp || '';
-    form.elements.assistant_name.value = data?.assistant_name || 'Asistente general de MiEje Market';
-    form.elements.system_instructions.value = data?.system_instructions || '';
-    form.elements.enabled.checked = Boolean(data?.enabled);
+    const form = document.querySelector('#platformAiForm');
+    if (!form) return;
+    const message = document.querySelector('#platformAiMessage');
+    let aiSettings = {};
+    let publicSettings = {};
+    try {
+      const [aiResult, publicResult] = await Promise.all([
+        callTechnicalFunction({ action: 'get_platform_ai_settings' }),
+        callTechnicalFunction({ action: 'get_platform_public_settings' })
+      ]);
+      aiSettings = aiResult?.settings || {};
+      publicSettings = publicResult?.settings || {};
+    } catch (error) {
+      if (message) {
+        message.textContent = 'No se pudo cargar toda la configuración general. Comprueba que las migraciones y la función técnica estén actualizadas: ' + (error.message || 'Error de consulta.');
+        message.className = 'message error';
+      }
+    }
+    form.elements.site_name.value = publicSettings.site_name || 'MiEje Market';
+    form.elements.site_description.value = publicSettings.site_description || '';
+    form.elements.logo_url.value = publicSettings.logo_url || '';
+    form.elements.hero_image_url.value = publicSettings.hero_image_url || '';
+    form.elements.support_whatsapp.value = publicSettings.support_whatsapp || '';
+    form.elements.assistant_name.value = aiSettings.assistant_name || 'Asistente general de MiEje Market';
+    form.elements.system_instructions.value = aiSettings.system_instructions || '';
+    form.elements.enabled.checked = Boolean(aiSettings.enabled);
   }
 
   async function savePlatformAi(event) {
-    event.preventDefault(); const form = event.currentTarget, message = document.querySelector('#platformAiMessage');
-    const { data: old } = await db.from('platform_ai_settings').select('settings').eq('id', true).maybeSingle();
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#platformAiMessage');
     const support = form.elements.support_whatsapp.value.replace(/[^0-9]/g, '').slice(0, 18);
-    const payload = { id: true, enabled: form.elements.enabled.checked, assistant_name: form.elements.assistant_name.value.trim(), system_instructions: form.elements.system_instructions.value.trim(), settings: { ...(old?.settings || {}), support_whatsapp: support }, updated_by: currentUser.id, updated_at: new Date().toISOString() };
-    const { error } = await db.from('platform_ai_settings').upsert(payload, { onConflict: 'id' });
-    if (error) { message.textContent = `No se pudo guardar: ${error.message}`; message.className = 'message error'; return; }
-    const { error: supportError } = await db.from('platform_public_settings').upsert({ id: true, support_whatsapp: support, updated_by: currentUser.id, updated_at: new Date().toISOString() }, { onConflict: 'id' });
-    message.textContent = supportError ? `IA guardada, pero falló el número de soporte: ${supportError.message}` : 'Configuración general y WhatsApp de soporte guardados.'; message.className = supportError ? 'message error' : 'message success';
+    let aiSaved = false;
+    try {
+      const aiResult = await callTechnicalFunction({
+        action: 'update_platform_ai_settings',
+        enabled: form.elements.enabled.checked,
+        assistant_name: form.elements.assistant_name.value.trim(),
+        system_instructions: form.elements.system_instructions.value.trim()
+      });
+      aiSaved = true;
+      const publicResult = await callTechnicalFunction({
+        action: 'update_platform_public_settings',
+        site_name: form.elements.site_name.value.trim(),
+        site_description: form.elements.site_description.value.trim(),
+        logo_url: form.elements.logo_url.value.trim(),
+        hero_image_url: form.elements.hero_image_url.value.trim(),
+        support_whatsapp: support
+      });
+      message.textContent = [
+        publicResult.message || 'Configuración general guardada.',
+        aiResult.audit_warning,
+        publicResult.audit_warning
+      ].filter(Boolean).join(' ');
+      message.className = aiResult.audit_warning || publicResult.audit_warning ? 'message error' : 'message success';
+    } catch (error) {
+      message.textContent = aiSaved
+        ? 'La configuración del asistente se guardó, pero no se completó la configuración pública: ' + (error.message || 'Error desconocido.')
+        : (error.message || 'No se pudo guardar la configuración general.');
+      message.className = 'message error';
+    }
   }
 
   async function showSupportLink() {
     const link = document.querySelector('#technicalSupportLink');
     if (!link) return;
+    const message = document.querySelector('#technicalSupportMessage');
     link.href = '#';
     link.classList.add('hidden');
-    const message = document.querySelector('#technicalSupportMessage');
-    if (message) message.textContent = 'El número de soporte de la plataforma aún no está configurado en el proyecto independiente.';
+    try {
+      const { data, error } = await db.functions.invoke('get-platform-public-settings', { body: {} });
+      if (error || !data?.ok) throw new Error(data?.error || error?.message || 'No se pudo consultar el contacto técnico.');
+      const number = String(data.settings?.support_whatsapp || '').replace(/[^0-9]/g, '');
+      if (!number) throw new Error('El WhatsApp del técnico todavía no está configurado.');
+      link.href = 'https://wa.me/' + number;
+      link.classList.remove('hidden');
+      if (message) message.textContent = 'Soporte técnico oficial de MiEje Market.';
+    } catch (error) {
+      if (message) message.textContent = error.message || 'No se pudo cargar el contacto técnico.';
+    }
   }
 
   async function initBusinessSettings() {
@@ -548,15 +933,7 @@
       const message = document.querySelector('#storeSettingsMessage');
       if (message) { message.textContent = 'No se pudieron cargar los métodos de pago: ' + methodsResult.error.message; message.className = 'message error'; }
     }
-    const pending = [
-      ['ia-negocio', 'IA exclusiva del negocio', 'La configuración de IA por negocio aún no está implementada en la base independiente.'],
-      ['solicitudes-bloqueo', 'Solicitudes de bloqueo', 'Las solicitudes de bloqueo desde el panel del negocio todavía no están implementadas en el servidor.']
-    ];
     await Promise.all([loadBusinessContent(), loadJobApplications()]);
-    for (const [id, heading, message] of pending) {
-      const section = document.getElementById(id);
-      if (section) section.innerHTML = `<div class="section-heading"><div><h2>${heading}</h2></div></div><div class="empty">${message}</div>`;
-    }
   }
 
   async function saveStoreSettings(event) {
@@ -567,6 +944,15 @@
     const name = value('name');
     const city = value('city');
     const category = value('category');
+    const paymentEntries = value('payment_methods').split('\n').map(line => {
+      const parts = line.split('|');
+      return { displayName: (parts.shift() || '').trim(), publicInstructions: parts.join('|').trim() };
+    }).filter(item => item.displayName.length >= 2 && item.displayName.length <= 100);
+    if (!paymentEntries.length) {
+      message.textContent = 'Configura al menos un método de pago para que los clientes puedan completar sus pedidos.';
+      message.className = 'message error';
+      return;
+    }
     if (!name || !city || !category) {
       message.textContent = 'El nombre, la categoría y la ciudad son obligatorios.';
       message.className = 'message error';
@@ -596,7 +982,6 @@
     message.textContent = logoFile ? 'Subiendo logo y guardando configuración…' : 'Guardando datos del negocio…';
     message.className = 'message';
     try {
-      if (logoFile) uploadedLogo = await uploadBusinessImage(logoFile, 'logo');
       const openingHours = {};
       const weekdays = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
       for (const day of weekdays) {
@@ -610,6 +995,9 @@
         }
         openingHours[day] = enabled ? { open: open, close: close, closed: false } : { closed: true };
       }
+      // Subir el archivo solo después de validar todos los horarios para no
+      // dejar objetos huérfanos cuando el formulario tenga datos inválidos.
+      if (logoFile) uploadedLogo = await uploadBusinessImage(logoFile, 'logo');
       const businessPayload = {
         name,
         category,
@@ -623,16 +1011,14 @@
         delivery_fee: deliveryFee,
         minimum_order_amount: minimumOrder,
       };
-      const { error: businessError } = await db.from('businesses').update(businessPayload).eq('id', businessId);
-      if (businessError) {
+      const { data: updatedBusiness, error: businessError } = await db.from('businesses')
+        .update(businessPayload).eq('id', businessId).select('id').maybeSingle();
+      if (businessError || !updatedBusiness) {
         await removeUploadedBusinessImage(uploadedLogo?.path);
-        throw new Error('No se pudieron guardar los datos del negocio: ' + businessError.message);
+        throw new Error('No se pudieron guardar los datos del negocio: ' + (businessError?.message || 'No se encontró el negocio o no tienes permiso para modificarlo.'));
       }
       try {
-        const entries = value('payment_methods').split('\n').map(line => {
-          const parts = line.split('|');
-          return { displayName: (parts.shift() || '').trim(), publicInstructions: parts.join('|').trim() };
-        }).filter(item => item.displayName.length >= 2 && item.displayName.length <= 100);
+        const entries = paymentEntries;
         const methodCodeFor = label => {
           const normalized = label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
           if (normalized.includes('efectivo') || normalized.includes('contra entrega')) return 'cash';
@@ -654,10 +1040,10 @@
         for (const method of methods) {
           const old = byCode.get(method.methodCode)?.shift();
           if (old) {
-            const { error } = await db.from('business_payment_methods').update({
+            const { data: updatedMethod, error } = await db.from('business_payment_methods').update({
               display_name: method.displayName, public_instructions: method.publicInstructions || null, is_enabled: true, sort_order: method.sortOrder, updated_at: new Date().toISOString()
-            }).eq('id', old.id).eq('business_id', businessId);
-            if (error) throw error;
+            }).eq('id', old.id).eq('business_id', businessId).select('id').maybeSingle();
+            if (error || !updatedMethod) throw new Error(error?.message || 'No se pudo actualizar un método de pago del negocio.');
             retained.add(old.id);
           } else {
             const { error } = await db.from('business_payment_methods').insert({
@@ -669,8 +1055,8 @@
         }
         for (const old of (existing || [])) {
           if (!retained.has(old.id) && old.is_enabled) {
-            const { error } = await db.from('business_payment_methods').update({ is_enabled: false, updated_at: new Date().toISOString() }).eq('id', old.id).eq('business_id', businessId);
-            if (error) throw error;
+            const { data: disabledMethod, error } = await db.from('business_payment_methods').update({ is_enabled: false, updated_at: new Date().toISOString() }).eq('id', old.id).eq('business_id', businessId).select('id').maybeSingle();
+            if (error || !disabledMethod) throw new Error(error?.message || 'No se pudo desactivar un método de pago anterior.');
           }
         }
         message.textContent = 'Datos del negocio, métodos de pago y logo guardados correctamente.';
@@ -790,47 +1176,300 @@
     }));
   }
 
+  async function initBusinessAi() {
+    const form = document.querySelector('#businessAiForm');
+    if (!form) return;
+    const message = document.querySelector('#businessAiMessage');
+    const { data, error } = await db.from('business_ai_settings')
+      .select('enabled,assistant_name,instructions')
+      .eq('business_id', businessId)
+      .maybeSingle();
+    if (error) {
+      if (message) {
+        message.textContent = 'No se pudo cargar la configuración de IA de este negocio: ' + error.message;
+        message.className = 'message error';
+      }
+      return;
+    }
+    form.elements.enabled.checked = Boolean(data?.enabled);
+    form.elements.assistant_name.value = data?.assistant_name || 'Asistente del negocio';
+    form.elements.instructions.value = data?.instructions || '';
+  }
+
   async function saveBusinessAi(event) {
     event.preventDefault(); const form=event.currentTarget, message=document.querySelector('#businessAiMessage');
     const payload={business_id:businessId,enabled:form.elements.enabled.checked,assistant_name:form.elements.assistant_name.value.trim(),instructions:form.elements.instructions.value.trim(),updated_by:currentUser.id,updated_at:new Date().toISOString()};
     const {error}=await db.from('business_ai_settings').upsert(payload,{onConflict:'business_id'}); message.textContent=error?`No se pudo guardar: ${error.message}`:'Configuración de IA de este negocio guardada por separado de la IA general.'; message.className=error?'message error':'message success';
   }
 
+  async function loadBlockTargetUsers() {
+    const target = document.querySelector('#blockTargetUser');
+    if (!target) return;
+    if (panel !== 'business_admin' || !isBusinessOwner) {
+      target.closest('form')?.classList.add('hidden');
+      const note = document.querySelector('#blockRequestOwnerNote');
+      if (note) note.classList.remove('hidden');
+      return;
+    }
+    target.innerHTML = '<option value="">Cargando usuarios del negocio…</option>';
+    const { data, error } = await db.from('business_memberships')
+      .select('user_id,role,profiles(display_name)')
+      .eq('business_id', businessId)
+      .eq('status', 'active')
+      .neq('user_id', currentUser.id)
+      .order('created_at', { ascending: true });
+    if (error) {
+      target.innerHTML = '<option value="">No se pudieron cargar los usuarios</option>';
+      const message = document.querySelector('#blockRequestMessage');
+      if (message) { message.textContent = 'No fue posible consultar las cuentas activas del negocio.'; message.className = 'message error'; }
+      console.warn('Block request target users:', error);
+      return;
+    }
+    const users = data || [];
+    target.innerHTML = '<option value="">Selecciona una cuenta</option>' + users.map(member => {
+      const profile = Array.isArray(member.profiles) ? member.profiles[0] : member.profiles;
+      const name = profile?.display_name || shortId(member.user_id);
+      const role = member.role === 'business_admin' ? 'Administrador' : 'Empleado';
+      return `<option value="${esc(member.user_id)}">${esc(name)} · ${role}</option>`;
+    }).join('');
+    if (!users.length) target.innerHTML = '<option value="">No hay otras cuentas activas en este negocio</option>';
+  }
+
   async function submitBlockRequest(event) {
-    event.preventDefault(); const form=event.currentTarget, message=document.querySelector('#blockRequestMessage');
-    const payload={business_id:businessId,requested_by:currentUser.id,target_user_id:form.elements.target_user_id.value,reason:form.elements.reason.value.trim()};
-    const {error}=await db.from('access_block_requests').insert(payload); message.textContent=error?`No se pudo enviar la solicitud: ${error.message}`:'Solicitud enviada al servicio técnico. El acceso no se bloquea hasta que el técnico la revise.'; message.className=error?'message error':'message success'; if(!error) form.reset();
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#blockRequestMessage');
+    const button = form.querySelector('button[type="submit"]');
+    const targetUserId = form.elements.target_user_id.value;
+    const reason = form.elements.reason.value.trim();
+    if (panel !== 'business_admin' || !isBusinessOwner) {
+      message.textContent = 'Solo el administrador del negocio puede solicitar este bloqueo.';
+      message.className = 'message error';
+      return;
+    }
+    if (!targetUserId || targetUserId === currentUser.id || reason.length < 5) {
+      message.textContent = 'Selecciona otra cuenta activa y escribe un motivo de al menos cinco caracteres.';
+      message.className = 'message error';
+      return;
+    }
+    button.disabled = true;
+    try {
+      const { error } = await db.from('access_block_requests').insert({
+        business_id: businessId,
+        requested_by: currentUser.id,
+        target_user_id: targetUserId,
+        reason
+      });
+      if (error) throw error;
+      message.textContent = 'Solicitud enviada al servicio técnico. El acceso no se bloquea hasta que el propietario técnico la revise.';
+      message.className = 'message success';
+      form.reset();
+      await loadBlockTargetUsers();
+    } catch (error) {
+      message.textContent = error.message || 'No se pudo enviar la solicitud.';
+      message.className = 'message error';
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function populateFinanceBusinessOptions() {
+    document.querySelectorAll('#platformFinanceForm select[name="business_id"], #payrollForm select[name="business_id"]').forEach(select => {
+      const selected = select.value;
+      select.innerHTML = '<option value="">Plataforma</option>' + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+      select.value = selected;
+    });
   }
 
   async function loadFinance() {
     const target = document.querySelector('#financeContainer');
-    const [financeResult, payrollResult] = await Promise.all([
-      db.from('platform_financial_records').select('business_id,record_type,description,amount,currency,occurred_at').order('occurred_at', { ascending: false }).limit(30),
-      db.from('payroll_records').select('business_id,payee_name,description,amount,currency,status,paid_at,created_at').order('created_at', { ascending: false }).limit(30)
-    ]);
-    if (financeResult.error) return showError(target, financeResult.error);
-    if (payrollResult.error) return showError(target, payrollResult.error);
-    const businessMap = new Map(cachedBusinesses.map(b => [b.id, b.name]));
-    const finance = financeResult.data || [];
-    const payroll = payrollResult.data || [];
-    target.innerHTML = `<div class="split"><div><div class="section-heading"><h3>Movimientos financieros</h3></div>${finance.length ? tableHtml(['Fecha','Negocio','Tipo','Descripción','Importe'], finance.map(r => [dateTime(r.occurred_at), r.business_id ? businessMap.get(r.business_id) || 'Negocio' : 'Plataforma', r.record_type, r.description, money(r.amount)])) : '<div class="empty">Sin movimientos financieros registrados.</div>'}</div><div><div class="section-heading"><h3>Nómina y honorarios</h3></div>${payroll.length ? tableHtml(['Fecha','Beneficiario','Descripción','Importe','Estado'], payroll.map(r => [dateTime(r.paid_at || r.created_at), r.payee_name, r.description, money(r.amount), r.status])) : '<div class="empty">Sin registros de nómina.</div>'}</div></div>`;
+    if (!target) return;
+    target.innerHTML = '<div class="empty">Cargando finanzas y nómina…</div>';
+    try {
+      const result = await callTechnicalFunction({ action: 'list_platform_finance' });
+      const finance = result.financial_records || [];
+      const payroll = result.payroll_records || [];
+      const businessMap = new Map(cachedBusinesses.map(b => [b.id, b.name]));
+      populateFinanceBusinessOptions();
+      const financeHtml = finance.length
+        ? tableHtml(['Fecha','Negocio','Tipo','Descripción','Importe','Referencia'], finance.map(r => [
+            dateTime(r.occurred_at),
+            r.business_id ? businessMap.get(r.business_id) || 'Negocio' : 'Plataforma',
+            ({ income: 'Ingreso', expense: 'Gasto', refund: 'Reembolso', adjustment: 'Ajuste' })[r.record_type] || r.record_type,
+            r.description,
+            money(r.amount),
+            r.reference || '—'
+          ]))
+        : '<div class="empty">Todavía no hay movimientos financieros registrados.</div>';
+      const payrollHtml = payroll.length
+        ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Beneficiario</th><th>Concepto</th><th>Importe</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${payroll.map(r => `<tr>
+            <td>${dateTime(r.paid_at || r.due_date || r.created_at)}</td>
+            <td>${esc(r.payee_name)}</td>
+            <td>${esc(r.description)}</td>
+            <td>${money(r.amount)}</td>
+            <td>${({ pending: 'Pendiente', paid: 'Registrado como pagado', cancelled: 'Cancelado' })[r.status] || esc(r.status)}</td>
+            <td>${r.status === 'pending'
+              ? `<button class="small-button" data-payroll-action="paid" data-payroll-id="${esc(r.id)}">Registrar pago</button> <button class="small-button" data-payroll-action="cancelled" data-payroll-id="${esc(r.id)}">Cancelar</button>`
+              : '—'}</td>
+          </tr>`).join('')}</tbody></table></div>`
+        : '<div class="empty">Todavía no hay obligaciones de nómina registradas.</div>';
+      target.innerHTML = `<div class="section-heading"><h3>Movimientos financieros</h3></div>${financeHtml}<div class="section-heading"><h3>Nómina y honorarios</h3></div>${payrollHtml}`;
+      target.querySelectorAll('[data-payroll-action]').forEach(button => button.addEventListener('click', async () => {
+        const decision = button.dataset.payrollAction;
+        if (decision === 'cancelled' && !window.confirm('¿Cancelar esta obligación de nómina?')) return;
+        const reference = decision === 'paid' ? (window.prompt('Referencia del comprobante (opcional):', '') || '') : '';
+        button.disabled = true;
+        try {
+          const response = await callTechnicalFunction({
+            action: 'resolve_payroll_record',
+            record_id: button.dataset.payrollId,
+            decision,
+            payment_reference: reference
+          });
+          alert(response.message || 'Registro actualizado.');
+          await loadFinance();
+          await loadAuditEvents(null, '#auditContainer');
+        } catch (error) {
+          alert(error.message || 'No se pudo actualizar el registro.');
+          button.disabled = false;
+        }
+      }));
+    } catch (error) {
+      showError(target, error);
+    }
+  }
+
+  async function createPlatformFinancialRecord(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#platformFinanceMessage');
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      const response = await callTechnicalFunction({
+        action: 'create_platform_financial_record',
+        record_type: form.elements.record_type.value,
+        business_id: form.elements.business_id.value || null,
+        description: form.elements.description.value.trim(),
+        amount: form.elements.amount.value,
+        occurred_at: form.elements.occurred_at.value ? new Date(form.elements.occurred_at.value).toISOString() : null,
+        reference: form.elements.reference.value.trim() || null,
+        currency: 'COP'
+      });
+      message.textContent = response.audit_warning || 'Movimiento financiero guardado.';
+      message.className = response.audit_warning ? 'message error' : 'message success';
+      form.reset();
+      await loadFinance();
+      await loadAuditEvents(null, '#auditContainer');
+    } catch (error) {
+      message.textContent = error.message || 'No se pudo guardar el movimiento.';
+      message.className = 'message error';
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function createPayrollRecord(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#payrollMessage');
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      const response = await callTechnicalFunction({
+        action: 'create_payroll_record',
+        payee_name: form.elements.payee_name.value.trim(),
+        business_id: form.elements.business_id.value || null,
+        description: form.elements.description.value.trim(),
+        amount: form.elements.amount.value,
+        due_date: form.elements.due_date.value || null,
+        currency: 'COP'
+      });
+      message.textContent = response.audit_warning || 'Obligación de nómina guardada.';
+      message.className = response.audit_warning ? 'message error' : 'message success';
+      form.reset();
+      await loadFinance();
+      await loadAuditEvents(null, '#auditContainer');
+    } catch (error) {
+      message.textContent = error.message || 'No se pudo guardar la obligación.';
+      message.className = 'message error';
+    } finally {
+      button.disabled = false;
+    }
   }
 
   async function loadContentModeration() {
-    const target=document.querySelector('#contentModerationContainer'); if(!target) return;
-    const {data,error}=await db.from('business_content_pages').select('id,business_id,content_type,title,body,is_published,moderation_status,created_at,businesses(name)').order('created_at',{ascending:false}).limit(100);
-    if(error){showError(target,error);return;} const rows=data||[]; if(!rows.length){target.innerHTML='<div class="empty">No hay publicaciones enviadas por los negocios.</div>';return;}
-    target.innerHTML=`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Negocio</th><th>Tipo</th><th>Título y contenido</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${dateTime(r.created_at)}</td><td>${esc(r.businesses?.name||shortId(r.business_id))}</td><td>${esc(r.content_type)}</td><td><strong>${esc(r.title)}</strong><br>${esc(r.body)}</td><td>${esc(r.moderation_status||'pending')}</td><td>${r.moderation_status!=='approved'?`<button class="small-button" data-moderate-content="${esc(r.id)}" data-decision="approved">Aprobar</button>`:''} ${r.moderation_status!=='rejected'?`<button class="small-button" data-moderate-content="${esc(r.id)}" data-decision="rejected">Rechazar</button>`:'—'}</td></tr>`).join('')}</tbody></table></div>`;
-    target.querySelectorAll('[data-moderate-content]').forEach(btn=>btn.addEventListener('click',async()=>{const note=window.prompt('Nota de revisión (opcional):','')||'';btn.disabled=true;try{const result=await callTechnicalFunction({action:'moderate_business_content',content_id:btn.dataset.moderateContent,decision:btn.dataset.decision,moderation_note:note});alert(result.message);await loadContentModeration();await loadAuditEvents(null,'#auditContainer');}catch(e){alert(e.message);btn.disabled=false;}}));
+    const target = document.querySelector('#contentModerationContainer');
+    if (!target) return;
+    target.innerHTML = '<div class="empty">Cargando publicaciones para revisión…</div>';
+    try {
+      // La moderación técnica usa la Edge Function privilegiada; no abre
+      // lectura global de business_content_pages mediante el Data API/RLS.
+      const result = await callTechnicalFunction({ action: 'list_content_moderation', limit: 100 });
+      const rows = result.contents || [];
+      if (!rows.length) {
+        target.innerHTML = '<div class="empty">No hay publicaciones enviadas por los negocios.</div>';
+        return;
+      }
+      target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Negocio</th><th>Tipo</th><th>Título y contenido</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${rows.map(r => `<tr><td>${dateTime(r.created_at)}</td><td>${esc(r.businesses?.name || shortId(r.business_id))}</td><td>${esc(r.content_type)}</td><td><strong>${esc(r.title)}</strong><br>${esc(r.body)}</td><td>${esc(r.moderation_status || 'pending')}</td><td>${r.moderation_status !== 'approved' ? `<button class="small-button" data-moderate-content="${esc(r.id)}" data-decision="approved">Aprobar</button>` : ''} ${r.moderation_status !== 'rejected' ? `<button class="small-button" data-moderate-content="${esc(r.id)}" data-decision="rejected">Rechazar</button>` : '—'}</td></tr>`).join('')}</tbody></table></div>`;
+      target.querySelectorAll('[data-moderate-content]').forEach(btn => btn.addEventListener('click', async () => {
+        const note = window.prompt('Nota de revisión (opcional):', '') || '';
+        btn.disabled = true;
+        try {
+          const actionResult = await callTechnicalFunction({
+            action: 'moderate_business_content',
+            content_id: btn.dataset.moderateContent,
+            decision: btn.dataset.decision,
+            moderation_note: note
+          });
+          alert(actionResult.message);
+          await loadContentModeration();
+          await loadAuditEvents(null, '#auditContainer');
+        } catch (error) {
+          alert(error.message);
+          btn.disabled = false;
+        }
+      }));
+    } catch (error) {
+      showError(target, error);
+    }
   }
 
   async function loadBlockRequests() {
-    const target=document.querySelector('#blockRequestsContainer'); if(!target) return;
-    const {data,error}=await db.from('access_block_requests').select('id,business_id,requested_by,target_user_id,reason,status,created_at,businesses(name)').order('created_at',{ascending:false}).limit(100);
-    if(error){showError(target,error);return;} const rows=data||[]; if(!rows.length){target.innerHTML='<div class="empty">No hay solicitudes de bloqueo pendientes.</div>';return;}
-    const names=await getUserNames(rows.flatMap(r=>[r.requested_by,r.target_user_id]));
-    target.innerHTML=`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Negocio</th><th>Solicitante</th><th>Cuenta solicitada</th><th>Motivo</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${dateTime(r.created_at)}</td><td>${esc(r.businesses?.name||shortId(r.business_id))}</td><td>${esc(names.get(r.requested_by)||shortId(r.requested_by))}</td><td>${esc(names.get(r.target_user_id)||shortId(r.target_user_id))}</td><td>${esc(r.reason)}</td><td>${esc(r.status)}</td><td>${r.status==='pending'?`<button class="small-button" data-request-resolve="${esc(r.id)}" data-decision="approved">Bloquear cuenta</button> <button class="small-button" data-request-resolve="${esc(r.id)}" data-decision="rejected">Rechazar</button>`:'—'}</td></tr>`).join('')}</tbody></table></div>`;
-    target.querySelectorAll('[data-request-resolve]').forEach(btn=>btn.addEventListener('click',async()=>{ const note=window.prompt('Nota del servicio técnico (opcional):','')||''; btn.disabled=true; try{const result=await callTechnicalFunction({action:'resolve_block_request',request_id:btn.dataset.requestResolve,decision:btn.dataset.decision,technician_note:note}); alert(result.message); await loadBlockRequests(); await loadTechnical();}catch(e){alert(e.message);btn.disabled=false;} }));
+    const target = document.querySelector('#blockRequestsContainer');
+    if (!target) return;
+    target.innerHTML = '<div class="empty">Cargando solicitudes de bloqueo…</div>';
+    try {
+      const result = await callTechnicalFunction({ action: 'list_block_requests' });
+      const rows = result.requests || [];
+      if (!rows.length) {
+        target.innerHTML = '<div class="empty">No hay solicitudes de bloqueo registradas.</div>';
+        return;
+      }
+      target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Negocio</th><th>Solicitante</th><th>Cuenta solicitada</th><th>Motivo</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${rows.map(r => `<tr><td>${dateTime(r.created_at)}</td><td>${esc(r.businesses?.name || shortId(r.business_id))}</td><td>${esc(r.requested_by_name || shortId(r.requested_by))}</td><td>${esc(r.target_user_name || shortId(r.target_user_id))}</td><td>${esc(r.reason)}</td><td>${esc(r.status)}</td><td>${r.status === 'pending' ? `<button class="small-button" data-request-resolve="${esc(r.id)}" data-decision="approved">Bloquear acceso</button> <button class="small-button" data-request-resolve="${esc(r.id)}" data-decision="rejected">Rechazar</button>` : esc(r.technician_note || 'Resuelta')}</td></tr>`).join('')}</tbody></table></div>`;
+      target.querySelectorAll('[data-request-resolve]').forEach(button => button.addEventListener('click', async () => {
+        const decision = button.dataset.decision;
+        const note = window.prompt('Nota del servicio técnico (opcional):', '') || '';
+        if (decision === 'approved' && !window.confirm('Se suspenderá únicamente la membresía de esta persona en el negocio indicado. ¿Deseas continuar?')) return;
+        button.disabled = true;
+        try {
+          const result = await callTechnicalFunction({
+            action: 'resolve_block_request',
+            request_id: button.dataset.requestResolve,
+            decision,
+            technician_note: note
+          });
+          alert(result.message);
+          await loadBlockRequests();
+          await loadTechnical();
+        } catch (error) {
+          alert(error.message || 'No se pudo resolver la solicitud.');
+          button.disabled = false;
+        }
+      }));
+    } catch (error) {
+      showError(target, error);
+    }
   }
 
   async function loadAccessEvents(id, selector) {
@@ -871,22 +1510,223 @@
     if (!orders.length) { target.innerHTML = '<div class="empty">No hay pedidos registrados en este negocio.</div>'; return; }
     const rows = orders.map(o => {
       const items = Array.isArray(o.items) ? o.items.map(i => `${esc(i.product_name)} × ${esc(i.quantity)}`).join('<br>') : '';
-      const action = nextStatus[o.status] ? `<button class="small-button" data-next="${nextStatus[o.status]}" data-order="${esc(o.id)}">Marcar: ${statusLabels[nextStatus[o.status]]}</button>` : '—';
-      const base = [esc(`#${o.order_number}`), esc(o.customer_name || 'Cliente'), esc(o.customer_phone || '—'), esc(o.delivery_address || '—') + (o.delivery_notes ? `<br><small>${esc(o.delivery_notes)}</small>` : ''), items || 'Sin detalle', `<span class="pill ${statusClass[o.status] || ''}">${statusLabels[o.status] || esc(o.status)}</span>`, dateTime(o.created_at)];
-      if (admin) base.splice(5, 0, `${money(o.total)}<br><small>${esc(o.payment_status || '—')}</small>`);
+      const paymentAction = admin && o.payment_status === 'pending' && o.status !== 'cancelled'
+        ? ` <button class="small-button" data-mark-payment="${esc(o.id)}" data-payment-method="${esc(o.payment_method || '')}">Confirmar pago recibido</button>`
+        : '';
+      const action = `${nextStatus[o.status] ? `<button class="small-button" data-next="${nextStatus[o.status]}" data-order="${esc(o.id)}">Marcar: ${statusLabels[nextStatus[o.status]]}</button>` : ''}${paymentAction}${!['delivered','cancelled'].includes(o.status) ? ` <button class="small-button" data-cancel-request="${esc(o.id)}">Solicitar cancelación</button>` : ''}` || '—';
+      const base = [esc(`#${o.order_number}`), esc(o.customer_name || 'Cliente'), esc(o.customer_phone || '—'), esc(o.delivery_address || '—') + (o.delivery_notes ? `<br><small>${esc(o.delivery_notes)}</small>` : '') + (o.delivery_tracking ? `<br><small>Seguimiento: ${esc(o.delivery_tracking)}</small>` : ''), items || 'Sin detalle', `<span class="pill ${statusClass[o.status] || ''}">${statusLabels[o.status] || esc(o.status)}</span>`, dateTime(o.created_at)];
+      if (admin) base.splice(5, 0, `${money(o.total)}<br><small>${esc(o.payment_status || '—')} · ${esc(o.payment_method || '—')}</small>`);
       base.push(action);
       return base;
     });
     const headers = admin ? ['Pedido','Cliente','Teléfono','Entrega','Productos','Total / pago','Estado','Creado','Acción'] : ['Pedido','Cliente','Teléfono','Entrega','Productos','Estado','Creado','Acción'];
     target.innerHTML = tableHtml(headers, rows);
     target.querySelectorAll('[data-next][data-order]').forEach(button => button.addEventListener('click', () => changeOrderStatus(button.dataset.order, button.dataset.next, button)));
+    target.querySelectorAll('[data-mark-payment]').forEach(button => button.addEventListener('click', () => markOrderPaymentReceived(button.dataset.markPayment, button.dataset.paymentMethod, button)));
+    target.querySelectorAll('[data-cancel-request]').forEach(button => button.addEventListener('click', () => requestCancellation(button.dataset.cancelRequest, button)));
+  }
+
+  async function loadRefundableOrders() {
+    const target = document.querySelector('#refundsContainer');
+    if (!target || panel !== 'business_admin') return;
+    target.innerHTML = '<div class="empty">Consultando pedidos pagados y cancelados…</div>';
+    const { data, error } = await db.rpc('get_business_admin_order_financials', {
+      p_business_id: businessId,
+      p_refundable_only: true,
+      p_limit: 100
+    });
+    if (error) return showError(target, error);
+    const orders = data || [];
+    if (!orders.length) {
+      target.innerHTML = '<div class="empty">No hay reembolsos pendientes de registrar.</div>';
+      return;
+    }
+    const rows = orders.map(o => [
+      esc(`#${o.order_number}`),
+      money(o.total),
+      dateTime(o.created_at),
+      `<button class="small-button" data-register-refund="${esc(o.order_id)}">Registrar reembolso realizado</button>`
+    ]);
+    target.innerHTML = tableHtml(['Pedido','Importe a devolver','Fecha del pedido','Acción'], rows);
+    target.querySelectorAll('[data-register-refund]').forEach(button => {
+      button.addEventListener('click', () => registerOrderRefund(button.dataset.registerRefund, button));
+    });
+  }
+
+  async function markOrderPaymentReceived(orderId, paymentMethod, button) {
+    if (!window.confirm('Confirma que el negocio ya recibió realmente el pago de este pedido? Esta acción registrará el ingreso y no realiza ningún cobro automático.')) return;
+    const provider = window.prompt('Entidad o proveedor (opcional, por ejemplo, banco o billetera):');
+    if (provider === null) return;
+    const reference = window.prompt(paymentMethod === 'cash'
+      ? 'Referencia o comprobante (opcional para efectivo):'
+      : 'Referencia o número del comprobante del pago recibido:');
+    if (reference === null) return;
+    if (paymentMethod !== 'cash' && !reference.trim()) {
+      alert('Para pagos que no son en efectivo debes registrar una referencia o comprobante.');
+      return;
+    }
+    const notes = window.prompt('Observaciones adicionales (opcional):');
+    if (notes === null) return;
+    button.disabled = true;
+    const { data, error } = await db.rpc('mark_order_payment_received', {
+      p_order_id: orderId,
+      p_provider: provider.trim() || null,
+      p_reference: reference.trim() || null,
+      p_notes: notes.trim() || null
+    });
+    if (error) {
+      alert(`No se pudo confirmar el pago. Comprueba que el procedimiento de confirmación esté desplegado y que el dinero ya se haya recibido. ${error.message}`);
+      button.disabled = false;
+      return;
+    }
+    alert('Pago recibido y registrado. El ingreso quedó guardado en los movimientos financieros.');
+    await loadBusinessAdmin();
+  }
+
+  async function registerOrderRefund(orderId, button) {
+    const method = window.prompt('Medio utilizado para devolver el dinero (por ejemplo, transferencia o efectivo):');
+    if (method === null) return;
+    if (!method.trim()) { alert('Debes indicar el medio de reembolso.'); return; }
+    const provider = window.prompt('Entidad o proveedor (opcional, por ejemplo, banco o billetera):');
+    if (provider === null) return;
+    const reference = window.prompt('Referencia o número del comprobante del reembolso ya realizado:');
+    if (reference === null) return;
+    if (!reference.trim()) { alert('Debes registrar una referencia o comprobante.'); return; }
+    const notes = window.prompt('Observaciones adicionales (opcional):');
+    if (notes === null) return;
+    button.disabled = true;
+    const { data, error } = await db.rpc('complete_order_refund', {
+      p_order_id: orderId,
+      p_refund_method: method.trim(),
+      p_provider: provider.trim() || null,
+      p_reference: reference.trim(),
+      p_notes: notes.trim() || null
+    });
+    if (error) {
+      alert(`No se pudo registrar el reembolso. Comprueba que el procedimiento de reembolsos esté desplegado y que el dinero ya se haya devuelto. ${error.message}`);
+      button.disabled = false;
+      return;
+    }
+    alert('Reembolso registrado. El pedido ahora figura como reembolsado.');
+    await loadBusinessAdmin();
+  }
+
+  async function requestCancellation(orderId, button) {
+    const reason = window.prompt('Escribe el motivo comunicado por el cliente (mínimo 5 caracteres):');
+    if (reason === null) return;
+    if (reason.trim().length < 5 || reason.trim().length > 2000) {
+      alert('El motivo debe tener entre 5 y 2000 caracteres.');
+      return;
+    }
+    button.disabled = true;
+    const { data, error } = await db.rpc('request_order_cancellation', {
+      p_business_id: businessId,
+      p_order_id: orderId,
+      p_customer_reason: reason.trim()
+    });
+    if (error) {
+      alert(`No se pudo registrar la solicitud. Comprueba que la migración de cancelaciones esté desplegada. ${error.message}`);
+      button.disabled = false;
+      return;
+    }
+    alert('La solicitud quedó registrada y pendiente de decisión del administrador.');
+    if (panel === 'business_admin') await Promise.all([loadBusinessOrders(), loadCancellationRequests()]);
+    else await loadEmployeeOrders();
+  }
+
+  async function loadCancellationRequests() {
+    const target = document.querySelector('#cancellationRequestsContainer');
+    if (!target || panel !== 'business_admin') return;
+    target.innerHTML = '<div class="empty">Cargando solicitudes…</div>';
+    const { data, error } = await db.from('order_cancellation_requests')
+      .select('id,order_id,customer_reason,status,forwarded_at,admin_response,orders(order_number,status)')
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error) return showError(target, error);
+    const requests = data || [];
+    if (!requests.length) {
+      target.innerHTML = '<div class="empty">Todavía no hay solicitudes de cancelación.</div>';
+      return;
+    }
+    const rows = requests.map(r => {
+      const order = Array.isArray(r.orders) ? r.orders[0] : r.orders;
+      const decision = r.status === 'pending'
+        ? `<button class="small-button" data-cancellation-decision="approved" data-request="${esc(r.id)}">Aprobar</button> <button class="small-button" data-cancellation-decision="rejected" data-request="${esc(r.id)}">Rechazar</button>`
+        : esc(r.status === 'approved' ? 'Aprobada' : 'Rechazada');
+      return [
+        esc(order?.order_number ? `#${order.order_number}` : r.order_id),
+        esc(r.customer_reason),
+        esc(statusLabels[order?.status] || order?.status || '—'),
+        esc(r.status === 'pending' ? 'Pendiente' : r.status === 'approved' ? 'Aprobada' : 'Rechazada'),
+        dateTime(r.forwarded_at),
+        decision
+      ];
+    });
+    target.innerHTML = tableHtml(['Pedido','Motivo','Estado del pedido','Solicitud','Fecha','Decisión'], rows);
+    target.querySelectorAll('[data-cancellation-decision][data-request]').forEach(button => {
+      button.addEventListener('click', () => decideCancellation(button.dataset.request, button.dataset.cancellationDecision, button));
+    });
+  }
+
+  async function decideCancellation(requestId, decision, button) {
+    const response = window.prompt(decision === 'approved'
+      ? 'Respuesta para dejar registrada al aprobar (opcional):'
+      : 'Indica el motivo del rechazo:');
+    if (response === null) return;
+    if (decision === 'rejected' && response.trim().length < 5) {
+      alert('Escribe un motivo de rechazo de al menos 5 caracteres.');
+      return;
+    }
+    button.disabled = true;
+    const { data, error } = await db.rpc('decide_order_cancellation', {
+      p_request_id: requestId,
+      p_decision: decision,
+      p_admin_response: response.trim() || null
+    });
+    if (error) {
+      alert(`No se pudo procesar la solicitud. Comprueba que la migración esté desplegada. ${error.message}`);
+      button.disabled = false;
+      return;
+    }
+    alert(decision === 'approved'
+      ? 'Cancelación aprobada. El inventario asociado fue restituido. Si el pedido estaba pagado, el reembolso debe gestionarse por separado.'
+      : 'Solicitud rechazada. El pedido y el inventario no fueron modificados.');
+    await loadBusinessAdmin();
   }
 
   async function changeOrderStatus(orderId, next, button) {
     button.disabled = true;
-    const { error } = await db.from('orders').update({ status: next }).eq('id', orderId).eq('business_id', businessId);
-    if (error) {
-      alert(`No se pudo cambiar el estado: ${error.message}`);
+    const changes = { status: next };
+
+    // Al iniciar el reparto, guardar una referencia que el cliente pueda consultar
+    // con su código privado de seguimiento.
+    if (next === 'out_for_delivery') {
+      const tracking = window.prompt(
+        'Ingresa el enlace o referencia de seguimiento. Si no usas transportadora, escribe por ejemplo: Domiciliario del negocio.',
+        'Domiciliario del negocio'
+      );
+      if (tracking === null) {
+        button.disabled = false;
+        return;
+      }
+      const normalizedTracking = tracking.trim();
+      if (normalizedTracking.length < 3 || normalizedTracking.length > 500) {
+        alert('La referencia de seguimiento debe tener entre 3 y 500 caracteres.');
+        button.disabled = false;
+        return;
+      }
+      changes.delivery_tracking = normalizedTracking;
+    }
+
+    const { data: updatedOrder, error } = await db.from('orders')
+      .update(changes)
+      .eq('id', orderId)
+      .eq('business_id', businessId)
+      .select('id,status,delivery_tracking')
+      .maybeSingle();
+    if (error || !updatedOrder) {
+      alert(`No se pudo cambiar el estado: ${error?.message || 'El pedido no existe, pertenece a otro negocio o no tienes permiso para cambiarlo.'}`);
       button.disabled = false;
       return;
     }

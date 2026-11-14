@@ -1,0 +1,24 @@
+# Mantener explícita la verificación JWT de cada Edge Function desplegada.
+# Las funciones públicas validan su propia solicitud o reciben tráfico de invitados;
+# las funciones privadas exigen un JWT válido y realizan autorización adicional.
+
+[functions.technical-business-management]
+verify_jwt = true
+
+[functions.resolve-my-access]
+verify_jwt = true
+
+[functions.create-public-order]
+verify_jwt = false
+
+[functions.track-public-order]
+verify_jwt = false
+
+[functions.get-public-storefront]
+verify_jwt = false
+
+[functions.create-job-application]
+verify_jwt = false
+
+[functions.get-platform-public-settings]
+verify_jwt = false

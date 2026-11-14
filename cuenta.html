@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mi cuenta | MiEje Market</title>
+  <link rel="stylesheet" href="panel-live.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js" defer></script>
+  <script src="cuenta.js" defer></script>
+</head>
+<body class="login-page">
+  <main class="login-card" style="width:min(760px,94vw)">
+    <a class="brand-login" href="index.html"><span class="brand-icon">M<span>+</span></span><span>MiEje <b>Market</b><small>Tu cuenta de cliente</small></span></a>
+    <section id="accountAccess">
+      <p class="eyebrow">CLIENTES</p>
+      <h1>Accede a tu cuenta</h1>
+      <p class="muted">Regístrate o inicia sesión para consultar tus pedidos y guardar tus productos favoritos.</p>
+      <form id="customerLoginForm">
+        <label for="customerEmail">Correo electrónico</label>
+        <input id="customerEmail" type="email" autocomplete="email" required>
+        <label for="customerPassword">Contraseña</label>
+        <input id="customerPassword" type="password" autocomplete="current-password" minlength="8" required>
+        <button id="customerLoginBtn" class="button primary full" type="submit">Iniciar sesión</button>
+      </form>
+      <hr>
+      <h2>Crear cuenta de cliente</h2>
+      <form id="customerRegisterForm">
+        <label for="customerName">Nombre</label>
+        <input id="customerName" type="text" maxlength="100" autocomplete="name" required>
+        <label for="registerEmail">Correo electrónico</label>
+        <input id="registerEmail" type="email" autocomplete="email" required>
+        <label for="registerPassword">Crear contraseña (mínimo 10 caracteres)</label>
+        <input id="registerPassword" type="password" minlength="10" autocomplete="new-password" required>
+        <button id="customerRegisterBtn" class="button secondary full" type="submit">Crear cuenta</button>
+      </form>
+      <p><a class="back-link" href="recuperar-clave.html">¿Olvidaste tu contraseña?</a></p>
+    </section>
+    <section id="customerDashboard" hidden>
+      <p class="eyebrow">MI ESPACIO</p>
+      <h1 id="customerWelcome">Mi cuenta</h1>
+      <p id="customerEmailLabel" class="muted"></p>
+      <button id="customerLogoutBtn" class="button secondary" type="button">Cerrar sesión</button>
+      <hr>
+      <h2>Mis pedidos</h2>
+      <div id="customerOrders"><p class="muted">Cargando pedidos…</p></div>
+      <hr>
+      <h2>Mis favoritos</h2>
+      <div id="customerFavorites"><p class="muted">Cargando favoritos…</p></div>
+    </section>
+    <p id="customerMessage" class="message" role="status" aria-live="polite"></p>
+    <a class="back-link" href="index.html">← Volver a MiEje Market</a>
+  </main>
+</body>
+</html>
