@@ -3,7 +3,9 @@
 <label>Nombre del producto<input class="field" name="name" required maxlength="180" placeholder="Nombre del producto"></label>
 <label>Categoría<input class="field" name="category" maxlength="100" placeholder="Ej. Tecnología, hogar, alimentos"></label>
 <label>Descripción<textarea class="field" name="description" rows="3" maxlength="3000" placeholder="Describe el producto"></textarea></label>
-<label>Precio (COP)<input class="field" name="price" type="number" min="0" step="1" required></label>
+<label>Precio de venta (COP)<input class="field" name="price" type="number" min="0" step="1" required></label>
+<label>Costo por unidad (COP, privado; opcional)<input class="field" name="cost_price" type="number" min="0" step="1" placeholder="Registra cuánto le cuesta al negocio"></label>
+<p class="muted">El costo solo lo consulta el administrador del negocio. No se muestra a los clientes ni al personal.</p>
 <label>Existencias<input class="field" name="inventory" type="number" min="0" step="1" required value="0"></label>
 <label>Subir imagen del producto<input class="field" name="image_file" type="file" accept="image/png,image/jpeg,image/webp"></label><p class="muted">PNG, JPG o WEBP. Máximo 5 MB. También puedes usar una URL externa:</p><label>URL de imagen externa (opcional)<input class="field" name="image_url" type="url" maxlength="1000" placeholder="https://..."></label>
 <label><input type="checkbox" name="is_active" checked> Producto activo y visible</label>
