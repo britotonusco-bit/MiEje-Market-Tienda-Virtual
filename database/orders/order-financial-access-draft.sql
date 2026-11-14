@@ -302,9 +302,22 @@ REVOKE SELECT (
 
 GRANT SELECT (
   id, business_id, order_number, customer_name, customer_phone,
-  delivery_address, delivery_notes, payment_method, status,
-  delivery_tracking, created_at, updated_at
+  delivery_address, delivery_notes, status, delivery_tracking,
+  created_at, updated_at
 ) ON TABLE public.orders TO authenticated;
+
+-- Los importes y el método de pago no se exponen mediante consultas directas.
+-- Los administradores los reciben únicamente desde los RPCs que validan su rol.
+-- El panel del personal solo necesita actualizar estado y referencia de entrega.
+REVOKE UPDATE ON TABLE public.orders FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE (
+  id, business_id, order_number, customer_name, customer_phone, customer_email,
+  delivery_address, delivery_notes, payment_method, payment_status, status,
+  delivery_tracking, subtotal, delivery_fee, total, public_tracking_token,
+  created_at, updated_at, customer_user_id
+) ON TABLE public.orders FROM PUBLIC, anon, authenticated;
+GRANT UPDATE (status, delivery_tracking, updated_at)
+ON TABLE public.orders TO authenticated;
 
 
 -- Los empleados y administradores solo necesitan nombres y cantidades para
@@ -317,8 +330,11 @@ REVOKE SELECT (
 ) ON TABLE public.order_items FROM PUBLIC, anon, authenticated;
 
 GRANT SELECT (
-  id, order_id, product_id, product_name, quantity, created_at
+  id, order_id, product_name, quantity, created_at
 ) ON TABLE public.order_items TO authenticated;
+
+-- No se permiten modificaciones directas de líneas de pedido desde los paneles.
+REVOKE INSERT, UPDATE, DELETE ON TABLE public.order_items FROM PUBLIC, anon, authenticated;
 
 
 
