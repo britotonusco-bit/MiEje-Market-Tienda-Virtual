@@ -1108,3 +1108,10 @@ El verificador de integración ahora comprueba: existencia de la relación `cust
 
 - Se corrigió el RPC de confirmación de pago para conservar las observaciones opcionales dentro de `audit_logs.details`; antes el panel las solicitaba, pero la función las validaba y luego descartaba.
 - Se añadieron accesos de navegación visibles a las secciones de solicitudes de cancelación y reembolsos del panel administrador.
+
+## Ajuste de conciliación del costo de inventario
+- El reporte anterior excluía del costo los pedidos que ya estaban cancelados, incluso cuando el pago ocurrió en un periodo anterior. Eso podía dejar el ingreso en el periodo del pago sin costo asociado.
+- El RPC actualizado reconoce el costo histórico en el periodo del pago y registra una reversión en el periodo en que se aprueba la cancelación y se restituye el inventario. Solo revierte costos de pedidos con al menos un pago completado.
+- El resultado expone por separado costo bruto de productos, reversión de costo por cancelaciones y costo neto del periodo. Los movimientos se agrupan por fecha local de Bogotá.
+- El cálculo sigue siendo estimado y basado en movimientos. No equivale a estados financieros certificados ni incluye impuestos, comisiones, depreciación o costos que no fueron registrados.
+- El verificador de integración comprueba que el RPC incluya la fecha de aprobación de cancelación y el indicador de reversión de costo.
