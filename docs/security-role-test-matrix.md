@@ -887,3 +887,35 @@ Se añadió al borrador `database/security/business-admin-boundaries.sql`:
 - Verificaciones post-migración para grants, políticas y ausencia de ejecución anónima de helpers privados.
 
 La prueba de catálogo debe repetirse en ensayo después de aplicar la migración. No se modificó el proyecto activo.
+
+## Auditoría del flujo completo de pedidos — 14/11/2026
+
+### Hallazgos confirmados en el proyecto Supabase activo
+
+- `create-public-order` está desplegada como versión 3. La interfaz ya envía `idempotency_key`, pero la función activa no la lee ni llama a las RPC idempotentes: consume `consume_checkout_rate_limit` y llama directamente a `create_public_order`. Si el navegador reintenta una solicitud cuya respuesta se perdió, puede crear un segundo pedido y volver a descontar inventario.
+- Las RPC `get_public_order_idempotent`, `reserve_checkout_rate_limit` y `create_public_order_idempotent` no existen todavía en la base activa. La corrección de la rama depende de aplicar primero `database/customers/customer-account-migration.sql` y después `database/orders/checkout-idempotency-draft.sql`, y desplegar la Edge Function de la misma rama.
+- La función activa `private.enforce_order_status_transition()` todavía permite el bypass de `platform_owner`. Las políticas activas de `orders` y `order_items` también conservan acceso global para ese rol. La migración `database/security/business-admin-boundaries.sql` sustituye ese acceso por membresías activas de cada negocio.
+- `track-public-order` está desplegada como versión 1 y no añade `Cache-Control: no-store`. La versión de la rama ya incluye esa cabecera para evitar almacenamiento en caché de respuestas que contienen información de pedidos.
+- El panel de negocio y el panel de empleados permitían avanzar el pedido hasta `out_for_delivery`, pero no consultaban ni guardaban `orders.delivery_tracking`. La rama ahora solicita una referencia al iniciar el reparto y la muestra en el detalle del pedido; el cliente puede consultarla con su código privado.
+
+### Comportamientos verificados por inspección
+
+- La restricción `orders_status_check` de la base activa admite `pending`, `confirmed`, `preparing`, `ready`, `out_for_delivery`, `delivered` y `cancelled`.
+- `create_public_order` bloquea cada fila de producto con `FOR UPDATE`, valida negocio/producto activo e inventario, calcula precios desde la base de datos y descuenta existencias dentro de la misma transacción que crea el pedido.
+- El panel actualiza el pedido filtrando por `id` y `business_id`; la política RLS y el trigger de transición deben validar además la membresía y el paso permitido.
+- La cancelación con aprobación y restitución de inventario está preparada en `database/orders/cancellation-flow-draft.sql`, pero sus RPC todavía no existen en la base activa. No se debe presentar como una función ya desplegada.
+- La consulta pública de seguimiento utiliza un token UUID aleatorio y devuelve número de pedido, negocio, estado, fecha, total y referencia de entrega. El token debe tratarse como código privado y entregarse únicamente al cliente que realizó la compra.
+
+### Pruebas obligatorias antes de producción
+
+1. Repetir una misma solicitud con la misma clave y el mismo contenido: debe devolver el mismo pedido y no descontar inventario otra vez.
+2. Repetir simultáneamente dos solicitudes con la misma clave: debe existir un solo pedido.
+3. Reutilizar una clave con contenido diferente: debe responder conflicto.
+4. Confirmar que `platform_owner` no puede consultar ni cambiar pedidos desde el Data API; admin/empleado A solo acceden a pedidos de A.
+5. Avanzar cada estado en orden y comprobar que saltos, retrocesos y cancelaciones directas se rechazan.
+6. Al marcar `out_for_delivery`, guardar una referencia y comprobar que aparece en el seguimiento público; verificar también que el dato se escapa como texto y no ejecuta HTML.
+7. Aprobar una cancelación y comprobar que pedido e inventario cambian juntos; rechazarla y comprobar que ninguno cambia.
+8. Probar dos compras concurrentes por las últimas unidades y una cancelación con varias líneas del mismo producto.
+9. Ejecutar pruebas A/B con datos ficticios en un entorno controlado. La base activa inspeccionada no tiene negocios, productos ni pedidos de prueba, por lo que no se ha podido completar una compra real ni una entrega de extremo a extremo.
+
+**Estado:** los ajustes de código y verificadores están preparados en `correcciones-funcionales`. No se han aplicado migraciones ni desplegado Edge Functions; el sitio publicado tampoco se ha cambiado.
