@@ -476,6 +476,59 @@ BEGIN
     RAISE EXCEPTION 'FALLO: faltan políticas de Storage para activos o documentos privados.';
   END IF;
 
+
+  IF to_regclass('public.product_costs') IS NULL
+     OR to_regclass('public.order_item_costs') IS NULL
+     OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid='public.product_costs'::regclass)
+     OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid='public.order_item_costs'::regclass) THEN
+    RAISE EXCEPTION 'FALLO: faltan tablas de costos o RLS no está habilitado.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='product_costs'
+      AND policyname='product_costs_admin_select'
+      AND cmd='SELECT' AND qual NOT ILIKE '%is_platform_owner%'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='product_costs'
+      AND policyname='product_costs_admin_insert'
+      AND cmd='INSERT' AND with_check NOT ILIKE '%is_platform_owner%'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='product_costs'
+      AND policyname='product_costs_admin_update'
+      AND cmd='UPDATE' AND qual NOT ILIKE '%is_platform_owner%'
+      AND with_check NOT ILIKE '%is_platform_owner%'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='order_item_costs'
+      AND policyname='order_item_costs_admin_select'
+      AND cmd='SELECT' AND qual NOT ILIKE '%is_platform_owner%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: las políticas de costos permiten acceso técnico global o faltan.';
+  END IF;
+
+  IF has_table_privilege('anon','public.product_costs','SELECT')
+     OR has_table_privilege('anon','public.order_item_costs','SELECT')
+     OR has_table_privilege('authenticated','public.order_item_costs','INSERT')
+     OR has_table_privilege('authenticated','public.order_item_costs','UPDATE')
+     OR has_table_privilege('authenticated','public.order_item_costs','DELETE') THEN
+    RAISE EXCEPTION 'FALLO: privilegios incorrectos en tablas de costos.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='order_item_costs'
+      AND column_name='unit_cost'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='product_costs'
+      AND column_name='cost_price'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: faltan columnas para costo unitario e histórico.';
+  END IF;
+
   RAISE NOTICE 'OK: estructura, RPCs, RLS, privilegios y buckets del paquete están presentes.';
 END
 $verify$;
