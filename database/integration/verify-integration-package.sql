@@ -532,6 +532,14 @@ BEGIN
     RAISE EXCEPTION 'FALLO: faltan columnas para costo unitario e histórico.';
   END IF;
 
+
+  IF to_regprocedure('public.get_business_admin_profit_report(uuid,date,date)') IS NULL THEN
+    RAISE EXCEPTION 'FALLO: falta el RPC de reporte financiero por periodo.';
+  END IF;
+  IF NOT has_function_privilege('authenticated','public.get_business_admin_profit_report(uuid,date,date)','EXECUTE')
+     OR has_function_privilege('anon','public.get_business_admin_profit_report(uuid,date,date)','EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: privilegios incorrectos en el reporte financiero.';
+  END IF;
   RAISE NOTICE 'OK: estructura, RPCs, RLS, privilegios y buckets del paquete están presentes.';
 END
 $verify$;
