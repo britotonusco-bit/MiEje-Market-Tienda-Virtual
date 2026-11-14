@@ -340,11 +340,12 @@ BEGIN
     RAISE EXCEPTION 'Solo el administrador activo del negocio puede consultar este reporte.' USING ERRCODE = '42501';
   END IF;
   WITH period_payments AS (
-    SELECT ft.order_id, ft.amount
+    SELECT ft.order_id, sum(ft.amount)::numeric(14,2) amount
     FROM public.financial_transactions ft
     WHERE ft.business_id=p_business_id AND ft.transaction_type='payment_received'
       AND ft.status='completed'
       AND (ft.completed_at AT TIME ZONE 'America/Bogota')::date BETWEEN p_start_date AND p_end_date
+    GROUP BY ft.order_id
   ),
   period_refunds AS (
     SELECT COALESCE(sum(ft.amount),0)::numeric(14,2) amount
@@ -353,17 +354,36 @@ BEGIN
       AND ft.status='completed'
       AND (ft.completed_at AT TIME ZONE 'America/Bogota')::date BETWEEN p_start_date AND p_end_date
   ),
-  order_costs AS (
-    SELECT pp.order_id,
-      count(*) FILTER (WHERE oic.unit_cost IS NULL)::integer missing_cost_lines,
-      COALESCE(sum(oic.unit_cost*oi.quantity) FILTER (WHERE oic.unit_cost IS NOT NULL),0)::numeric(14,2) cost_amount
+  cost_movements AS (
+    SELECT oi.id AS order_item_id, oic.unit_cost, oi.quantity, 1::integer AS direction
     FROM period_payments pp
     JOIN public.orders o ON o.id=pp.order_id AND o.business_id=p_business_id
     JOIN public.order_items oi ON oi.order_id=o.id
     LEFT JOIN public.order_item_costs oic ON oic.order_item_id=oi.id
       AND oic.order_id=o.id AND oic.business_id=p_business_id
-    WHERE o.status <> 'cancelled'
-    GROUP BY pp.order_id
+    UNION ALL
+    SELECT oi.id AS order_item_id, oic.unit_cost, oi.quantity, -1::integer AS direction
+    FROM public.order_cancellation_requests cr
+    JOIN public.orders o ON o.id=cr.order_id AND o.business_id=cr.business_id
+    JOIN public.order_items oi ON oi.order_id=o.id
+    LEFT JOIN public.order_item_costs oic ON oic.order_item_id=oi.id
+      AND oic.order_id=o.id AND oic.business_id=p_business_id
+    WHERE cr.business_id=p_business_id AND cr.status='approved'
+      AND cr.decided_at IS NOT NULL
+      AND (cr.decided_at AT TIME ZONE 'America/Bogota')::date BETWEEN p_start_date AND p_end_date
+      AND EXISTS (
+        SELECT 1 FROM public.financial_transactions paid
+        WHERE paid.business_id=p_business_id AND paid.order_id=o.id
+          AND paid.transaction_type='payment_received' AND paid.status='completed'
+      )
+  ),
+  cost_totals AS (
+    SELECT
+      COALESCE(sum(unit_cost*quantity) FILTER (WHERE unit_cost IS NOT NULL AND direction=1),0)::numeric(14,2) gross_cost,
+      COALESCE(sum(unit_cost*quantity) FILTER (WHERE unit_cost IS NOT NULL AND direction=-1),0)::numeric(14,2) inventory_cost_reversals,
+      COALESCE(sum(unit_cost*quantity*direction) FILTER (WHERE unit_cost IS NOT NULL),0)::numeric(14,2) net_cost,
+      count(DISTINCT order_item_id) FILTER (WHERE unit_cost IS NULL)::integer missing_cost_lines
+    FROM cost_movements
   ),
   expense_totals AS (
     SELECT COALESCE(sum(be.amount),0)::numeric(14,2) amount
@@ -376,24 +396,28 @@ BEGIN
     SELECT
       COALESCE((SELECT sum(amount) FROM period_payments),0)::numeric(14,2) sales,
       (SELECT amount FROM period_refunds) refunds,
-      COALESCE((SELECT sum(cost_amount) FROM order_costs),0)::numeric(14,2) cost_of_sales,
-      COALESCE((SELECT sum(missing_cost_lines) FROM order_costs),0)::integer missing_cost_lines,
+      (SELECT gross_cost FROM cost_totals) gross_cost,
+      (SELECT inventory_cost_reversals FROM cost_totals) inventory_cost_reversals,
+      (SELECT net_cost FROM cost_totals) cost_of_sales,
+      (SELECT missing_cost_lines FROM cost_totals) missing_cost_lines,
       (SELECT amount FROM expense_totals) paid_expenses,
       (SELECT count(*) FROM period_payments)::integer paid_orders
   )
   SELECT jsonb_build_object(
     'start_date',p_start_date,'end_date',p_end_date,'sales',sales,'refunds',refunds,
-    'net_sales',sales-refunds,'cost_of_sales',cost_of_sales,
+    'net_sales',sales-refunds,'gross_cost_of_sales',gross_cost,
+    'inventory_cost_reversals',inventory_cost_reversals,'cost_of_sales',cost_of_sales,
     'gross_profit_estimate',sales-refunds-cost_of_sales,
     'paid_expenses',paid_expenses,
     'net_profit_estimate',sales-refunds-cost_of_sales-paid_expenses,
     'missing_cost_lines',missing_cost_lines,'paid_orders',paid_orders,
     'complete_cost_data',missing_cost_lines=0,
-    'basis','Pagos y reembolsos confirmados por fecha de movimiento; costos asociados a pedidos pagados en el periodo; gastos por fecha de pago. Resultado estimado, no estado contable certificado.'
+    'basis','Reporte de movimientos por fecha de confirmación en hora Bogotá: pagos, reembolsos, aprobaciones de cancelación que restituyen inventario y gastos pagados. El costo se reconoce con el pago y se revierte al aprobar una cancelación pagada. Resultado estimado, no estado contable certificado.'
   ) INTO v_result FROM totals;
   RETURN v_result;
 END;
 $function$;
+
 REVOKE ALL ON FUNCTION public.get_business_admin_profit_report(uuid,date,date) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_business_admin_profit_report(uuid,date,date) TO authenticated;
 
