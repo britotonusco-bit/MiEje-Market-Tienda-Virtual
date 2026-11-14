@@ -323,6 +323,13 @@ BEGIN
     RAISE EXCEPTION 'FALLO: permisos incorrectos en RPC de historial.';
   END IF;
 
+  IF NOT has_function_privilege('authenticated',
+       'public.mark_order_payment_received(uuid,text,text,text)','EXECUTE')
+     OR has_function_privilege('anon',
+       'public.mark_order_payment_received(uuid,text,text,text)','EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: permisos incorrectos en RPC de confirmación de pagos.';
+  END IF;
+
   IF has_column_privilege('authenticated','public.orders','total','SELECT')
      OR has_column_privilege('authenticated','public.orders','payment_status','SELECT')
      OR has_column_privilege('authenticated','public.order_items','unit_price','SELECT')
