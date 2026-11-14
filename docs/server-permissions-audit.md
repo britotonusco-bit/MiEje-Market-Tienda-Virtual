@@ -745,3 +745,16 @@ Hallazgos:
 
 **Límite de verificación:** la comparación de esquema y lectura de definiciones fue de solo lectura. No se ejecutó el DDL, no se probó la función dentro de una transacción y no se simularon compras/cancelaciones concurrentes. La compatibilidad estructural no equivale a una prueba de ejecución.
 
+
+
+### 8. Revisión de referencias de inventario en el resto del proyecto
+
+Se buscaron referencias a existencias en los archivos JavaScript/TypeScript y en las funciones SQL del árbol de la rama:
+
+- `app.js` consulta y muestra el inventario disponible para que el cliente no agregue más unidades de las que hay. No realiza escrituras de inventario.
+- `panel-live.js` es el punto de escritura del panel administrador; su edición de catálogo ya no incluye `inventory` y el ajuste se dirige a la RPC protegida.
+- `create-public-order` del cliente Edge no realiza una actualización directa del inventario; delega la operación a las RPC de checkout.
+- `technical-business-management` y `panel-admin.js` no presentan operaciones directas de existencias.
+- Los cambios de existencias previstos quedan concentrados en checkout, ajuste administrativo y restitución de cancelación, todos con bloqueo de filas y trigger de movimientos cuando las migraciones estén instaladas.
+
+No se encontró otra escritura directa de inventario en los archivos revisados de esta rama. Esta búsqueda está limitada al código y SQL versionados en la rama, no a scripts externos ni a funciones que pudieran existir fuera del repositorio.
