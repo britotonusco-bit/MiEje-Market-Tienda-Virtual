@@ -82,7 +82,7 @@
         if (!access.is_platform_owner || profile.platform_role !== 'platform_owner') throw new Error('Esta sección es exclusiva del propietario técnico autorizado.');
         const { data: assurance, error: assuranceError } = await db.auth.mfa.getAuthenticatorAssuranceLevel();
         if (assuranceError || assurance?.currentLevel !== 'aal2') {
-          await db.auth.signOut();
+          await db.auth.signOut({ scope: 'local' });
           window.location.replace('login.html');
           return;
         }
