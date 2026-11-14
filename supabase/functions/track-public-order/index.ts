@@ -40,7 +40,7 @@ Deno.serve(async (req: Request) => {
 
   const { data, error } = await admin
     .from("orders")
-    .select("order_number,status,created_at,updated_at,delivery_tracking,total,businesses(name)")
+    .select("order_number,status,created_at,updated_at,delivery_tracking,total,payment_method_name,businesses(name)")
     .eq("public_tracking_token", token)
     .maybeSingle();
 
@@ -59,6 +59,7 @@ Deno.serve(async (req: Request) => {
       updated_at: data.updated_at,
       delivery_tracking: data.delivery_tracking,
       total: data.total,
+      payment_method_name: data.payment_method_name,
       business_name: business?.name ?? null,
     },
   });
