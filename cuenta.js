@@ -20,7 +20,7 @@
     return value ? new Intl.DateTimeFormat("es-CO", { dateStyle:"medium", timeStyle:"short", timeZone:"America/Bogota" }).format(new Date(value)) : "Fecha no disponible";
   }
   function status(value) {
-    return ({pending:"Recibido",confirmed:"Confirmado",preparing:"En preparación",ready:"Listo",out_for_delivery:"En camino",delivered:"Entregado",cancelled:"Cancelado"})[value] || value || "Sin estado";
+    return ({received:"Recibido",confirmed:"Confirmado",preparing:"En preparación",ready:"Listo",on_the_way:"En camino",delivered:"Entregado",cancelled:"Cancelado"})[value] || value || "Sin estado";
   }
   async function showSession(session) {
     if (!session) {
