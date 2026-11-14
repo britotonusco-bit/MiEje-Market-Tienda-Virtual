@@ -540,6 +540,11 @@ BEGIN
   END IF;
 
 
+  IF to_regclass('public.idx_financial_completed_business_type_date') IS NULL
+     OR to_regclass('public.idx_business_expenses_paid_at') IS NULL
+     OR to_regclass('public.idx_cancellation_approved_business_decided') IS NULL THEN
+    RAISE EXCEPTION 'FALLO: faltan índices para consultar pagos, cancelaciones y gastos por fecha de movimiento.';
+  END IF;
   IF to_regprocedure('public.get_business_admin_profit_report(uuid,date,date)') IS NULL THEN
     RAISE EXCEPTION 'FALLO: falta el RPC de reporte financiero por periodo.';
   END IF;
