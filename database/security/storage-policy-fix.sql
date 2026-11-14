@@ -14,6 +14,7 @@ FOR INSERT
 TO authenticated
 WITH CHECK (
   bucket_id = 'business-assets'
+  AND array_length(storage.foldername(objects.name), 1) = 2
   AND (storage.foldername(objects.name))[1] ~*
     '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
   AND (storage.foldername(objects.name))[2] IN ('logo', 'products')
@@ -33,6 +34,7 @@ FOR SELECT
 TO authenticated
 USING (
   bucket_id = 'business-assets'
+  AND array_length(storage.foldername(objects.name), 1) = 2
   AND (storage.foldername(objects.name))[1] ~*
     '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
   AND (storage.foldername(objects.name))[2] IN ('logo', 'products')
@@ -52,6 +54,7 @@ FOR UPDATE
 TO authenticated
 USING (
   bucket_id = 'business-assets'
+  AND array_length(storage.foldername(objects.name), 1) = 2
   AND (storage.foldername(objects.name))[1] ~*
     '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
   AND (storage.foldername(objects.name))[2] IN ('logo', 'products')
@@ -65,6 +68,7 @@ USING (
 )
 WITH CHECK (
   bucket_id = 'business-assets'
+  AND array_length(storage.foldername(objects.name), 1) = 2
   AND (storage.foldername(objects.name))[1] ~*
     '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
   AND (storage.foldername(objects.name))[2] IN ('logo', 'products')
@@ -84,6 +88,7 @@ FOR DELETE
 TO authenticated
 USING (
   bucket_id = 'business-assets'
+  AND array_length(storage.foldername(objects.name), 1) = 2
   AND (storage.foldername(objects.name))[1] ~*
     '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
   AND (storage.foldername(objects.name))[2] IN ('logo', 'products')
