@@ -449,6 +449,89 @@ BEGIN
     RAISE EXCEPTION 'FALLO: buckets ausentes o su visibilidad/límite de 5 MB no coincide con lo esperado.';
   END IF;
 
+  -- Storage: las imágenes comerciales son públicas por diseño, pero su
+  -- escritura/gestión queda limitada al administrador del negocio propietario.
+  -- Hojas de vida y comprobantes financieros deben permanecer privados.
+  IF NOT EXISTS (
+    SELECT 1 FROM storage.buckets
+    WHERE id='business-expense-receipts' AND public=false
+      AND file_size_limit=5242880
+  ) THEN
+    RAISE EXCEPTION 'FALLO: el bucket de comprobantes financieros no es privado o no limita archivos a 5 MB.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='storage' AND tablename='objects'
+      AND policyname IN (
+        'business_assets_admin_upload','business_assets_admin_read',
+        'business_assets_admin_update','business_assets_admin_delete'
+      )
+      AND (
+        coalesce(qual,'') ILIKE '%storage.foldername(b.name)%'
+        OR coalesce(with_check,'') ILIKE '%storage.foldername(b.name)%'
+      )
+  ) THEN
+    RAISE EXCEPTION 'FALLO: una política de business-assets obtiene la ruta desde businesses.name en lugar del objeto Storage.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='storage' AND tablename='objects'
+      AND policyname='job_application_documents_business_admin_read'
+      AND cmd='SELECT'
+      AND roles @> ARRAY['authenticated']::name[]
+      AND qual ILIKE '%job-applications-private%'
+      AND qual ILIKE '%has_business_role%'
+      AND qual ILIKE '%business_admin%'
+  ) OR EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='storage' AND tablename='objects'
+      AND policyname='job_application_documents_business_admin_read'
+      AND (coalesce(qual,'') ILIKE '%platform_owner%' OR roles @> ARRAY['anon']::name[])
+  ) THEN
+    RAISE EXCEPTION 'FALLO: la lectura de hojas de vida no está restringida al administrador autenticado del negocio.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='storage' AND tablename='objects'
+      AND policyname='business_expense_receipts_admin_read'
+      AND cmd='SELECT'
+      AND roles @> ARRAY['authenticated']::name[]
+      AND qual ILIKE '%business-expense-receipts%'
+      AND qual ILIKE '%has_business_role%'
+      AND qual ILIKE '%business_admin%'
+      AND qual ILIKE '%business_expenses%'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='storage' AND tablename='objects'
+      AND policyname='business_expense_receipts_admin_upload'
+      AND cmd='INSERT'
+      AND roles @> ARRAY['authenticated']::name[]
+      AND with_check ILIKE '%business-expense-receipts%'
+      AND with_check ILIKE '%has_business_role%'
+      AND with_check ILIKE '%business_admin%'
+      AND with_check ILIKE '%status%'
+      AND with_check ILIKE '%active%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: comprobantes de gastos sin políticas privadas de lectura/carga para el administrador activo.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='storage' AND tablename='objects'
+      AND roles @> ARRAY['anon']::name[]
+      AND (
+        coalesce(qual,'') ILIKE '%job-applications-private%'
+        OR coalesce(qual,'') ILIKE '%business-expense-receipts%'
+        OR coalesce(with_check,'') ILIKE '%job-applications-private%'
+        OR coalesce(with_check,'') ILIKE '%business-expense-receipts%'
+      )
+  ) THEN
+    RAISE EXCEPTION 'FALLO: anon tiene una política directa sobre hojas de vida o comprobantes financieros.';
+  END IF;
+
   IF NOT has_column_privilege('anon','public.businesses','id','SELECT')
      OR NOT has_column_privilege('anon','public.businesses','status','SELECT') THEN
     RAISE EXCEPTION 'FALLO: anon no tiene las columnas públicas mínimas para resolver contenido publicado.';
