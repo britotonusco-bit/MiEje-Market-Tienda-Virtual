@@ -19,7 +19,7 @@ BEGIN
      AND NEW.status = 'active'
      AND OLD.payment_status = 'pending'
      AND NEW.payment_status = 'paid'
-     AND (to_jsonb(NEW) - ARRAY['payment_status','payment_method','paid_at','updated_at'])
+     AND (to_jsonb(NEW) - ARRAY['payment_status','payment_method','transaction_reference','paid_at','updated_at'])
          = (to_jsonb(OLD) - ARRAY['payment_status','payment_method','paid_at','updated_at'])
   THEN
     IF NEW.payment_method IS NULL OR NEW.paid_at IS NULL THEN
