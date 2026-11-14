@@ -569,7 +569,7 @@ REVOKE UPDATE ON TABLE public.products FROM PUBLIC, anon, authenticated;
 REVOKE UPDATE (id, business_id, name, category, description, sku, price, inventory,
   image_url, is_active, created_at, updated_at)
 ON TABLE public.products FROM PUBLIC, anon, authenticated;
-GRANT UPDATE (name, category, description, price, inventory, image_url, is_active, sku, updated_at)
+GRANT UPDATE (name, category, description, price, image_url, is_active, sku, updated_at)
 ON TABLE public.products TO authenticated;
 
 -- Los métodos de pago tampoco deben poder trasladarse ni alterar su identidad.
