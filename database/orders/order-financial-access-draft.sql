@@ -381,7 +381,8 @@ BEGIN
       AND oic.order_id=o.id AND oic.business_id=p_business_id
     WHERE cr.business_id=p_business_id AND cr.status='approved'
       AND cr.decided_at IS NOT NULL
-      AND (cr.decided_at AT TIME ZONE 'America/Bogota')::date BETWEEN p_start_date AND p_end_date
+      AND cr.decided_at >= (p_start_date::timestamp AT TIME ZONE 'America/Bogota')
+      AND cr.decided_at < ((p_end_date + 1)::timestamp AT TIME ZONE 'America/Bogota')
       AND EXISTS (
         SELECT 1 FROM public.financial_transactions paid
         WHERE paid.business_id=p_business_id AND paid.order_id=o.id
