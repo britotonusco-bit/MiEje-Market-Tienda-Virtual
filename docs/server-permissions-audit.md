@@ -470,3 +470,84 @@ La Edge Function `create-job-application` usa `service_role` para crear sesiones
 ### Resultado
 
 Esta revisión fue de lectura del código en `correcciones-funcionales` y consultas de solo lectura al proyecto Supabase independiente. No se emitieron enlaces reales, no se cargaron archivos, no se probaron cuentas de dos negocios, no se ejecutó SQL y no se desplegaron Edge Functions.
+
+
+## Novena revisión: cuentas de clientes, historial, favoritos y datos personales
+
+**Fecha:** 14 de noviembre de 2026  
+**Alcance:** estructura live de `orders`, `order_items` y `profiles`; políticas RLS y grants; migraciones de cuenta e historial; Edge Functions de checkout y seguimiento público.
+
+### 1. Estado real de la base de datos
+
+En el proyecto Supabase independiente:
+
+- `orders`, `order_items` y `profiles` tienen RLS habilitado.
+- `orders.customer_user_id` todavía no existe.
+- La tabla `customer_favorites` todavía no existe.
+- No está instalada la RPC `get_customer_order_history()` ni la función privada `private.customer_owns_order(uuid)`.
+- `public_tracking_token` sí existe, es NOT NULL y tiene `gen_random_uuid()` como valor predeterminado.
+- `profiles` concede SELECT a usuarios autenticados, limitado por RLS. No se concedió SELECT a `anon`.
+
+Por tanto, el historial de compras asociado a cuentas y los favoritos todavía no están activos en el proyecto live. Los pedidos de invitado se guardan con datos de contacto, pero aún no hay una columna que los vincule a la cuenta autenticada.
+
+### 2. Brecha live de lectura global en pedidos
+
+Las políticas instaladas `orders_members_select` y `order_items_members_select` incluyen una condición OR para `private.is_platform_owner()`. Esto permite al propietario técnico leer globalmente las filas de pedidos y sus líneas, independientemente del negocio.
+
+El borrador `database/orders/order-financial-access-draft.sql` retira los grants generales de lectura y concede a los paneles únicamente columnas operativas; también deja los importes detrás de RPCs que validan el rol de administrador. La revisión anterior ya identificó esta brecha, y la consulta live confirma que todavía existe en el proyecto independiente.
+
+La política global del propietario técnico puede ser útil para soporte y auditoría, pero expone información personal y comercial de todos los pedidos mediante acceso directo a tablas. Debe retirarse de las consultas generales y reemplazarse por operaciones técnicas específicas, con campos mínimos y registro de auditoría. No se debe aplicar el borrador sin probar primero cada panel y las funciones que hoy consultan las tablas directamente.
+
+### 3. Acceso de administradores y empleados a datos de compradores
+
+Las políticas live permiten a miembros activos del negocio consultar los pedidos de su propio negocio y las líneas correspondientes. Los pedidos contienen nombre, teléfono, correo, dirección de entrega y notas. Estos datos son necesarios para preparar y entregar compras, pero deben permanecer limitados al personal asignado a ese negocio.
+
+El borrador financiero reduce las columnas directas y separa las consultas de importes. Aun después de aplicarlo, debe comprobarse que cada empleado vea únicamente los datos de entrega necesarios para sus tareas y que ningún panel de otro negocio pueda consultar esos pedidos.
+
+### 4. Historial de compras: diseño del borrador
+
+`database/customers/customer-account-migration.sql` añade `orders.customer_user_id` con referencia a `auth.users(id)` y `ON DELETE SET NULL`. Esto permite conservar los registros comerciales si una cuenta se elimina, sin mantener una asociación personal activa.
+
+`database/orders/order-financial-access-draft.sql` define `get_customer_order_history()` como función `SECURITY DEFINER`, con `search_path = ''`. Obtiene el usuario mediante `auth.uid()`, rechaza cuentas bloqueadas, filtra por `customer_user_id = auth.uid()` y limita el historial a 50 pedidos. Devuelve datos del pedido, nombre del negocio y líneas con precios. No acepta un ID de usuario como argumento, por lo que el cliente no puede solicitar el historial de otra cuenta cambiando un parámetro.
+
+El mismo borrador crea `private.customer_owns_order(uuid)`, que verifica propiedad con `auth.uid()`, y limita la lectura de líneas de pedido al cliente dueño. Los privilegios de ejecución se revocan a `PUBLIC` y `anon`, y se conceden a `authenticated`.
+
+### 5. Favoritos: diseño del borrador
+
+La migración de clientes crea `customer_favorites` con RLS y reglas de propiedad:
+
+- SELECT y DELETE solo cuando `user_id = auth.uid()`.
+- INSERT solo para el usuario autenticado y productos activos de negocios activos.
+- No concede UPDATE, evitando reasignar un favorito a otra cuenta.
+- La restricción UNIQUE `(user_id, product_id)` evita favoritos duplicados.
+- Al eliminar la cuenta se eliminan sus favoritos; al eliminar un producto se elimina su relación de favorito.
+
+El diseño es correcto a nivel estático, pero no se ha probado con dos cuentas reales ni está instalado en Supabase.
+
+### 6. Checkout autenticado y seguimiento público
+
+La versión de `create-public-order/index.ts` en la rama valida el JWT del comprador mediante `auth.getUser()`, consulta el perfil y rechaza cuentas bloqueadas. Solo después asigna el ID verificado a `p_customer_user_id`; no confía en un ID de usuario enviado en el JSON del navegador. Para invitados mantiene ese campo en NULL. La vinculación efectiva depende de aplicar las migraciones de cliente e idempotencia.
+
+La función `track-public-order` consulta mediante el token UUID y devuelve número de pedido, estado, fechas, seguimiento, total y nombre del negocio. No devuelve nombre, teléfono, correo ni dirección del comprador. Las respuestas incluyen `Cache-Control: no-store, private`. El token actúa como credencial de acceso al seguimiento: debe tratarse como secreto, no mostrarse en listados públicos ni registrarse en analítica o logs de terceros.
+
+### 7. Acciones pendientes antes de producción
+
+1. Probar la migración de cuenta, checkout e historial en un entorno de ensayo.
+2. Aplicar las migraciones solo después de verificar que el checkout de invitados y los paneles existentes siguen funcionando.
+3. Retirar el bypass de lectura global del propietario técnico en pedidos y líneas, sustituyéndolo por consultas técnicas mínimas y auditadas.
+4. Probar dos clientes: A no puede leer pedidos, líneas ni favoritos de B, incluso con UUIDs conocidos.
+5. Probar dos negocios: administrador/empleado A no puede consultar pedidos ni datos personales de B.
+6. Confirmar que el cliente solo ve sus pedidos autenticados y que los pedidos de invitado no se atribuyen automáticamente a una cuenta.
+7. Revisar retención, exportación y eliminación de datos personales, incluyendo qué datos se conservan por obligaciones contables y de atención de pedidos.
+8. Evitar incluir tokens de seguimiento, teléfonos, correos y direcciones en logs, analítica o mensajes de error.
+
+### Resultado
+
+- RLS y grants live: **consultados en solo lectura**.
+- Lectura global técnica de pedidos y líneas: **confirmada en políticas instaladas**.
+- Historial de cliente y favoritos: **no instalados en live**.
+- Diseño de propiedad de pedidos y favoritos: **revisado estáticamente en borradores**.
+- Checkout autenticado en la rama: **valida JWT y perfil antes de asignar customer_user_id**.
+- Seguimiento público: **devuelve datos limitados y usa token UUID; no expone contacto ni dirección**.
+- Pruebas cruzadas entre clientes y negocios: **pendientes**.
+- SQL aplicado, despliegues o cambios de Auth: **ninguno**.
