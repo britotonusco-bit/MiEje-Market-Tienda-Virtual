@@ -728,3 +728,20 @@ No aplicar esta secuencia directamente en producción sin pruebas. En particular
 - `panel-live.js` consulta los últimos 100 movimientos del negocio autenticado, muestra fecha, producto, tipo, saldos, variación y motivo. La consulta queda protegida por la política RLS de administradores activos.
 - `database/security/business-admin-boundaries.sql` deja de conceder UPDATE directo de la columna `products.inventory` a `authenticated`. Los cambios de existencias deben pasar por `adjust_business_inventory`; la función `SECURITY DEFINER` realiza el UPDATE después de validar el rol y el negocio.
 - El historial solo se podrá consultar cuando la migración de movimientos esté instalada. Si se despliega el panel antes de esa migración, la consulta mostrará el error de tabla/función ausente; por eso debe respetarse el orden de despliegue.
+
+
+### 7. Segunda revisión de compatibilidad SQL: bloqueos y esquema live
+
+Se comparó el borrador de checkout con la definición real de `public.create_public_order(uuid,text,text,text,text,text,text,jsonb)` y con las columnas/constraints actuales de `products`, `orders`, `order_items`, `order_item_costs` y `audit_logs`.
+
+Hallazgos:
+
+- La clave única live `products_business_id_id_unique` confirma que la FK compuesta de movimientos `(business_id, product_id) → products(business_id,id)` es compatible.
+- Las columnas usadas por el checkout revisado coinciden con el esquema live inspeccionado.
+- El borrador mantiene el resultado JSON, los estados iniciales, el cálculo de precio/costo histórico y el permiso de ejecución `service_role` de la función actual.
+- El borrador agrega validación explícita para carrito nulo/no-array y método de pago nulo, y valida UUID/cantidad antes de ordenar los locks.
+- El checkout adquiere los locks de productos por UUID ascendente antes de crear el pedido y descontar existencias.
+- En la revisión adicional se detectó que la restitución de cancelaciones todavía podía adquirir locks en un orden no definido. Se corrigió `cancellation-flow-draft.sql` para bloquear primero los productos afectados por UUID ascendente y después realizar la restitución.
+
+**Límite de verificación:** la comparación de esquema y lectura de definiciones fue de solo lectura. No se ejecutó el DDL, no se probó la función dentro de una transacción y no se simularon compras/cancelaciones concurrentes. La compatibilidad estructural no equivale a una prueba de ejecución.
+
