@@ -645,3 +645,76 @@ No se encontró ninguna tabla pública con nombre relacionado con inventario, st
 - Libro de movimientos de inventario: **no existe en el esquema revisado**.
 - Pruebas reales: **bloqueadas porque no hay productos ni pedidos de prueba en la base**.
 - SQL aplicado, Edge Functions desplegadas o cambios en producción: **ninguno**.
+
+
+## Correcciones preparadas después de la décima revisión: inventario y checkout
+
+**Fecha:** 14 de noviembre de 2026  
+**Estado:** cambios guardados únicamente en la rama `correcciones-funcionales`; pendientes de revisión, migración y pruebas.
+
+### 1. Libro de movimientos de inventario
+
+Se creó `database/inventory/inventory-movements-draft.sql`:
+
+- Tabla `public.inventory_movements` con negocio, producto, actor, tipo, saldo anterior, saldo posterior, delta, motivo y fecha.
+- FK compuesta para impedir que un movimiento relacione un producto con otro negocio.
+- RLS para lectura exclusiva del administrador activo del negocio.
+- Sin INSERT, UPDATE ni DELETE directo para usuarios autenticados.
+- Trigger que registra inventario inicial y cada cambio posterior.
+- Tipos de movimiento: `initial`, `adjustment`, `sale`, `cancellation_return`.
+- RPC `adjust_business_inventory`, exclusiva para administradores activos del negocio.
+
+La RPC bloquea el producto con `FOR UPDATE` y compara el inventario esperado enviado por el formulario con el valor actual en la base. Si hubo una venta o ajuste mientras el formulario estaba abierto, rechaza la operación y pide recargar. Así evita que un valor desactualizado sobrescriba una venta reciente.
+
+### 2. Panel de administración
+
+Se modificó `panel-live.js`:
+
+- La edición de nombre, precio, descripción, categoría e imagen ya no envía el campo `inventory`.
+- Al crear un producto nuevo, conserva el inventario inicial.
+- Al editar un producto y cambiar las existencias, solicita un motivo.
+- Envía el ajuste mediante `adjust_business_inventory`, incluyendo el inventario que el panel había leído como valor esperado.
+- Si el catálogo se guarda pero el ajuste falla por concurrencia o permisos, informa expresamente que los datos del producto se guardaron y que las existencias no cambiaron.
+
+El ajuste depende de que la nueva migración SQL esté instalada; no funcionará en live antes de eso. El guardado del catálogo y el ajuste son dos operaciones separadas: un error en la segunda no revierte los cambios comerciales ya guardados.
+
+### 3. Checkout con bloqueos deterministas
+
+Se creó `database/inventory/checkout-inventory-lock-order-draft.sql`, con una versión revisada de `create_public_order` que:
+
+- Valida el tipo del carrito y los identificadores antes de convertirlos.
+- Adquiere bloqueos de productos por UUID ascendente, sin depender del orden del carrito.
+- Mantiene la comprobación de negocio, producto activo, existencias, precio y costo histórico.
+- Registra los descuentos de venta en el libro de inventario con el tipo `sale` y el número del pedido.
+- Conserva el permiso de ejecución de la función para `service_role`.
+
+Esta migración debe compararse nuevamente con la definición live antes de ejecutarse. No reemplaza la migración de idempotencia; son protecciones distintas.
+
+### 4. Cancelaciones y devoluciones de inventario
+
+Se actualizó `database/orders/cancellation-flow-draft.sql` para etiquetar las restituciones con tipo `cancellation_return` y motivo que incluye el ID del pedido. También se corrigió el orden SQL del CTE de restitución para que la sentencia sea válida.
+
+La restitución sigue siendo parte de la misma transacción que aprueba la cancelación y cambia el estado del pedido. Requiere que primero exista el trigger de movimientos de inventario para registrar la devolución.
+
+### 5. Orden de revisión y dependencias
+
+Orden recomendado para staging, una vez que exista un entorno disponible:
+
+1. `database/inventory/inventory-movements-draft.sql`
+2. `database/inventory/checkout-inventory-lock-order-draft.sql`
+3. `database/orders/checkout-idempotency-draft.sql` (después de revisar dependencias y firmas de Edge Function).
+4. `database/orders/cancellation-flow-draft.sql`.
+
+No aplicar esta secuencia directamente en producción sin pruebas. En particular, la cancelación depende del registro de movimientos para que la devolución quede en el historial.
+
+### Resultado de esta preparación
+
+- Libro de movimientos y RPC de ajuste: **borrador creado**.
+- Edición del panel separada del inventario: **cambio guardado en la rama**.
+- Protección contra formulario desactualizado: **implementada en el borrador SQL y llamada desde el panel**.
+- Bloqueo determinista del checkout: **borrador creado**.
+- Registro de venta y devolución con tipo/motivo: **preparado en los borradores**.
+- Cancelación: **CTE corregido y devolución clasificada**.
+- Lectura y verificación de archivos en GitHub: **realizadas**.
+- Migraciones SQL aplicadas, funciones desplegadas y pruebas concurrentes: **ninguna**.
+- GitHub Pages y `main`: **sin cambios**.
