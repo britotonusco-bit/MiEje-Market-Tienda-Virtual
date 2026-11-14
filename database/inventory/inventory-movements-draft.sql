@@ -59,6 +59,10 @@ DECLARE
   v_reason text;
 BEGIN
   IF TG_OP = 'INSERT' THEN
+    -- No registrar un movimiento de cero unidades: la tabla exige delta distinto de cero.
+    IF NEW.inventory = 0 THEN
+      RETURN NEW;
+    END IF;
     v_before := 0;
     v_after := NEW.inventory;
     v_reason := 'Inventario inicial';
