@@ -551,7 +551,9 @@ BEGIN
   IF pg_get_functiondef('public.get_business_admin_profit_report(uuid,date,date)'::regprocedure)
      NOT LIKE '%inventory_cost_reversals%'
      OR pg_get_functiondef('public.get_business_admin_profit_report(uuid,date,date)'::regprocedure)
-     NOT LIKE '%decided_at%' THEN
+     NOT LIKE '%decided_at%'
+     OR pg_get_functiondef('public.get_business_admin_profit_report(uuid,date,date)'::regprocedure)
+     LIKE '%AT TIME ZONE ''America/Bogota'')::date%' THEN
     RAISE EXCEPTION 'FALLO: el reporte no revierte el costo de inventario en la fecha de aprobación de cancelación.';
   END IF;
   IF NOT has_function_privilege('authenticated','public.get_business_admin_profit_report(uuid,date,date)','EXECUTE')
