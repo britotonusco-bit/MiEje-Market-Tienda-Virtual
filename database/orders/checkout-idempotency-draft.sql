@@ -169,11 +169,6 @@ GRANT EXECUTE ON FUNCTION public.create_public_order_for_customer_with_payment_m
   uuid, uuid, uuid, text, text, text, text, text, text, jsonb
 ) TO service_role;
 
--- La función anterior sin snapshot no debe usarse para nuevos pedidos.
-REVOKE ALL ON FUNCTION public.create_public_order_for_customer(
-  uuid, uuid, text, text, text, text, text, text, jsonb
-) FROM PUBLIC, anon, authenticated, service_role;
-
 -- La cuenta autenticada se asigna solo después de validar el JWT en la Edge Function.
 CREATE OR REPLACE FUNCTION public.create_public_order_for_customer(
   p_customer_user_id uuid,
@@ -223,9 +218,10 @@ BEGIN
 END;
 $function$;
 
+-- Revocar después de crear la función: esta firma no existe en el esquema live.
 REVOKE ALL ON FUNCTION public.create_public_order_for_customer(
   uuid, uuid, text, text, text, text, text, text, jsonb
-) FROM PUBLIC, anon, authenticated;
+) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.create_public_order_for_customer(
   uuid, uuid, text, text, text, text, text, text, jsonb
 ) TO service_role;
