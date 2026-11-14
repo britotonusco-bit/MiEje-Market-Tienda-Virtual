@@ -409,6 +409,11 @@ BEGIN
     SELECT
       COALESCE((SELECT sum(amount) FROM period_payments),0)::numeric(14,2) sales,
       (SELECT amount FROM period_refunds) refunds,
+      COALESCE((
+        SELECT sum(o.delivery_fee)
+        FROM period_payments pp
+        JOIN public.orders o ON o.id=pp.order_id AND o.business_id=p_business_id
+      ),0)::numeric(14,2) delivery_fees,
       (SELECT gross_cost FROM cost_totals) gross_cost,
       (SELECT inventory_cost_reversals FROM cost_totals) inventory_cost_reversals,
       (SELECT net_cost FROM cost_totals) cost_of_sales,
@@ -418,14 +423,15 @@ BEGIN
   )
   SELECT jsonb_build_object(
     'start_date',p_start_date,'end_date',p_end_date,'sales',sales,'refunds',refunds,
-    'net_sales',sales-refunds,'gross_cost_of_sales',gross_cost,
+    'net_sales',sales-refunds,'delivery_fees_collected',delivery_fees,
+    'gross_cost_of_sales',gross_cost,
     'inventory_cost_reversals',inventory_cost_reversals,'cost_of_sales',cost_of_sales,
     'gross_profit_estimate',sales-refunds-cost_of_sales,
     'paid_expenses',paid_expenses,
     'net_profit_estimate',sales-refunds-cost_of_sales-paid_expenses,
     'missing_cost_lines',missing_cost_lines,'paid_orders',paid_orders,
     'complete_cost_data',missing_cost_lines=0,
-    'basis','Reporte de movimientos por fecha de confirmación en hora Bogotá: pagos, reembolsos, aprobaciones de cancelación que restituyen inventario y gastos pagados. El costo se reconoce con el pago y se revierte al aprobar una cancelación pagada. Resultado estimado, no estado contable certificado.'
+    'basis','Reporte de movimientos por fecha de confirmación en hora Bogotá. Los cobros incluyen productos y domicilio; el costo de entrega debe registrarse como gasto si lo asume el negocio. El costo de productos se reconoce con el pago y se revierte al aprobar una cancelación pagada. Resultado estimado, no estado contable certificado.'
   ) INTO v_result FROM totals;
   RETURN v_result;
 END;
