@@ -237,6 +237,9 @@ BEGIN
     RAISE EXCEPTION 'FALLO: RPC de reembolso ausente o con permisos incorrectos.';
   END IF;
 
+  IF to_regclass('public.order_cancellation_one_approved_per_order') IS NULL THEN
+    RAISE EXCEPTION 'FALLO: falta el índice que impide aprobar dos cancelaciones para el mismo pedido.';
+  END IF;
   IF to_regprocedure('public.request_order_cancellation(uuid,uuid,text)') IS NULL
      OR to_regprocedure('public.decide_order_cancellation(uuid,text,text)') IS NULL
      OR to_regprocedure('public.complete_order_refund(uuid,text,text,text,text)') IS NULL THEN
