@@ -272,7 +272,7 @@
     const target = document.querySelector('#ordersContainer');
     target.innerHTML = '<div class="empty">Cargando pedidos…</div>';
     const [ordersResult, financeResult] = await Promise.all([
-      db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,status,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100),
+      db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,delivery_tracking,status,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100),
       db.rpc('get_business_admin_order_financials', {
         p_business_id: businessId,
         p_refundable_only: false,
@@ -293,7 +293,7 @@
   async function loadEmployeeOrders() {
     const target = document.querySelector('#ordersContainer');
     target.innerHTML = '<div class="empty">Cargando pedidos…</div>';
-    const { data, error } = await db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,status,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
+    const { data, error } = await db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,delivery_tracking,status,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
     if (error) return showError(target, error);
     renderOrders(target, (data || []).map(o => ({ ...o, items: o.order_items || [] })), false);
   }
@@ -1256,7 +1256,7 @@
         ? ` <button class="small-button" data-mark-payment="${esc(o.id)}" data-payment-method="${esc(o.payment_method || '')}">Confirmar pago recibido</button>`
         : '';
       const action = `${nextStatus[o.status] ? `<button class="small-button" data-next="${nextStatus[o.status]}" data-order="${esc(o.id)}">Marcar: ${statusLabels[nextStatus[o.status]]}</button>` : ''}${paymentAction}${!['delivered','cancelled'].includes(o.status) ? ` <button class="small-button" data-cancel-request="${esc(o.id)}">Solicitar cancelación</button>` : ''}` || '—';
-      const base = [esc(`#${o.order_number}`), esc(o.customer_name || 'Cliente'), esc(o.customer_phone || '—'), esc(o.delivery_address || '—') + (o.delivery_notes ? `<br><small>${esc(o.delivery_notes)}</small>` : ''), items || 'Sin detalle', `<span class="pill ${statusClass[o.status] || ''}">${statusLabels[o.status] || esc(o.status)}</span>`, dateTime(o.created_at)];
+      const base = [esc(`#${o.order_number}`), esc(o.customer_name || 'Cliente'), esc(o.customer_phone || '—'), esc(o.delivery_address || '—') + (o.delivery_notes ? `<br><small>${esc(o.delivery_notes)}</small>` : '') + (o.delivery_tracking ? `<br><small>Seguimiento: ${esc(o.delivery_tracking)}</small>` : ''), items || 'Sin detalle', `<span class="pill ${statusClass[o.status] || ''}">${statusLabels[o.status] || esc(o.status)}</span>`, dateTime(o.created_at)];
       if (admin) base.splice(5, 0, `${money(o.total)}<br><small>${esc(o.payment_status || '—')} · ${esc(o.payment_method || '—')}</small>`);
       base.push(action);
       return base;
@@ -1439,11 +1439,33 @@
 
   async function changeOrderStatus(orderId, next, button) {
     button.disabled = true;
+    const changes = { status: next };
+
+    // Al iniciar el reparto, guardar una referencia que el cliente pueda consultar
+    // con su código privado de seguimiento.
+    if (next === 'out_for_delivery') {
+      const tracking = window.prompt(
+        'Ingresa el enlace o referencia de seguimiento. Si no usas transportadora, escribe por ejemplo: Domiciliario del negocio.',
+        'Domiciliario del negocio'
+      );
+      if (tracking === null) {
+        button.disabled = false;
+        return;
+      }
+      const normalizedTracking = tracking.trim();
+      if (normalizedTracking.length < 3 || normalizedTracking.length > 500) {
+        alert('La referencia de seguimiento debe tener entre 3 y 500 caracteres.');
+        button.disabled = false;
+        return;
+      }
+      changes.delivery_tracking = normalizedTracking;
+    }
+
     const { data: updatedOrder, error } = await db.from('orders')
-      .update({ status: next })
+      .update(changes)
       .eq('id', orderId)
       .eq('business_id', businessId)
-      .select('id,status')
+      .select('id,status,delivery_tracking')
       .maybeSingle();
     if (error || !updatedOrder) {
       alert(`No se pudo cambiar el estado: ${error?.message || 'El pedido no existe, pertenece a otro negocio o no tienes permiso para cambiarlo.'}`);
