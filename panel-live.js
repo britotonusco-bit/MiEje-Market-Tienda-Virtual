@@ -626,13 +626,12 @@
   async function loadTechnical() {
     const result = await callTechnicalFunction({ action: 'list_businesses' });
     cachedBusinesses = result.businesses || [];
-    const auditResult = await db.from('audit_logs').select('id', { count: 'exact', head: true });
-    if (auditResult.error) throw auditResult.error;
+    const auditResult = await callTechnicalFunction({ action: 'list_audit_logs', limit: 1 });
     renderStats([
       ['Negocios registrados', number(cachedBusinesses.length), 'Administración de la plataforma'],
       ['Negocios activos', number(cachedBusinesses.filter(b => b.status === 'active').length), 'Con acceso habilitado'],
       ['Negocios suspendidos', number(cachedBusinesses.filter(b => b.status === 'suspended').length), 'Requieren revisión o reactivación'],
-      ['Eventos de auditoría', number(auditResult.count || 0), 'Registros de actividad']
+      ['Eventos de auditoría', number(auditResult.audit_count || 0), 'Registros de actividad']
     ]);
     const options = `<option value="">Todos los negocios</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (inactivo)'}</option>`).join('');
     const select = document.querySelector('#businessSelect'); if (select) select.innerHTML = options;
@@ -1542,13 +1541,25 @@
 
   async function loadAuditEvents(id, selector) {
     const target = document.querySelector(selector);
-    let query = db.from('audit_logs').select('id,business_id,actor_id,action,entity_type,entity_id,details,created_at').order('created_at', { ascending: false }).limit(100);
-    if (id) query = query.eq('business_id', id);
-    else if (panel !== 'technical') query = query.eq('actor_id', currentUser.id);
-    const { data, error } = await query;
-    if (error) return showError(target, error);
-    const rows = data || [];
-    const names = await getUserNames(rows.map(e => e.actor_id));
+    let rows = [];
+    let names = new Map();
+    if (panel === 'technical') {
+      try {
+        const result = await callTechnicalFunction({ action: 'list_audit_logs', business_id: id || undefined, limit: 100 });
+        rows = result.audit_logs || [];
+        names = new Map(rows.filter(row => row.actor_name).map(row => [row.actor_id, row.actor_name]));
+      } catch (error) {
+        return showError(target, error);
+      }
+    } else {
+      let query = db.from('audit_logs').select('id,business_id,actor_id,action,entity_type,entity_id,details,created_at').order('created_at', { ascending: false }).limit(100);
+      if (id) query = query.eq('business_id', id);
+      else query = query.eq('actor_id', currentUser.id);
+      const { data, error } = await query;
+      if (error) return showError(target, error);
+      rows = data || [];
+      names = await getUserNames(rows.map(e => e.actor_id));
+    }
     if (!rows.length) { target.innerHTML = '<div class="empty">No hay registros de auditoría para este filtro todavía.</div>'; return; }
     target.innerHTML = tableHtml(['Fecha y hora','Usuario','Acción','Entidad','Registro','Detalle'], rows.map(e => [dateTime(e.created_at), names.get(e.actor_id) || shortId(e.actor_id), esc(e.action), esc(e.entity_type), e.entity_id || '—', esc(JSON.stringify(e.details || {}))]));
   }
