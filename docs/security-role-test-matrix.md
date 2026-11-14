@@ -1061,3 +1061,32 @@ El verificador de integración ahora comprueba: existencia de la relación `cust
 - Pruebas obligatorias: periodos diario/mensual/anual; pagos y reembolsos en fechas distintas; gastos pagados/pendientes/anulados; costos ausentes; aislamiento entre negocios; fechas inválidas; comparación con movimientos de prueba.
 
 **Estado:** reporte preparado en rama y migración pendiente. No se ejecutó SQL ni se publicó en GitHub Pages.
+## Auditoría de gastos, pagos y comprobantes — 14/11/2026
+
+### Estado comprobado en Supabase activo
+
+- `business_expenses` tiene importe positivo, categoría, descripción, fecha, proveedor, referencia, ruta de comprobante, estado de pago, fecha de pago y campos de anulación. Los gastos se conservan al anularse.
+- `register_business_expense` permite actualmente crear un gasto directamente como `paid`, sin pasar por `pay_business_expense`. Esto salta el paso uniforme de confirmación y no genera un evento propio en `audit_logs`.
+- `pay_business_expense` bloquea el registro duplicado por fila y valida administrador activo, pero no exige referencia para transferencias/tarjetas y no registra evento de auditoría. El movimiento queda representado solo por columnas del gasto.
+- `void_business_expense` conserva el registro y exige motivo, pero no escribe evento de auditoría.
+- `financial_transactions` registra pagos/reembolsos de pedidos con estado, importe, método, proveedor, referencia, usuario y fecha de confirmación. La función de confirmación de pago del pedido crea el movimiento, actualiza el pedido y escribe auditoría en una transacción; tiene índice único parcial para evitar más de un pago completado por pedido.
+- Las políticas activas de `business_expenses` y `financial_transactions` aún permiten al propietario técnico leer datos financieros. `business-admin-boundaries.sql` prepara la corrección para que solo el administrador activo del negocio tenga lectura directa.
+- No existe bucket privado para comprobantes de gastos. Los buckets actuales son imágenes comerciales públicas y documentos privados de postulaciones laborales.
+- El panel administrador no incluye todavía un módulo funcional para crear/listar/pagar/anular gastos ni adjuntar/consultar sus comprobantes.
+
+### Correcciones preparadas
+
+- Nuevo borrador `database/finance/expense-receipts-storage-draft.sql`: crea bucket privado de 5 MB para PDF/JPEG/PNG/WebP y permite leer/cargar solo al administrador del negocio propietario del gasto, con ruta `<business_uuid>/<expense_uuid>/<filename>`. No concede lectura pública ni UPDATE/DELETE de objetos.
+- El verificador comprueba que el bucket permanezca privado y que existan las políticas de lectura/carga administrativa.
+- La migración de límites de administrador elimina el acceso financiero global del propietario técnico.
+
+### Pendiente antes de habilitar el módulo de gastos
+
+1. Modificar `register_business_expense` para que siempre cree gastos pendientes; el pago debe pasar por una transición separada.
+2. Exigir referencia cuando el método de pago sea transferencia o tarjeta.
+3. Registrar en `audit_logs` cada creación, pago y anulación, incluyendo actor, negocio, importe y referencia, sin almacenar datos sensibles innecesarios.
+4. Añadir RPC restringido para asociar el comprobante cargado al gasto y verificar que el objeto está en la ruta correcta.
+5. Crear el módulo de gastos del panel administrador con lista, filtros, alta, confirmación, anulación y enlaces firmados temporales a comprobantes.
+6. Probar aislamiento entre negocios A/B, empleados, propietario técnico, carga de archivos no permitidos, rutas falsificadas, doble pago y anulación.
+
+**Estado:** hallazgos y borrador de almacenamiento privado preparados en la rama. No se aplicaron migraciones ni se desplegó el módulo. Los gastos y comprobantes no deben considerarse listos para uso real desde el panel.
