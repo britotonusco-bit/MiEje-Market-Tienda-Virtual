@@ -930,3 +930,12 @@ La consulta de solo lectura del 14/11/2026 confirmó que todavía no existen est
 - `complete_order_refund` y `get_customer_order_history`.
 
 Por tanto, las pantallas y botones que llaman a esas RPC no deben considerarse operativos en el proyecto activo hasta aplicar y verificar las migraciones correspondientes. En particular, el panel administrativo no podrá cargar el resumen financiero ni registrar pagos recibidos; empleados/admin no podrán completar el flujo nuevo de solicitudes de cancelación y el administrador no podrá registrar reembolsos mediante estas RPC. La presencia de tablas existentes no significa que los procedimientos de negocio estén instalados.
+
+
+### Hallazgo adicional: confirmación de pagos del pedido
+
+- El panel de administrador muestra la acción **Confirmar pago recibido** únicamente cuando el pedido tiene pago pendiente. La acción llama a `mark_order_payment_received`.
+- En la base activa inspeccionada, esa RPC todavía no existe. Por tanto, el botón no puede completar el registro financiero allí.
+- La rama incluye la RPC en `database/orders/order-financial-access-draft.sql`. Esta valida que el actor sea el administrador activo del negocio, bloquea la fila del pedido, evita pagos duplicados, exige referencia para métodos distintos de efectivo, registra el movimiento financiero y cambia `payment_status` a `paid` en la misma transacción.
+- El panel no debe afirmar que el pago fue cobrado automáticamente: es una confirmación manual de dinero que el negocio ya recibió por fuera de MiEje Market.
+- El verificador de integración ahora comprueba que `mark_order_payment_received` permita ejecución a `authenticated` y la niegue a `anon`.
