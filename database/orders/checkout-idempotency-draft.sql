@@ -165,7 +165,7 @@ BEGIN
     RAISE EXCEPTION 'Se requiere una clave de pedido válida.';
   END IF;
 
-  v_request_hash := md5(jsonb_build_object(
+  v_request_hash := pg_catalog.encode(extensions.digest(jsonb_build_object(
     'business_id', p_business_id,
     'payment_method_id', p_payment_method_id,
     'customer_user_id', p_customer_user_id,
@@ -176,7 +176,7 @@ BEGIN
     'delivery_notes', p_delivery_notes,
     'payment_method', p_payment_method,
     'items', p_items
-  )::text);
+  )::text, 'sha256'), 'hex');
 
   SELECT request_hash, response
   INTO v_existing_hash, v_existing_response
@@ -216,6 +216,13 @@ ALTER TABLE private.checkout_rate_limit_reservations ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE private.checkout_rate_limit_reservations
   FROM PUBLIC, anon, authenticated, service_role;
 
+-- Índices para que el conteo por IP y la limpieza de reservas antiguas
+-- no recorran toda la tabla cuando aumente el volumen de compras.
+CREATE INDEX IF NOT EXISTS checkout_rate_reservations_ip_created_idx
+  ON private.checkout_rate_limit_reservations (ip_hash, created_at DESC);
+CREATE INDEX IF NOT EXISTS checkout_rate_reservations_created_idx
+  ON private.checkout_rate_limit_reservations (created_at);
+
 CREATE OR REPLACE FUNCTION public.reserve_checkout_rate_limit(
   p_idempotency_key uuid,
   p_ip text,
@@ -252,7 +259,7 @@ BEGIN
   v_ip_hash := pg_catalog.encode(
     extensions.digest(pg_catalog.btrim(p_ip), 'sha256'), 'hex'
   );
-  v_request_hash := pg_catalog.md5(pg_catalog.jsonb_build_object(
+  v_request_hash := pg_catalog.encode(extensions.digest(pg_catalog.jsonb_build_object(
     'business_id', p_business_id,
     'payment_method_id', p_payment_method_id,
     'customer_user_id', p_customer_user_id,
@@ -263,7 +270,7 @@ BEGIN
     'delivery_notes', p_delivery_notes,
     'payment_method', p_payment_method,
     'items', p_items
-  )::text);
+  )::text, 'sha256'), 'hex');
 
   -- Serializar por clave y después por IP para evitar reservas duplicadas
   -- y que solicitudes concurrentes sobrepasen el límite.
@@ -349,7 +356,7 @@ BEGIN
     RAISE EXCEPTION 'Se requiere una clave de pedido válida.';
   END IF;
 
-  v_request_hash := md5(jsonb_build_object(
+  v_request_hash := pg_catalog.encode(extensions.digest(jsonb_build_object(
     'business_id', p_business_id,
     'payment_method_id', p_payment_method_id,
     'customer_user_id', p_customer_user_id,
@@ -360,7 +367,7 @@ BEGIN
     'delivery_notes', p_delivery_notes,
     'payment_method', p_payment_method,
     'items', p_items
-  )::text);
+  )::text, 'sha256'), 'hex');
 
   -- Serializa solicitudes simultáneas con la misma clave.
   PERFORM pg_advisory_xact_lock(hashtextextended(p_idempotency_key::text, 0));
