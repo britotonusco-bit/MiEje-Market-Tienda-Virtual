@@ -1096,3 +1096,7 @@ El verificador de integración ahora comprueba: existencia de la relación `cust
 - Se corrigieron las políticas del bucket para comparar UUID como texto y evitar conversiones de rutas no confiables, y para conservar lectura de comprobantes históricos de gastos anulados.
 - La transición de pago del trigger permite actualizar la referencia junto con el método y la fecha; se revisó esta correspondencia entre RPC y trigger para evitar que el pago falle al guardar la referencia.
 - La función de confirmación no procesa dinero ni valida una transferencia bancaria: registra que el administrador afirma haber recibido/realizado el pago. Se necesita conciliación humana y comprobante cuando aplique.
+
+- Se añadió al panel administrador una sección de gastos con alta de gasto pendiente, listado, confirmación de pago, anulación y adjunto/consulta temporal de comprobantes. La interfaz invoca los RPCs del borrador y no permite que el técnico o los empleados gestionen gastos desde sus paneles.
+- El formulario valida archivos PDF/JPG/PNG/WEBP de hasta 5 MB en el navegador; el bucket también limita tipos y tamaño, y Storage aplica RLS. La descarga de comprobantes usa enlaces firmados de duración corta.
+- El módulo está integrado en la rama, pero queda sin prueba funcional real porque las funciones/migraciones siguen sin desplegarse y el proyecto activo no tiene datos de negocios/pedidos de ensayo.
