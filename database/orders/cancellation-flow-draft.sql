@@ -209,6 +209,9 @@ BEGIN
       'Restitución por cancelación del pedido ' || v_request.order_id::text,
       true
     );
+    PERFORM pg_catalog.set_config(
+      'app.inventory_movement_type', 'cancellation_return', true
+    );
 
     WITH quantities AS (
       SELECT oi.product_id, pg_catalog.sum(oi.quantity)::integer AS quantity
