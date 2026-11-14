@@ -94,3 +94,49 @@ El borrador contiene, entre otras medidas:
 - Migración aplicada en Supabase: **no**.
 - Pruebas de extremo a extremo con usuarios de cada rol: **pendientes**.
 - Despliegue de Edge Functions o publicación: **no realizado**.
+
+
+## Segunda revisión estática de la migración
+
+Se compararon las políticas actuales de Supabase con los nombres que elimina y recrea `database/security/business-admin-boundaries.sql`.
+
+### Correspondencia de políticas
+
+Los nombres de políticas de la base de datos actual coinciden con los `DROP POLICY` del borrador en las áreas revisadas: negocios, perfiles, membresías, pedidos, líneas de pedido, productos (lectura), métodos de pago, gastos, transacciones financieras, reembolsos, costos, contenido comercial, solicitudes de cancelación y postulaciones.
+
+Las políticas actuales de escritura de productos (`products_admin_insert`, `products_admin_update`, `products_admin_delete`) ya exigen el rol `business_admin` y negocio activo. No se encontró en ellas un bypass de propietario técnico. El borrador mantiene esa restricción y retira el bypass que sí existe en la política de lectura autenticada.
+
+Las políticas actuales de inserción/actualización de páginas comerciales y actualización de postulaciones ya exigen administrador activo; el borrador conserva ese límite y corrige la lectura.
+
+### Privilegios de columnas
+
+El borrador reduce privilegios directos de columnas en las tablas `businesses`, `products`, `business_payment_methods`, `product_costs`, `business_expenses` y `profiles`.
+
+- Productos: el administrador solo recibe UPDATE de campos comerciales y de inventario; no recibe permiso para cambiar `id` ni `business_id`.
+- Métodos de pago: no recibe UPDATE de identidad ni pertenencia al negocio; solo de los campos de configuración.
+- Costos: solo puede actualizar el precio de costo y la marca de actualización; no puede trasladar el costo a otro producto o negocio.
+- Negocios: solo puede actualizar la ficha comercial; el estado de plataforma y los identificadores quedan fuera del grant.
+- Perfiles: el usuario puede modificar únicamente nombre visible, avatar y teléfono; no puede cambiar rol ni bloqueo.
+- Gastos: el INSERT se limita a campos de captura y la política exige que el nuevo gasto esté pendiente, sin datos de pago ni anulación. El UPDATE se limita a columnas de transición que valida el trigger.
+
+### Validación de los helpers y triggers actuales
+
+- `private.has_business_role` valida usuario, membresía activa, rol permitido y perfil no bloqueado.
+- `private.business_is_active` exige estado `active` del negocio.
+- `private.guard_business_expense_update` no permite edición libre de gastos; acepta solo el cambio de pendiente a pagado o la anulación, y compara el resto de columnas para detectar alteraciones.
+- El borrador reemplaza `private.enforce_order_status_transition` para retirar el bypass del propietario técnico y exigir membresía activa en el negocio.
+
+### Riesgos que todavía requieren atención antes de ejecutar
+
+1. **No se ha validado la sintaxis ejecutando la migración en una base de ensayo.** El proyecto no tiene un entorno de staging disponible. No se debe afirmar que el archivo está listo para producción solo por la revisión estática.
+2. **No se han probado los paneles con usuarios de los cuatro tipos** (propietario técnico, administrador, empleado y cliente). En particular, deben comprobarse las consultas de la interfaz que actualmente podrían depender de leer columnas de perfil como `platform_role` o `is_blocked` directamente. El borrador limita esas columnas y el código de cliente debe obtener el acceso autorizado desde `resolve-my-access`.
+3. **Debe revisarse el flujo de membresías en la Edge Function técnica** tras revocar INSERT/UPDATE/DELETE directos de `business_memberships`. La función técnica usa `service_role`, por lo que debe seguir pudiendo crear, cambiar y suspender membresías. Esto necesita una prueba real de invitación y asignación.
+4. **Debe revisarse la interfaz de empleados** porque el borrador reserva los costos, gastos, pagos y bandeja de cancelaciones al administrador. Las funciones de solicitud de cancelación siguen siendo una vía controlada para empleados; hay que comprobar que la interfaz no intente consultar la bandeja de decisiones.
+5. **La tabla `businesses` solo expone por Data API las columnas concedidas en el GRANT.** Las páginas públicas y paneles deben probarse para confirmar que no solicitan columnas internas que ahora quedarán ocultas.
+6. **El propietario técnico conserva el acceso de servicio a través de Edge Functions.** Hay que verificar que los endpoints técnicos no devuelvan información operativa privada como parte de sus respuestas generales; esta migración solo limita el Data API directo, no los endpoints con `service_role`.
+
+### Conclusión de esta segunda revisión
+
+No se encontró una política de escritura de productos que permita al propietario técnico modificar el catálogo directamente. Sí se confirmó que las políticas actuales de lectura y varias tablas operativas le permiten consultar datos globales. El borrador aborda esas rutas y restringe los privilegios por columna.
+
+**La migración sigue clasificada como borrador pendiente de ensayo.** La revisión estática reduce la incertidumbre, pero no reemplaza las pruebas de SQL, RLS, Edge Functions y flujos completos. No se aplicó ningún cambio en Supabase.
