@@ -976,3 +976,35 @@ El verificador de integración ahora comprueba: existencia de la relación `cust
 8. Los pedidos antiguos anteriores a la migración no se vinculan automáticamente por coincidencia de correo.
 
 **Estado:** revisión de código y verificaciones estáticas preparadas en `correcciones-funcionales`. La base activa no ha recibido migraciones; no se ha probado registro, compra autenticada ni historial de extremo a extremo.
+
+## Auditoría financiera de pedidos — 14/11/2026
+
+### Estado observado en Supabase activo
+
+- `financial_transactions` y `business_expenses` tienen RLS, pero las políticas activas `financial_admin_select` y `business_expenses_select` incluyen un bypass `private.is_platform_owner()`. Esto permite al propietario técnico lectura directa global de finanzas de negocios y contradice el modelo de paneles.
+- Las RPC `register_business_expense`, `pay_business_expense` y `void_business_expense` exigen sesión y rol de administrador del negocio; el trigger `guard_business_expense_update` impide editar gastos libremente, pagar dos veces o modificar gastos anulados.
+- `financial_transactions` todavía no tiene índices únicos parciales para un pago completado o reembolso completado por pedido. El índice activo `financial_business_order_id_unique` incluye también `id`, por lo que no impide múltiples movimientos del mismo tipo para el mismo pedido.
+- No hay negocios, pedidos, gastos ni transacciones financieras en la base activa al momento de esta revisión; por eso no existen duplicados actuales, pero tampoco es posible probar operaciones reales.
+- La base no registra actualmente una fecha de confirmación de pago en `orders`. El panel suma pedidos con `payment_status='paid'` usando `orders.created_at`; ese dato no equivale a un libro de caja por fecha efectiva de cobro.
+
+### Correcciones preparadas en la rama
+
+- `business-admin-boundaries.sql` elimina el bypass técnico de lectura de `financial_transactions`, `refund_details` y `business_expenses`. El técnico debe seguir usando las operaciones de gestión técnica, no las consultas financieras del negocio.
+- `order-financial-access-draft.sql` crea el índice único parcial `financial_one_completed_payment_per_order` y la RPC `mark_order_payment_received()`. La RPC bloquea el pedido, acepta únicamente pagos pendientes, registra el movimiento y cambia el estado del pedido dentro de una transacción. Es una confirmación manual de un pago recibido por fuera, no una pasarela de pagos.
+- `refund-flow-draft.sql` crea `financial_one_completed_refund_per_order` y `complete_order_refund()`. Solo registra un reembolso total ya realizado externamente, para un pedido cancelado y con solicitud aprobada; no mueve dinero.
+- `panel-live.js` aclara las etiquetas del resumen para no presentar la suma de pedidos con pago confirmado como si fuera un libro de caja por fecha de cobro.
+- El verificador de integración comprueba índices únicos de pago/reembolso, permisos de reembolso y ausencia del bypass del propietario técnico en políticas de lectura financiera.
+
+### Pruebas obligatorias en ensayo
+
+1. Administrador del negocio A consulta sus movimientos; no puede consultar negocio B.
+2. Propietario técnico y empleados no pueden leer directamente movimientos, gastos ni detalles de reembolso de ningún negocio.
+3. Una confirmación concurrente del mismo pedido solo crea un pago completado.
+4. Una segunda confirmación de un pedido ya pagado falla sin insertar otro movimiento.
+5. No se puede registrar un pago para pedido cancelado, fallido o reembolsado.
+6. Solo un pedido cancelado, pagado y con cancelación aprobada puede registrar un reembolso.
+7. Dos intentos simultáneos de reembolso no pueden crear dos devoluciones completadas.
+8. El panel no cuenta un reembolso como dinero actualmente recibido.
+9. Los reportes por día/mes/año se calculan con la fecha del movimiento financiero, separando ingresos, reembolsos y gastos; no se deben inferir desde `orders.created_at`.
+
+**Estado:** revisión estática y correcciones preparadas en `correcciones-funcionales`. No se han aplicado migraciones ni desplegado funciones en el proyecto activo.
