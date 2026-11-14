@@ -543,7 +543,9 @@ BEGIN
 
 
   IF to_regprocedure('public.attach_business_expense_receipt(uuid,text)') IS NULL
-     OR to_regprocedure('public.pay_business_expense(uuid,text,text)') IS NULL THEN
+     OR to_regprocedure('public.pay_business_expense(uuid,text,text)') IS NULL
+     OR to_regprocedure('public.register_business_expense(uuid,text,text,numeric,date,text,text,text,text,text,text)') IS NULL
+     OR to_regprocedure('public.void_business_expense(uuid,text)') IS NULL THEN
     RAISE EXCEPTION 'FALLO: faltan RPCs de confirmación de gasto o asociación de comprobantes.';
   END IF;
   IF has_function_privilege('anon','public.attach_business_expense_receipt(uuid,text)','EXECUTE')
