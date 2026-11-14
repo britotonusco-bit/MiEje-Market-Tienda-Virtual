@@ -213,16 +213,32 @@ BEGIN
 
   IF EXISTS (
     SELECT 1 FROM pg_policies
-    WHERE schemaname='public' AND tablename='financial_transactions'
-      AND policyname='financial_admin_select'
-      AND qual ILIKE '%is_platform_owner%'
-  ) OR EXISTS (
-    SELECT 1 FROM pg_policies
-    WHERE schemaname='public' AND tablename='business_expenses'
-      AND policyname='business_expenses_select'
-      AND qual ILIKE '%is_platform_owner%'
+    WHERE schemaname='public' AND tablename IN (
+      'financial_transactions','business_expenses','refund_details',
+      'product_costs','order_item_costs'
+    )
+      AND policyname IN (
+        'financial_admin_select','business_expenses_select','refund_admin_select',
+        'product_costs_admin_select','order_item_costs_admin_select'
+      )
+      AND coalesce(qual,'') ILIKE '%is_platform_owner%'
   ) THEN
-    RAISE EXCEPTION 'FALLO: el propietario técnico conserva lectura directa global de finanzas de negocios.';
+    RAISE EXCEPTION 'FALLO: el propietario técnico conserva lectura directa global de finanzas o costos de negocios.';
+  END IF;
+
+  IF position('has_business_role' IN lower(pg_get_functiondef(
+       'public.get_business_admin_order_financials(uuid,boolean,integer)'::regprocedure
+     ))) = 0
+     OR position('business_is_active' IN lower(pg_get_functiondef(
+       'public.get_business_admin_order_financials(uuid,boolean,integer)'::regprocedure
+     ))) = 0
+     OR position('has_business_role' IN lower(pg_get_functiondef(
+       'public.mark_order_payment_received(uuid,text,text,text)'::regprocedure
+     ))) = 0
+     OR position('business_is_active' IN lower(pg_get_functiondef(
+       'public.mark_order_payment_received(uuid,text,text,text)'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: un RPC financiero no valida membresía administrativa y negocio activo.';
   END IF;
 
   IF to_regclass('public.refund_details') IS NULL
