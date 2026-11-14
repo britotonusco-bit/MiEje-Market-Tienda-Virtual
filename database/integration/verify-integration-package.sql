@@ -218,6 +218,37 @@ BEGIN
     RAISE EXCEPTION 'FALLO: faltan funciones de protección de membresías/negocios/pedidos.';
   END IF;
 
+  -- El técnico no debe conservar un bypass global sobre pedidos ni partidas.
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='orders'
+      AND policyname IN ('orders_members_select','orders_members_update_status')
+      AND (
+        coalesce(qual,'') ILIKE '%is_platform_owner%'
+        OR coalesce(with_check,'') ILIKE '%is_platform_owner%'
+      )
+  ) OR EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='order_items'
+      AND policyname='order_items_members_select'
+      AND coalesce(qual,'') ILIKE '%is_platform_owner%'
+  ) OR position(
+    'is_platform_owner' IN lower(pg_get_functiondef(
+      'private.enforce_order_status_transition()'::regprocedure
+    ))
+  ) > 0 THEN
+    RAISE EXCEPTION 'FALLO: el propietario técnico conserva un bypass directo en el flujo de pedidos.';
+  END IF;
+
+  IF NOT has_column_privilege('authenticated','public.orders','status','UPDATE')
+     OR NOT has_column_privilege('authenticated','public.orders','delivery_tracking','UPDATE')
+     OR has_column_privilege('authenticated','public.orders','payment_status','UPDATE')
+     OR has_column_privilege('authenticated','public.orders','total','UPDATE')
+     OR has_table_privilege('anon','public.orders','SELECT')
+     OR has_table_privilege('anon','public.order_items','SELECT') THEN
+    RAISE EXCEPTION 'FALLO: los permisos de actualización/lectura de pedidos no coinciden con el modelo.';
+  END IF;
+
   IF NOT EXISTS (
     SELECT 1 FROM pg_policies
     WHERE schemaname='public' AND tablename='customer_favorites'
