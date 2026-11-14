@@ -222,3 +222,63 @@ El código actual y los borradores coinciden entre sí en estos estados: `pendin
 ### Estado
 
 Esta revisión no encontró una llamada de la interfaz que permita al empleado confirmar pagos, registrar reembolsos, consultar reportes financieros o administrar gastos. Las restricciones críticas están en funciones SQL y triggers, no dependen solo de ocultar botones. El resultado es una revisión estática de los borradores: no demuestra que las funciones estén instaladas ni que el comportamiento se haya probado en Supabase.
+
+
+## Quinta revisión: aislamiento entre negocios, relaciones y Edge Functions
+
+Se contrastaron las funciones SQL instaladas en Supabase, las políticas RLS y los privilegios actuales con las versiones preparadas en `correcciones-funcionales`.
+
+### 1. Relaciones entre negocios y registros operativos
+
+Las relaciones compuestas instaladas ofrecen una protección importante frente a identificadores cruzados:
+
+- `order_cancellation_requests(business_id, order_id)` referencia conjuntamente el negocio y el pedido.
+- `financial_transactions(business_id, order_id)` exige que el movimiento pertenezca al mismo negocio que el pedido.
+- La relación financiera de una cancelación también comprueba negocio, pedido y solicitud.
+- `refund_details` relaciona negocio, pedido y transacción financiera en conjunto.
+- `product_costs(business_id, product_id)` exige que el producto pertenezca al negocio indicado.
+- `order_item_costs` comprueba la relación con el pedido y la línea correspondiente.
+
+Estas restricciones reducen el riesgo de asociar accidentalmente un pago, reembolso, costo o cancelación con un pedido de otra tienda.
+
+**Punto a conservar en las siguientes migraciones:** `order_items` tiene actualmente claves foráneas simples hacia `orders(id)` y `products(id)`, no una clave compuesta que obligue a que el producto y el pedido sean del mismo negocio. El checkout instalado sí comprueba `products.business_id = p_business_id` antes de insertar cada línea, y los roles `anon` y `authenticated` no tienen INSERT directo en `order_items`; por tanto, no se identificó una ruta directa para que un cliente fuerce esa mezcla. Aun así, conviene reforzar la integridad relacional con una FK compuesta o trigger de consistencia en una migración futura, especialmente porque `service_role` sí tiene privilegios de escritura.
+
+### 2. Funciones SECURITY DEFINER y permisos de ejecución
+
+La consulta de funciones instaladas encontró que las funciones públicas privilegiadas revisadas tienen `search_path` vacío y no conceden ejecución a `anon` ni a `authenticated`. Las funciones de checkout, postulación y límites de solicitudes quedan ejecutables por `service_role`; las funciones privadas de soporte no se exponen directamente al cliente.
+
+La función instalada `create_public_order` valida que el negocio esté activo y que cada producto seleccionado pertenezca al `p_business_id` recibido, esté activo y tenga inventario suficiente. Bloquea la fila del producto con `FOR UPDATE`, recalcula los precios en servidor y descuenta inventario dentro de la misma transacción. No confía en los precios enviados por el navegador.
+
+La función `submit_public_job_application` comprueba que la página de vacante pertenezca al negocio indicado, esté publicada, aprobada y sea de tipo `job_form`. Cuando hay hoja de vida, exige una sesión de carga que coincida en identificador, negocio, página y ruta del archivo, y que no haya vencido ni sido consumida.
+
+**Resultado:** no se encontró una concesión de ejecución directa de estas funciones privilegiadas a usuarios públicos o autenticados. La validación de pertenencia negocio-producto en el checkout y negocio-vacante en la postulación se realiza en servidor.
+
+### 3. Edge Functions que usan service_role
+
+Se revisaron las funciones instaladas de checkout, seguimiento público, directorio de pagos, postulaciones, acceso y administración técnica.
+
+- `create-public-order`: la versión instalada valida que el método de pago pertenezca al mismo `business_id`, esté habilitado y que la función SQL valide los productos para ese negocio. Sin embargo, la versión desplegada todavía llama a `create_public_order` directamente, no asocia el pedido a una cuenta de cliente y no utiliza la clave idempotente. La versión más reciente del repositorio ya incorpora validación del JWT del cliente, rechazo de perfiles bloqueados, vinculación de `customer_user_id`, consulta/reserva idempotente y límites de solicitudes. **La corrección existe en la rama, pero no está desplegada ni puede considerarse activa en Supabase.**
+- `get-public-storefront`: la versión desplegada selecciona los identificadores de los negocios activos y devuelve los métodos de pago habilitados. La versión instalada consultaba las columnas sin incluir `id`, aunque después intentaba devolver `method.id`; esto hace que el identificador llegue indefinido al navegador y puede impedir que el checkout envíe un método de pago válido. La versión de la rama ya incluye `id` en el SELECT y lo devuelve. **Es una discrepancia funcional confirmada entre el despliegue y el código corregido.**
+- `track-public-order`: consulta por un token privado de seguimiento y devuelve únicamente número, estado, fechas, seguimiento de entrega, total y nombre del negocio; no devuelve dirección, teléfono, correo ni líneas del pedido. La versión de la rama agrega `Cache-Control: no-store, private`, pero la instalada no lo incluye. Conviene desplegar la corrección antes de usar seguimiento con pedidos reales y añadir limitación de consultas por token/IP como endurecimiento adicional.
+- `create-job-application`: verifica negocio activo y página publicada/aprobada del mismo negocio antes de crear la sesión de carga o enviar la postulación. La ruta de la hoja de vida se genera en servidor con prefijo de negocio y aplicación; la RPC vuelve a comprobar la relación con la sesión de carga. La función usa límites por IP.
+- `technical-business-management`: exige JWT válido, perfil no bloqueado y rol de propietario técnico antes de las acciones administrativas. La lista de miembros se filtra por el `business_id` solicitado; la consulta global de negocios y auditoría es deliberada y corresponde a las funciones del panel técnico, no a una consulta del catálogo o los pedidos privados.
+
+### 4. Políticas y privilegios instalados frente al borrador
+
+La lectura actual de Supabase confirma que todavía existen bypass del propietario técnico en RLS para pedidos, líneas, productos, métodos de pago, costos, gastos, transacciones financieras, reembolsos y solicitudes de cancelación. También conserva acceso de actualización de la ficha comercial. Los roles de usuario no tienen INSERT directo sobre pedidos ni líneas; la creación se realiza mediante las funciones de servidor.
+
+El archivo `database/security/business-admin-boundaries.sql` elimina esos bypass y limita las consultas operativas a miembros activos del negocio correspondiente. Los privilegios actuales de escritura de `products`, `business_payment_methods` y `product_costs` todavía son amplios a nivel de tabla para `authenticated`; el borrador los sustituye por permisos de columna que impiden cambiar identificadores o trasladar registros a otro negocio.
+
+### 5. Hallazgos y acciones pendientes
+
+1. **Prioridad funcional alta — métodos de pago:** la Edge Function instalada no devuelve `id` en su consulta, aunque el frontend lo necesita para el valor del selector. La rama ya contiene la corrección; falta desplegarla y probar un checkout completo.
+2. **Prioridad de integridad — checkout:** la función instalada no usa idempotencia ni vincula los pedidos de clientes autenticados con su cuenta. La rama contiene la implementación y la migración correspondiente, pero ambas siguen pendientes de ensayo y despliegue.
+3. **Privacidad — seguimiento:** la función instalada debe incorporar respuesta `no-store`; se recomienda limitar intentos de consulta. El token privado funciona como credencial de acceso al resumen del pedido y no debe publicarse en registros o enlaces compartidos.
+4. **Integridad relacional — líneas de pedido:** estudiar una clave foránea compuesta que garantice que cada producto de una línea corresponde al mismo negocio del pedido. Actualmente el checkout valida esta relación en el servidor y no hay INSERT directo para clientes.
+5. **Prueba IDOR pendiente:** no se pudo ejecutar una prueba real con dos negocios y usuarios de roles distintos porque no hay datos de negocios, pedidos y cuentas de prueba suficientes. La revisión de código y restricciones no equivale a una prueba de explotación ni a una prueba E2E.
+
+### Conclusión de la quinta revisión
+
+No se identificó en las rutas de checkout y postulación revisadas una validación que acepte un producto o una vacante perteneciente a otro negocio. Las claves foráneas compuestas de pagos, cancelaciones, reembolsos y costos aportan integridad adicional. No obstante, el aislamiento completo **todavía no está aplicado en la base de datos**: las políticas instaladas conservan accesos globales del propietario técnico y la versión desplegada de algunas Edge Functions está atrasada respecto de la rama.
+
+No se ejecutó SQL, no se desplegó ninguna Edge Function y no se modificó producción durante esta revisión. Los cambios del repositorio continúan limitados a la rama `correcciones-funcionales`.
