@@ -111,6 +111,7 @@
         if (panel === 'business_admin') { await loadBusinessAdmin(); await initBusinessSettings(); await initBusinessAi(); await loadBlockTargetUsers(); }
         else { await loadEmployeeOrders(); await showSupportLink(); }
       }
+      startAccessRevalidation();
     } catch (error) {
       if (notice) { notice.textContent = error.message || 'No se pudo cargar el panel.'; notice.className = 'notice'; }
       document.querySelectorAll('.panel-section, #statsGrid').forEach(el => { if (el) el.classList.add('hidden'); });
@@ -125,6 +126,57 @@
 
   async function signOut() {
     try { await db.auth.signOut(); } finally { window.location.replace('login.html'); }
+  }
+
+  // Revalida el acceso en servidor mientras el panel permanece abierto.
+  // Una membresía suspendida o un perfil bloqueado no conservará la interfaz
+  // operativa indefinidamente con una sesión que ya estaba abierta.
+  let accessCheckInProgress = false;
+  async function revalidatePanelAccess() {
+    if (!db || accessCheckInProgress || document.visibilityState === 'prerender') return;
+    accessCheckInProgress = true;
+    try {
+      const { data: auth, error: authError } = await db.auth.getUser();
+      if (authError || !auth.user) throw new Error('La sesión ya no es válida.');
+      const { data: access, error: accessError } = await db.functions.invoke('resolve-my-access', { body: {} });
+      if (accessError || !access?.ok || !access.profile) {
+        throw new Error(access?.error || 'Tu acceso fue suspendido o ya no está autorizado.');
+      }
+      if (panel === 'technical') {
+        if (!access.is_platform_owner || access.profile.platform_role !== 'platform_owner') {
+          throw new Error('Tu cuenta ya no tiene autorización para el panel técnico.');
+        }
+        const { data: assurance, error: assuranceError } = await db.auth.mfa.getAuthenticatorAssuranceLevel();
+        if (assuranceError || assurance?.currentLevel !== 'aal2') {
+          throw new Error('La verificación en dos pasos venció. Inicia sesión nuevamente.');
+        }
+      } else {
+        const stillAllowed = (access.memberships || []).some(item =>
+          item.business_id === businessId &&
+          item.business?.status === 'active' &&
+          item.role === panel
+        );
+        if (!stillAllowed) throw new Error('Tu acceso a este negocio fue suspendido o retirado.');
+      }
+    } catch (error) {
+      console.warn('MiEje Market: acceso revocado o no verificable.', error);
+      const notice = document.querySelector('#notice');
+      if (notice) {
+        notice.textContent = error.message || 'Tu acceso dejó de estar autorizado. Inicia sesión nuevamente.';
+        notice.className = 'notice error';
+      }
+      try { await db.auth.signOut({ scope: 'local' }); } catch (_) {}
+      window.location.replace('login.html');
+    } finally {
+      accessCheckInProgress = false;
+    }
+  }
+
+  function startAccessRevalidation() {
+    window.setInterval(() => { void revalidatePanelAccess(); }, 60000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') void revalidatePanelAccess();
+    });
   }
 
   async function loadBusinessAdmin() {
