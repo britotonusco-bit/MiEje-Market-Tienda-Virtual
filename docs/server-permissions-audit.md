@@ -909,3 +909,64 @@ Se completó la conexión visual del snapshot en los puntos que ya existen:
 **Compatibilidad histórica:** los pedidos creados antes de aplicar la migración tendrán `payment_method_id` y `payment_method_name` nulos. No es posible reconstruir con certeza qué cuenta concreta eligió cada cliente a partir del antiguo código general (`transfer`, por ejemplo); la interfaz muestra un valor genérico para esos pedidos antiguos.
 
 No se desplegaron estos archivos ni se ejecutó la migración. La confirmación de funcionamiento requiere instalar primero los borradores en staging y realizar compras con dos métodos distintos del mismo tipo.
+
+
+## Revisión de compatibilidad y orden de instalación del paquete SQL
+
+Se revisaron los 15 borradores SQL y sus dependencias, junto con la estructura live de Supabase Independiente. No se ejecutó ninguna migración.
+
+### Correcciones detectadas y aplicadas en la rama
+
+1. `database/orders/checkout-idempotency-draft.sql`
+   - El bloque DO que agrega la FK del método de pago tenía delimitadores de dollar-quote incompletos. Se corrigió usando el delimitador `$payment_method_fk$`.
+   - La revocación del helper `create_public_order_for_customer` estaba antes de crear la función. En Supabase live esa firma no existe; PostgreSQL habría detenido la migración. La revocación ahora aparece después de la definición y antes de conceder EXECUTE solo a `service_role`.
+   - La llamada idempotente sigue usando el helper que guarda el método concreto y su snapshot.
+
+2. `database/inventory/checkout-inventory-lock-order-draft.sql`
+   - El archivo contenía fragmentos repetidos e incompletos después de la sección de pruebas. Se conservó la definición completa de `create_public_order` y se retiraron los fragmentos sobrantes.
+   - La lectura posterior confirmó una sola definición de la función y un final limpio del archivo.
+
+### Orden recomendado de aplicación en un entorno de pruebas
+
+1. `database/platform/platform-public-settings-draft.sql`
+2. `database/security/business-admin-boundaries.sql`
+3. `database/platform/platform-finance-payroll-draft.sql`
+4. `database/ai/ai-settings-draft.sql`
+5. `database/security/access-block-requests-draft.sql`
+6. `database/security/storage-policy-fix.sql`
+7. `database/customers/customer-account-migration.sql`
+8. `database/inventory/inventory-movements-draft.sql`
+9. `database/inventory/checkout-inventory-lock-order-draft.sql`
+10. `database/orders/checkout-idempotency-draft.sql`
+11. `database/orders/order-financial-access-draft.sql`
+12. `database/orders/cancellation-flow-draft.sql`
+13. `database/orders/refund-flow-draft.sql`
+14. `database/finance/expense-receipts-storage-draft.sql`
+15. `database/finance/business-expense-audit-draft.sql`
+
+Dependencias determinantes:
+- Clientes crea `orders.customer_user_id` y `customer_favorites`.
+- Inventario crea el historial y el trigger antes de que checkout y cancelaciones generen movimientos.
+- Checkout con bloqueo determinista reemplaza `create_public_order` antes del wrapper idempotente que la invoca.
+- Acceso financiero necesita los campos de cliente y el snapshot del método de pago.
+- Reembolso depende del flujo de cancelación aprobada y de la conciliación de pagos.
+- El bucket privado de comprobantes debe existir antes de instalar la RPC que asocia comprobantes a gastos.
+
+### Comprobaciones estáticas
+
+- Los 15 archivos fueron leídos nuevamente después de las correcciones.
+- Los delimitadores de funciones y bloques DO quedaron balanceados.
+- No se detectaron nombres de funciones duplicados dentro de un mismo archivo.
+- El borrador de checkout por inventario quedó con una sola definición completa.
+- La firma antigua `create_public_order_for_customer` no existe en la base live; por eso su revocación se movió después de crearla.
+- Las funciones base `private.business_is_active`, `private.has_business_role`, `private.is_platform_owner` y `private.guard_business_expense_update` sí existen en Supabase live.
+
+### Pendientes antes de instalar
+
+- Ejecutar el paquete completo en staging y corregir cualquier error real de PostgreSQL.
+- Revisar grants y RLS después de todas las migraciones, no archivo por archivo de forma aislada.
+- Probar concurrencia del checkout, inventario, idempotencia, cancelación y reembolso.
+- Resolver la diferencia entre los estados solicitados por el producto (`received`, `on_the_way`) y los valores actuales del código (`pending`, `out_for_delivery`).
+- Desplegar Edge Functions solo después de que las firmas RPC instaladas coincidan con sus llamadas.
+
+**Estado:** las dos correcciones fueron guardadas y verificadas en `correcciones-funcionales`. Supabase Independiente permanece sin cambios: no se ejecutó SQL, no se desplegaron Edge Functions y no se modificó `main` ni GitHub Pages.
