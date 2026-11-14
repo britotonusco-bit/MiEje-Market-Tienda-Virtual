@@ -1090,3 +1090,8 @@ El verificador de integración ahora comprueba: existencia de la relación `cust
 6. Probar aislamiento entre negocios A/B, empleados, propietario técnico, carga de archivos no permitidos, rutas falsificadas, doble pago y anulación.
 
 **Estado:** hallazgos y borrador de almacenamiento privado preparados en la rama. No se aplicaron migraciones ni se desplegó el módulo. Los gastos y comprobantes no deben considerarse listos para uso real desde el panel.
+- Se verificó que `audit_logs` admite negocio, actor, acción, entidad, identificador y detalles JSON. Se detectó que las funciones live de gastos no escribían eventos.
+- Nuevo borrador `database/finance/business-expense-audit-draft.sql`: crea gastos únicamente pendientes; confirma pagos con referencia obligatoria para transferencia/tarjeta; bloquea la fila para impedir doble pago; registra creación, pago, anulación y adjunto de comprobante en `audit_logs`; permite asociar un único archivo existente del bucket privado a su gasto.
+- El trigger de protección se amplía para permitir únicamente la transición de pago, la anulación y el adjunto único de comprobante. Los gastos anulados conservan acceso de lectura del comprobante para el administrador del negocio, sin permitir nuevas cargas.
+- Se corrigieron las políticas del bucket para comparar UUID como texto y evitar conversiones de rutas no confiables, y para conservar lectura de comprobantes históricos de gastos anulados.
+- La función de confirmación no procesa dinero ni valida una transferencia bancaria: registra que el administrador afirma haber recibido/realizado el pago. Se necesita conciliación humana y comprobante cuando aplique.
