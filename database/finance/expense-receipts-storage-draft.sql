@@ -30,7 +30,7 @@ USING (
     FROM public.business_expenses e
     WHERE e.id = ((storage.foldername(name))[2])::uuid
       AND e.business_id = ((storage.foldername(name))[1])::uuid
-      AND e.status = 'active'
+      AND e.status IN ('active','voided')
       AND private.business_is_active(e.business_id)
       AND private.has_business_role(e.business_id, ARRAY['business_admin']::text[])
   )
@@ -50,7 +50,7 @@ WITH CHECK (
     FROM public.business_expenses e
     WHERE e.id = ((storage.foldername(name))[2])::uuid
       AND e.business_id = ((storage.foldername(name))[1])::uuid
-      AND e.status = 'active'
+      AND e.status IN ('active','voided')
       AND private.business_is_active(e.business_id)
       AND private.has_business_role(e.business_id, ARRAY['business_admin']::text[])
   )
