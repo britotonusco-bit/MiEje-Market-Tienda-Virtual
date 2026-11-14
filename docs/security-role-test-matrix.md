@@ -919,3 +919,14 @@ La prueba de catálogo debe repetirse en ensayo después de aplicar la migració
 9. Ejecutar pruebas A/B con datos ficticios en un entorno controlado. La base activa inspeccionada no tiene negocios, productos ni pedidos de prueba, por lo que no se ha podido completar una compra real ni una entrega de extremo a extremo.
 
 **Estado:** los ajustes de código y verificadores están preparados en `correcciones-funcionales`. No se han aplicado migraciones ni desplegado Edge Functions; el sitio publicado tampoco se ha cambiado.
+
+### RPC de operaciones aún ausentes en la base activa
+
+La consulta de solo lectura del 14/11/2026 confirmó que todavía no existen estas RPC requeridas por los paneles y por el checkout:
+
+- `get_public_order_idempotent`, `reserve_checkout_rate_limit` y `create_public_order_idempotent`.
+- `get_business_admin_order_financials` y `mark_order_payment_received`.
+- `request_order_cancellation` y `decide_order_cancellation`.
+- `complete_order_refund` y `get_customer_order_history`.
+
+Por tanto, las pantallas y botones que llaman a esas RPC no deben considerarse operativos en el proyecto activo hasta aplicar y verificar las migraciones correspondientes. En particular, el panel administrativo no podrá cargar el resumen financiero ni registrar pagos recibidos; empleados/admin no podrán completar el flujo nuevo de solicitudes de cancelación y el administrador no podrá registrar reembolsos mediante estas RPC. La presencia de tablas existentes no significa que los procedimientos de negocio estén instalados.
