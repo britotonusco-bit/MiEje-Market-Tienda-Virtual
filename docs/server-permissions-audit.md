@@ -855,3 +855,40 @@ El borrador de confirmación de pagos `mark_order_payment_received` no está ins
 **Acciones pendientes antes de activar:** incorporar snapshot del método seleccionado al pedido; aplicar en staging los límites de permisos de administrador/empleado/técnico; probar que un empleado no puede leer importes ni registrar pagos; probar que el administrador del negocio A no ve métodos, pedidos ni transacciones de B; verificar pago duplicado/concurrente, cancelación y reembolso; y confirmar que la interfaz no presenta un pago como recibido antes de que el RPC confirme la transacción.
 
 **Resultado:** el flujo de configuración y confirmación manual está preparado parcialmente, pero falta identificar de forma persistente el método concreto elegido en cada pedido y activar las restricciones financieras. No se cambió producción.
+
+
+#### Corrección preparada: método concreto y snapshot del pedido
+
+Se guardaron cambios adicionales en `correcciones-funcionales`:
+
+1. `checkout-idempotency-draft.sql` agrega a `orders`:
+   - `payment_method_id`: referencia al método concreto seleccionado.
+   - `payment_method_name`: nombre visible copiado al crear el pedido.
+   - FK con `ON DELETE SET NULL`: si algún día se elimina el método, se conserva el nombre histórico del pedido.
+   - Índice por negocio y método para consultas administrativas.
+
+2. Se añadió `create_public_order_for_customer_with_payment_method`, que:
+   - valida en la base que el método pertenezca al negocio del pedido;
+   - exige que siga habilitado al crear una compra nueva;
+   - bloquea la fila del método durante la creación para evitar una desactivación simultánea;
+   - obtiene el nombre directamente de la base, sin confiar en el navegador;
+   - crea el pedido y guarda el ID/nombre snapshot en la misma transacción;
+   - conserva la asociación con la cuenta del cliente autenticado, cuando exista.
+
+3. `create_public_order_idempotent` ahora llama a ese helper. La clave idempotente ya incluye el ID del método, por lo que reintentar con otro método no recupera por error un pedido anterior.
+
+4. Se revocó el uso del helper anterior que no guardaba el método concreto.
+
+5. `panel-live.js` consulta el snapshot para el administrador y muestra el nombre exacto en la columna de pago. La vista de empleados no recibe importes ni necesita consultar datos financieros.
+
+6. El formulario de métodos de pago ahora busca primero una coincidencia por nombre y tipo antes de reutilizar un ID existente. Así, reordenar métodos como Nequi y Bancolombia no intercambia sus identificadores por compartir ambos el código `transfer`.
+
+7. `order-financial-access-draft.sql` permite leer el nombre snapshot en la consulta operativa del pedido y usa ese nombre como proveedor por defecto al registrar el ingreso, si el administrador no escribe uno.
+
+**Verificación de rama:** se leyeron nuevamente los cuatro archivos después de los cambios y se comprobaron las columnas, FK, helper, llamada idempotente, consulta del panel, coincidencia estable de IDs y snapshot de conciliación.
+
+**Verificación live:** las columnas `payment_method_id`, `payment_method_name` y el helper nuevo siguen ausentes en Supabase Independiente. Esto confirma que la corrección está preparada, no desplegada.
+
+**Pruebas pendientes en staging:** compra con Nequi y Bancolombia del mismo negocio; comprobar que cada pedido conserva el método exacto; renombrar/desactivar un método después de la compra y verificar que el pedido histórico no cambia; reintentar una compra con la misma clave; probar método perteneciente a otro negocio; y confirmar que empleado y administrador reciben exactamente los campos previstos por sus permisos.
+
+No se ejecutó SQL, no se desplegó Edge Function y no se modificó `main` ni GitHub Pages.
