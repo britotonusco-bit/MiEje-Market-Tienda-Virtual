@@ -551,3 +551,97 @@ La función `track-public-order` consulta mediante el token UUID y devuelve núm
 - Seguimiento público: **devuelve datos limitados y usa token UUID; no expone contacto ni dirección**.
 - Pruebas cruzadas entre clientes y negocios: **pendientes**.
 - SQL aplicado, despliegues o cambios de Auth: **ninguno**.
+
+
+## Décima revisión: inventario, concurrencia y consistencia de pedidos
+
+**Fecha:** 14 de noviembre de 2026  
+**Alcance:** función live `create_public_order`, restricciones de inventario, triggers de pedidos, interfaz de productos y borradores de idempotencia y cancelación.
+
+### 1. Checkout e inventario live
+
+La función live `public.create_public_order(uuid,text,text,text,text,text,text,jsonb)` es `SECURITY DEFINER`, tiene `search_path = ''` y su ejecución está concedida únicamente a `service_role`; no puede ser llamada directamente por `anon` ni `authenticated`.
+
+La función:
+
+- Valida que el negocio esté activo y que los productos pertenezcan al negocio indicado.
+- Rechaza productos inactivos, cantidades no enteras, cantidades menores que 1 o mayores que 99, productos repetidos y carritos vacíos o excesivos.
+- Lee cada producto con `SELECT ... FOR UPDATE`.
+- Comprueba que `inventory >= quantity`.
+- Calcula el subtotal con el precio guardado en la base de datos.
+- Crea el pedido y sus líneas, registra el costo histórico y descuenta las existencias.
+- Devuelve el pedido con su token de seguimiento.
+
+Como toda la función se ejecuta en una transacción PostgreSQL, si una inserción o un descuento falla, la operación completa se revierte. Las restricciones live `products_inventory_check` (`inventory >= 0`) y `order_items_quantity_check` (`quantity > 0`) agregan una segunda barrera.
+
+### 2. Concurrencia: riesgo de interbloqueo, no de sobreventa
+
+La función bloquea los productos uno por uno siguiendo el orden recibido en el JSON del carrito. Dos compras simultáneas con varios productos en orden inverso pueden intentar bloquear las mismas filas en distinto orden. PostgreSQL detectaría el interbloqueo y abortaría una transacción; el bloqueo evita que ambas descuenten las mismas unidades, pero una compra legítima podría fallar y requerir reintento.
+
+Mejora recomendada: adquirir los bloqueos de todos los productos en un orden determinista (por ejemplo, UUID ascendente) antes de validar y descontar cantidades. Debe incorporarse en una migración revisada y probarse con dos checkouts concurrentes en staging.
+
+### 3. Idempotencia: código de rama pendiente de migración
+
+El Edge Function `create-public-order/index.ts` de la rama llama a estas RPC:
+
+- `get_public_order_idempotent`
+- `reserve_checkout_rate_limit`
+- `create_public_order_idempotent`
+
+En la base live no están instaladas esas funciones ni la tabla privada `private.checkout_idempotency`. El borrador `database/orders/checkout-idempotency-draft.sql` las define y usa una clave por intento, hash de la solicitud y bloqueos asesorados para impedir pedidos duplicados por reintentos concurrentes.
+
+**Importante:** no desplegar la versión de Edge Function de la rama antes de instalar y verificar sus dependencias SQL. Tampoco considerar activa la idempotencia en producción solo porque el código y el borrador estén guardados en GitHub.
+
+### 4. Edición manual de existencias en el panel
+
+En `panel-live.js`, `saveProduct()` incluye siempre el valor de `inventory` del formulario dentro del mismo UPDATE que guarda nombre, descripción, precio y otros datos del producto.
+
+Esto crea una condición de carrera: si el administrador abre un producto con 10 unidades, se vende una unidad mientras el formulario permanece abierto y luego guarda un cambio de descripción, el formulario podría escribir nuevamente 10 y deshacer el descuento real.
+
+Además, el inventario se modifica directamente desde el panel; no se encontró una tabla de movimientos de inventario ni un registro separado y estructurado de ajustes con cantidad anterior, cantidad nueva, motivo y actor.
+
+Corrección recomendada:
+- Separar la edición de datos comerciales de los ajustes de existencias.
+- No enviar `inventory` en una actualización normal de nombre, descripción o precio.
+- Gestionar entradas y salidas mediante una RPC transaccional que bloquee la fila del producto y aplique un delta sobre el inventario actual.
+- Registrar cada ajuste con actor, negocio, producto, delta, saldo anterior y posterior, motivo y fecha.
+- Restringir la operación al administrador activo del negocio y auditarla.
+
+### 5. Cancelaciones y restitución de existencias
+
+En live existen las tablas de pedidos y solicitudes de cancelación, y el trigger `private.enforce_order_status_transition()` exige una solicitud aprobada por el mismo usuario que cambia el pedido a `cancelled`. No se encontró instalada la RPC `decide_order_cancellation`; por tanto, el flujo completo de aprobación y restitución todavía no está activo en la base independiente.
+
+El borrador `database/orders/cancellation-flow-draft.sql` implementa:
+- Solicitud de cancelación por administrador o empleado del negocio.
+- Decisión exclusiva del administrador del negocio.
+- Bloqueo del pedido y de la solicitud para evitar decisiones simultáneas.
+- Aprobación, cambio de estado y restitución de existencias dentro de una misma transacción.
+- Comprobación de que se restituyeron todos los productos existentes del pedido.
+- Índice único para impedir más de una cancelación aprobada por pedido.
+
+Si una restitución falla, PostgreSQL revierte también la aprobación y el cambio de estado. El borrador necesita pruebas de concurrencia y de inventario antes de instalarse. Los productos deben desactivarse en lugar de eliminarse cuando todavía puedan formar parte de pedidos cancelables; la FK actual de `order_items.product_id` usa `ON DELETE SET NULL`, por lo que al borrar un producto se pierde la referencia necesaria para devolver sus unidades.
+
+### 6. Estados y consistencia funcional
+
+Los estados live son `pending`, `confirmed`, `preparing`, `ready`, `out_for_delivery`, `delivered` y `cancelled`. El trigger impide saltos de estado no autorizados y permite cancelar solo con una solicitud aprobada.
+
+Hay una diferencia con el flujo solicitado para MiEje Market: el nombre funcional pedido fue `received` y `on_the_way`, mientras la base usa `pending` y `out_for_delivery`. Antes de cambiarlo debe definirse una equivalencia uniforme entre base, Edge Functions, paneles y seguimiento público; no renombrar estados solo en la interfaz.
+
+### 7. Estado de datos y pruebas
+
+La consulta live devolvió cero registros en `orders`, `products`, `order_items` y `order_cancellation_requests`. Por tanto, no fue posible ejecutar pruebas reales de compra, concurrencia, cancelación o restitución.
+
+No se encontró ninguna tabla pública con nombre relacionado con inventario, stock, movimientos o ajustes. Los triggers de productos instalados solo actualizan `updated_at`; no registran movimientos de inventario.
+
+### Resultado
+
+- Checkout live con bloqueo de filas y descuento transaccional: **confirmado por definición SQL**.
+- Restricción de inventario no negativo y cantidades positivas: **confirmadas en live**.
+- Ejecución directa del checkout por anon/authenticated: **denegada; solo service_role**.
+- Orden determinista de bloqueo de múltiples productos: **mejora pendiente**.
+- Idempotencia de checkout: **borrador en rama; RPC y tabla ausentes en live**.
+- Aprobación de cancelaciones y restitución: **borrador en rama; RPC ausente en live**.
+- Edición de inventario desde formulario: **riesgo de sobrescribir descuentos concurrentes identificado**.
+- Libro de movimientos de inventario: **no existe en el esquema revisado**.
+- Pruebas reales: **bloqueadas porque no hay productos ni pedidos de prueba en la base**.
+- SQL aplicado, Edge Functions desplegadas o cambios en producción: **ninguno**.
