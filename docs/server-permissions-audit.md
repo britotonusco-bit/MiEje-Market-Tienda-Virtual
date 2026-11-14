@@ -282,3 +282,78 @@ El archivo `database/security/business-admin-boundaries.sql` elimina esos bypass
 No se identificó en las rutas de checkout y postulación revisadas una validación que acepte un producto o una vacante perteneciente a otro negocio. Las claves foráneas compuestas de pagos, cancelaciones, reembolsos y costos aportan integridad adicional. No obstante, el aislamiento completo **todavía no está aplicado en la base de datos**: las políticas instaladas conservan accesos globales del propietario técnico y la versión desplegada de algunas Edge Functions está atrasada respecto de la rama.
 
 No se ejecutó SQL, no se desplegó ninguna Edge Function y no se modificó producción durante esta revisión. Los cambios del repositorio continúan limitados a la rama `correcciones-funcionales`.
+
+
+## Sexta revisión: Storage, hojas de vida y comprobantes privados
+
+Se inspeccionaron los buckets, las políticas instaladas de `storage.objects`, el código de carga y descarga del panel y las migraciones de Storage preparadas en la rama.
+
+### 1. Buckets existentes en Supabase
+
+La consulta de solo lectura encontró estos buckets:
+
+- `business-assets`: público, límite 5 MB, admite PNG, JPEG y WEBP. Su lectura pública es coherente con logos e imágenes de productos que deben aparecer en el catálogo.
+- `job-applications-private`: privado, límite 5 MB, admite PDF, DOC y DOCX. Es correcto que las hojas de vida no sean públicas.
+- `business-expense-receipts`: todavía no existe en la base observada. El borrador `database/finance/expense-receipts-storage-draft.sql` lo crea como bucket privado, con límite de 5 MB y tipos PDF/JPEG/PNG/WEBP.
+
+La consulta de objetos no devolvió registros para los buckets inspeccionados. Por eso no fue posible comprobar archivos reales, rutas históricas ni descargas con usuarios.
+
+### 2. Hallazgo en las políticas de business-assets
+
+Las cuatro políticas instaladas para insertar, leer, actualizar y eliminar objetos de `business-assets` contienen una referencia incorrecta: dentro de la subconsulta comparan el UUID de negocio con `storage.foldername(b.name)`, donde `b` es la tabla `businesses`. La ruta del archivo debe obtenerse de `storage.objects.name`, no del nombre comercial del negocio.
+
+Esto puede impedir que el administrador gestione sus logos e imágenes desde el panel. El bucket es público, así que la visualización pública de archivos ya almacenados no depende de esa política SELECT; el problema principal afecta la gestión autenticada de los objetos.
+
+El borrador `database/security/storage-policy-fix.sql` reemplaza la referencia incorrecta por la ruta real del objeto y valida que:
+- el primer segmento sea un UUID de negocio;
+- el segundo segmento sea `logo` o `products`;
+- el negocio esté activo;
+- el usuario sea administrador activo de ese negocio.
+
+La ruta esperada es `<business_uuid>/logo/<archivo>` o `<business_uuid>/products/<archivo>`. Debe comprobarse que el frontend usa exactamente esa estructura antes de ejecutar la migración.
+
+### 3. Hojas de vida: bucket privado y autorización
+
+La función `create-job-application` genera el nombre de archivo en servidor, bajo la ruta `<business_uuid>/<application_uuid>/<random_uuid>.(pdf|doc|docx)`. Crea una sesión de carga de corta duración y entrega un token de carga firmado. Al enviar la postulación, vuelve a comprobar que la sesión corresponda al negocio, vacante, ruta y aplicación, que no esté vencida ni consumida, y que el objeto exista y no supere 5 MB.
+
+El panel administrador filtra las postulaciones por su `business_id` y solicita enlaces firmados de descarga de 5 minutos para las hojas de vida. No genera enlaces públicos permanentes.
+
+**Hallazgo en la política instalada:** `job_application_documents_business_admin_read` solo comprueba el bucket, el primer segmento de negocio y el rol administrador. No valida que el segundo segmento sea un UUID de aplicación ni que el nombre final sea un UUID con extensión permitida. El bucket sigue siendo privado y la comprobación de negocio impide que el administrador de otra tienda obtenga acceso por cambiar el identificador de negocio, pero la política permite a un administrador de ese mismo negocio leer objetos huérfanos o rutas que no corresponden a una postulación registrada.
+
+El borrador de `storage-policy-fix.sql` endurece la estructura de la ruta y valida el nombre del archivo. Antes de producción conviene reforzarlo también con una comprobación contra `job_applications`: que el UUID de aplicación del segundo segmento exista, pertenezca al primer UUID de negocio y que `resume_path` coincida exactamente con `storage.objects.name`. Así se evita que una ruta bien formada pero ajena a una postulación registrada sea descargable.
+
+### 4. Comprobantes privados de gastos
+
+El panel ya implementa la carga en `business-expense-receipts` con ruta `<business_uuid>/<expense_uuid>/<random_uuid>.<extension>`. La carga se hace después de crear el gasto; la función `attach_business_expense_receipt` del borrador comprueba:
+- que el usuario sea administrador activo del negocio propietario del gasto;
+- que el gasto esté activo y todavía no tenga comprobante;
+- que la ruta comience con el UUID exacto del negocio y del gasto;
+- que el objeto exista en el bucket privado;
+- que el comprobante se asocie una sola vez.
+
+El panel genera enlaces firmados temporales de 5 minutos para ver comprobantes. El borrador no crea políticas de UPDATE o DELETE, conservando la evidencia original. La política de lectura también comprueba que el gasto y el negocio de la ruta coincidan y que el administrador pertenezca a ese negocio.
+
+**Estado:** el diseño de acceso está bien delimitado en el borrador, pero el bucket y las políticas todavía no existen en la base observada. La función SQL y la UI no se han probado con un archivo real.
+
+### 5. Límites de validación de archivos
+
+La función de postulaciones valida extensión declarada, MIME declarado y tamaño, y el bucket limita tamaño y MIME permitido. El comprobante también valida MIME y tamaño en el navegador y en las restricciones del bucket.
+
+Estas comprobaciones no equivalen a inspeccionar el contenido binario. No se encontró un antivirus ni una validación real de tipo de archivo por firma binaria. Antes de abrir cargas a público conviene añadir inspección de contenido, protección frente a archivos maliciosos y una política de retención/borrado para postulaciones que ya no deban conservarse.
+
+### 6. Resultado y acciones pendientes
+
+1. Corregir las cuatro políticas de `business-assets` con el borrador y confirmar que el frontend usa las rutas esperadas.
+2. Reforzar la política de lectura de hojas de vida para exigir una postulación registrada cuya ruta coincida exactamente con el objeto.
+3. Crear el bucket privado de comprobantes y aplicar sus políticas junto con las funciones de auditoría de gastos, después de revisar el paquete completo.
+4. Incorporar validación binaria y controles antimalware para hojas de vida y comprobantes.
+5. Probar con dos negocios: el administrador A debe poder subir/descargar archivos de A y recibir denegación al intentar usar rutas de B; empleados y clientes no deben poder obtener enlaces firmados.
+6. Probar que la lectura pública de logos/productos sigue funcionando y que el administrador puede reemplazar y eliminar solo archivos de su negocio.
+
+### Conclusión de la sexta revisión
+
+Se confirmó un error real en las políticas instaladas de gestión de imágenes: usan el nombre del negocio en lugar del nombre del objeto para comprobar la ruta. También se detectó que la política instalada de lectura de hojas de vida valida el negocio y el rol, pero no vincula la ruta con una postulación concreta. El bucket privado reduce la exposición, aunque la política debe endurecerse.
+
+El diseño de comprobantes privados está preparado en los borradores, pero no está instalado. No se encontraron objetos en Storage durante la consulta, así que no hubo datos reales para realizar pruebas de lectura o descarga.
+
+No se ejecutó SQL, no se modificaron buckets, no se desplegaron funciones y no se cambiaron políticas en Supabase. Esta revisión fue de solo lectura en el proyecto y de análisis estático de los archivos de la rama.
