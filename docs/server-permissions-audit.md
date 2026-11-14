@@ -779,3 +779,35 @@ La consulta de seguridad más reciente mantiene los avisos ya documentados:
 - `rls_enabled_no_policy`: tres tablas internas/de control con RLS y sin políticas: `private.checkout_rate_limits`, `public.job_application_rate_limits` y `public.job_application_upload_sessions` (INFO).
 
 No se modificaron estos ajustes durante la revisión de inventario. Las tablas de rate limit y sesiones se mantienen sin políticas de acceso directo porque sus operaciones se realizan mediante funciones de servicio; no se deben añadir políticas genéricas para silenciar el aviso.
+
+
+### 11. Revisión de idempotencia y límite de solicitudes del checkout
+
+**Alcance:** revisión estática de la rama `correcciones-funcionales` y consultas de solo lectura en Supabase Independiente.
+
+Hallazgos:
+
+- La Edge Function genera y conserva una clave UUID por intento en `sessionStorage`. El mismo contenido del checkout recupera la misma clave tras un fallo de red; si el contenido cambia, se genera una clave nueva.
+- El servidor valida el JWT del cliente autenticado mediante `auth.getUser()` y consulta `profiles.is_blocked`; nunca toma el ID del cliente desde el JSON enviado por el navegador.
+- La clave idempotente se consulta antes de reservar el límite de IP. Un pedido ya creado puede recuperarse sin consumir un nuevo intento.
+- La reserva de IP y la creación del pedido son transacciones separadas. Una reserva repetida con la misma clave, IP y contenido se acepta; la misma clave con IP o contenido diferente se rechaza.
+- La creación final serializa solicitudes con la misma clave mediante advisory lock y guarda respuesta + pedido en una misma transacción. Si la creación falla, la transacción revierte y la clave puede reintentarse.
+- La tabla de idempotencia mantiene una clave única global y el hash incluye negocio, método de pago, cuenta, datos de entrega y productos. Las funciones RPC están restringidas a `service_role`; las tablas privadas no conceden acceso directo a roles públicos.
+- El límite existente live usa 10 solicitudes por IP cada 10 minutos. El nuevo borrador conserva ese umbral y registra reservas por clave para que los reintentos no consuman intentos adicionales.
+
+Correcciones guardadas en la rama:
+
+1. Los hashes de contenido de las tres RPC ahora usan SHA-256 en lugar de MD5.
+2. Se agregaron índices por `(ip_hash, created_at)` y por `created_at` a la tabla de reservas, para apoyar el conteo por IP y la limpieza de registros antiguos.
+3. La Edge Function ya no concatena el nombre visible del método de pago a `delivery_notes`. El método ya se almacena en `orders.payment_method`; quitar esa etiqueta variable evita que un cambio posterior en el nombre comercial convierta un reintento idéntico en un conflicto de hash.
+
+Estado live consultado:
+
+- Existe `private.checkout_rate_limits` y la RPC antigua `consume_checkout_rate_limit(text)`.
+- No existen todavía `private.checkout_idempotency`, `private.checkout_rate_limit_reservations`, `get_public_order_idempotent`, `reserve_checkout_rate_limit` ni `create_public_order_idempotent`.
+- `pgcrypto` está instalado, por lo que la función `extensions.digest(..., 'sha256')` está disponible.
+- No se modificó la base de datos ni se desplegó la Edge Function.
+
+**Pendientes antes de activar:** probar en staging la misma clave con igual contenido, la misma clave con contenido distinto, dos solicitudes simultáneas, pérdida de respuesta después de confirmar el pedido, error de inventario y límite de 10 solicitudes por IP. También comprobar que el proxy de producción entrega una IP de origen confiable en `cf-connecting-ip` o `x-forwarded-for`; no debe confiarse en una cabecera de IP que el cliente pueda controlar.
+
+**Resultado:** idempotencia y reserva de límite revisadas y reforzadas en la rama. La protección todavía no está activa en Supabase live; la compra real no puede probarse porque la base sigue sin productos ni pedidos de prueba.
