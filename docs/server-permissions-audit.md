@@ -368,3 +368,58 @@ La comprobación se verificó leyendo nuevamente el archivo de la rama. También
 - SHA del borrador actualizado: `49b002e7621da70594adc64960b32b24f813e45e`.
 - Rama: `correcciones-funcionales`.
 - No se ejecutó la migración ni se cambió la política instalada en Supabase.
+
+
+## Quinta revisión: Storage, hojas de vida y comprobantes privados
+
+**Fecha:** 14 de noviembre de 2026  
+**Alcance:** buckets, políticas instaladas de `storage.objects`, rutas de archivos, Edge Function `create-job-application` y RPC de postulaciones.
+
+### Estado observado directamente en Supabase
+
+Los buckets existentes son:
+
+- `business-assets`: público, límite de 5 MB, permite PNG, JPEG y WebP.
+- `job-applications-private`: privado, límite de 5 MB, permite PDF, DOC y DOCX.
+- No se encontraron objetos almacenados en ninguno de los buckets consultados en esta revisión.
+
+El bucket `business-expense-receipts` todavía no existe. Su creación está contemplada en `database/finance/expense-receipts-storage-draft.sql`, que permanece pendiente.
+
+### Hallazgos críticos y correcciones pendientes
+
+1. **Las políticas instaladas de `business-assets` contienen una referencia de ruta incorrecta.** En las expresiones actuales se usa `storage.foldername(b.name)` dentro de la subconsulta de negocios, cuando la ruta debe derivarse del nombre del objeto (`storage.objects.name`). Esto puede impedir que el administrador gestione correctamente sus imágenes y no constituye una comprobación fiable de pertenencia. El archivo `database/security/storage-policy-fix.sql` corrige esa referencia y valida el UUID del negocio, la carpeta permitida (`logo` o `products`) y la membresía activa del administrador.
+
+2. **La política instalada de lectura de hojas de vida es demasiado amplia dentro de la carpeta del negocio.** Actualmente comprueba la carpeta del negocio y el rol de administrador, pero no relaciona el objeto con una fila concreta de `job_applications` ni verifica que `resume_path` coincida exactamente con el objeto. El borrador añade esas comprobaciones, valida la carpeta de aplicación y el nombre UUID del archivo, y exige que la postulación pertenezca al mismo negocio. Debe aplicarse antes de habilitar la descarga de CVs en producción.
+
+3. **La ruta de carga de CV está vinculada a una sesión temporal.** `create-job-application` genera en servidor el identificador de postulación, la ruta del objeto y una URL firmada de carga de un solo uso. Antes de registrar la postulación, comprueba que la sesión coincida con el negocio, la vacante, la ruta y la fecha de vencimiento; también comprueba que el archivo se haya cargado y que su tamaño no supere 5 MB. La RPC `submit_public_job_application` repite la validación de vacante y consume la sesión dentro de una transacción.
+
+4. **Falta validación del contenido real del archivo.** La función valida extensión, MIME declarado y tamaño, pero no inspecciona la firma binaria del archivo ni ejecuta análisis antimalware. El MIME enviado por el navegador no demuestra el formato real. Antes de abrir las postulaciones al público se necesita una validación adicional del contenido y un proceso de revisión segura de documentos.
+
+5. **Las funciones `SECURITY DEFINER` de postulaciones no son ejecutables por `anon` ni por `authenticated`.** Se verificaron los privilegios efectivos de `submit_public_job_application` y `consume_job_application_rate_limit`: ambos permiten ejecución a `service_role`, no a los roles públicos o de usuario. La Edge Function actúa como intermediaria y valida la vacante y la sesión antes de llamar a la RPC.
+
+6. **Los comprobantes de gastos aún no tienen almacenamiento desplegado.** El borrador configura un bucket privado y políticas de lectura/carga asociadas a un gasto y a su negocio. No crea permisos de modificación o eliminación, lo cual conserva los comprobantes como evidencia. La descarga debe realizarse mediante enlaces firmados de corta duración, después de validar el acceso del administrador.
+
+### Consideración sobre el bucket público
+
+`business-assets` es público por configuración. Por tanto, las políticas RLS no convierten en privadas las imágenes de ese bucket: cualquier persona que conozca la URL pública puede leer el objeto. Este comportamiento es apropiado únicamente para logos e imágenes de productos que deban mostrarse en la tienda. No deben almacenarse allí hojas de vida, comprobantes, documentos de clientes ni archivos internos.
+
+### Acciones necesarias antes de producción
+
+- Aplicar y probar `database/security/storage-policy-fix.sql` en un entorno de pruebas.
+- Probar que un administrador A pueda gestionar archivos de A y no leer, reemplazar o borrar archivos de B.
+- Probar que un empleado y un cliente no puedan descargar hojas de vida.
+- Probar que una postulación solo permita acceder al archivo exacto registrado en `resume_path`.
+- Incorporar validación de firma de archivo y análisis antimalware para CVs.
+- Crear y probar el bucket privado de comprobantes mediante su migración correspondiente.
+- Verificar que las Edge Functions que generan enlaces firmados validen primero la pertenencia del archivo al negocio y la membresía activa.
+
+### Resultado
+
+- Buckets y políticas instaladas: **inspeccionados en lectura**.
+- Archivos actuales: **no se encontraron objetos**.
+- Error de referencia en políticas de `business-assets`: **confirmado**.
+- Lectura de CV sin vínculo exacto con la postulación: **confirmada como brecha de alcance**.
+- Borradores de corrección: **ya existen en la rama**.
+- SQL aplicado o bucket nuevo creado: **no**.
+- Pruebas de carga y descarga con cuentas de distintos negocios: **pendientes**.
+- Validación antimalware y de firma binaria: **pendiente**.
