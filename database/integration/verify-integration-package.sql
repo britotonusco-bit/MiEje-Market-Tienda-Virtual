@@ -206,6 +206,33 @@ BEGIN
     RAISE EXCEPTION 'FALLO: faltan RPCs de finanzas o historial de clientes.';
   END IF;
 
+  IF to_regclass('public.financial_one_completed_payment_per_order') IS NULL
+     OR to_regclass('public.financial_one_completed_refund_per_order') IS NULL THEN
+    RAISE EXCEPTION 'FALLO: falta la protección contra pagos o reembolsos completados duplicados.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='financial_transactions'
+      AND policyname='financial_admin_select'
+      AND qual ILIKE '%is_platform_owner%'
+  ) OR EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='business_expenses'
+      AND policyname='business_expenses_select'
+      AND qual ILIKE '%is_platform_owner%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: el propietario técnico conserva lectura directa global de finanzas de negocios.';
+  END IF;
+
+  IF to_regprocedure('public.complete_order_refund(uuid,text,text,text,text)') IS NULL
+     OR NOT has_function_privilege('authenticated',
+       'public.complete_order_refund(uuid,text,text,text,text)','EXECUTE')
+     OR has_function_privilege('anon',
+       'public.complete_order_refund(uuid,text,text,text,text)','EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: RPC de reembolso ausente o con permisos incorrectos.';
+  END IF;
+
   IF to_regprocedure('public.request_order_cancellation(uuid,uuid,text)') IS NULL
      OR to_regprocedure('public.decide_order_cancellation(uuid,text,text)') IS NULL
      OR to_regprocedure('public.complete_order_refund(uuid,text,text,text,text)') IS NULL THEN
