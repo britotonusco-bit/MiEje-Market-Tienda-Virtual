@@ -541,6 +541,18 @@ BEGIN
     RAISE EXCEPTION 'FALLO: privilegios incorrectos en el reporte financiero.';
   END IF;
 
+
+  IF to_regprocedure('public.attach_business_expense_receipt(uuid,text)') IS NULL
+     OR to_regprocedure('public.pay_business_expense(uuid,text,text)') IS NULL THEN
+    RAISE EXCEPTION 'FALLO: faltan RPCs de confirmación de gasto o asociación de comprobantes.';
+  END IF;
+  IF has_function_privilege('anon','public.attach_business_expense_receipt(uuid,text)','EXECUTE')
+     OR has_function_privilege('anon','public.pay_business_expense(uuid,text,text)','EXECUTE')
+     OR NOT has_function_privilege('authenticated','public.attach_business_expense_receipt(uuid,text)','EXECUTE')
+     OR NOT has_function_privilege('authenticated','public.pay_business_expense(uuid,text,text)','EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: privilegios incorrectos en RPCs de gastos.';
+  END IF;
+
   IF NOT EXISTS (
     SELECT 1 FROM storage.buckets
     WHERE id='business-expense-receipts' AND public=false
