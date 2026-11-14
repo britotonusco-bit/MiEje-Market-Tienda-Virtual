@@ -599,7 +599,7 @@
     const target = document.querySelector('#ordersContainer');
     target.innerHTML = '<div class="empty">Cargando pedidos…</div>';
     const [ordersResult, financeResult] = await Promise.all([
-      db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,delivery_tracking,status,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100),
+      db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,delivery_tracking,payment_method_name,status,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100),
       db.rpc('get_business_admin_order_financials', {
         p_business_id: businessId,
         p_refundable_only: false,
@@ -1652,7 +1652,10 @@
         : '';
       const action = `${nextStatus[o.status] ? `<button class="small-button" data-next="${nextStatus[o.status]}" data-order="${esc(o.id)}">Marcar: ${statusLabels[nextStatus[o.status]]}</button>` : ''}${paymentAction}${!['delivered','cancelled'].includes(o.status) ? ` <button class="small-button" data-cancel-request="${esc(o.id)}">Solicitar cancelación</button>` : ''}` || '—';
       const base = [esc(`#${o.order_number}`), esc(o.customer_name || 'Cliente'), esc(o.customer_phone || '—'), esc(o.delivery_address || '—') + (o.delivery_notes ? `<br><small>${esc(o.delivery_notes)}</small>` : '') + (o.delivery_tracking ? `<br><small>Seguimiento: ${esc(o.delivery_tracking)}</small>` : ''), items || 'Sin detalle', `<span class="pill ${statusClass[o.status] || ''}">${statusLabels[o.status] || esc(o.status)}</span>`, dateTime(o.created_at)];
-      if (admin) base.splice(5, 0, `${money(o.total)}<br><small>${esc(o.payment_status || '—')} · ${esc(o.payment_method || '—')}</small>`);
+      if (admin) {
+        const methodLabel = o.payment_method_name || ({cash:'Efectivo',transfer:'Transferencia',card:'Tarjeta',other:'Otro'}[o.payment_method] || o.payment_method || '—');
+        base.splice(5, 0, `${money(o.total)}<br><small>${esc(o.payment_status || '—')} · ${esc(methodLabel)}</small>`);
+      }
       base.push(action);
       return base;
     });
