@@ -370,7 +370,7 @@ La comprobación se verificó leyendo nuevamente el archivo de la rama. También
 - No se ejecutó la migración ni se cambió la política instalada en Supabase.
 
 
-## Quinta revisión: Storage, hojas de vida y comprobantes privados
+## Séptima revisión: Storage, hojas de vida y comprobantes privados
 
 **Fecha:** 14 de noviembre de 2026  
 **Alcance:** buckets, políticas instaladas de `storage.objects`, rutas de archivos, Edge Function `create-job-application` y RPC de postulaciones.
