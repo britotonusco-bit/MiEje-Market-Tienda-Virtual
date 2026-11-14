@@ -1,6 +1,32 @@
 -- Borrador: protección idempotente del checkout público y funciones de clientes.
 -- No ejecutar hasta revisar y autorizar la migración completa.
 
+-- Método concreto seleccionado por el cliente. El nombre queda congelado
+-- como histórico aunque el negocio renombre/desactive/elimine el método.
+ALTER TABLE public.orders
+  ADD COLUMN IF NOT EXISTS payment_method_id uuid,
+  ADD COLUMN IF NOT EXISTS payment_method_name text;
+
+DO $
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.orders'::regclass
+      AND conname = 'orders_payment_method_id_fkey'
+  ) THEN
+    ALTER TABLE public.orders
+      ADD CONSTRAINT orders_payment_method_id_fkey
+      FOREIGN KEY (payment_method_id)
+      REFERENCES public.business_payment_methods(id)
+      ON DELETE SET NULL;
+  END IF;
+END;
+$;
+
+CREATE INDEX IF NOT EXISTS orders_business_payment_method_idx
+  ON public.orders (business_id, payment_method_id)
+  WHERE payment_method_id IS NOT NULL;
+
 -- Vinculación de pedidos con clientes autenticados y favoritos.
 -- Los pedidos de invitados conservan customer_user_id = NULL.
 ALTER TABLE public.orders
@@ -66,6 +92,87 @@ CREATE POLICY order_items_customer_select_own ON public.order_items
         AND o.customer_user_id = (SELECT auth.uid())
     )
   );
+
+-- Crea el pedido y conserva el método exacto elegido. La Edge Function
+-- nunca proporciona el nombre snapshot: se obtiene de la fila validada aquí.
+CREATE OR REPLACE FUNCTION public.create_public_order_for_customer_with_payment_method(
+  p_customer_user_id uuid,
+  p_business_id uuid,
+  p_payment_method_id uuid,
+  p_payment_method text,
+  p_customer_name text,
+  p_customer_phone text,
+  p_customer_email text,
+  p_delivery_address text,
+  p_delivery_notes text,
+  p_items jsonb
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_method public.business_payment_methods%ROWTYPE;
+  v_order jsonb;
+  v_order_id uuid;
+BEGIN
+  IF p_payment_method_id IS NULL OR p_business_id IS NULL THEN
+    RAISE EXCEPTION 'Debes seleccionar un método de pago válido.';
+  END IF;
+
+  SELECT *
+  INTO v_method
+  FROM public.business_payment_methods
+  WHERE id = p_payment_method_id
+    AND business_id = p_business_id
+    AND is_enabled = true
+  FOR SHARE;
+
+  IF NOT FOUND OR v_method.method_code <> p_payment_method THEN
+    RAISE EXCEPTION 'El método de pago ya no está disponible. Actualiza la tienda y vuelve a intentarlo.';
+  END IF;
+
+  v_order := public.create_public_order(
+    p_business_id,
+    p_customer_name,
+    p_customer_phone,
+    p_customer_email,
+    p_delivery_address,
+    p_delivery_notes,
+    p_payment_method,
+    p_items
+  );
+
+  v_order_id := (v_order->>'id')::uuid;
+
+  UPDATE public.orders
+  SET payment_method_id = v_method.id,
+      payment_method_name = v_method.display_name,
+      customer_user_id = p_customer_user_id
+  WHERE id = v_order_id
+    AND business_id = p_business_id
+    AND customer_user_id IS NULL;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'No fue posible guardar el método de pago del pedido.';
+  END IF;
+
+  RETURN v_order;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.create_public_order_for_customer_with_payment_method(
+  uuid, uuid, uuid, text, text, text, text, text, text, jsonb
+) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.create_public_order_for_customer_with_payment_method(
+  uuid, uuid, uuid, text, text, text, text, text, text, jsonb
+) TO service_role;
+
+-- La función anterior sin snapshot no debe usarse para nuevos pedidos.
+REVOKE ALL ON FUNCTION public.create_public_order_for_customer(
+  uuid, uuid, text, text, text, text, text, text, jsonb
+) FROM PUBLIC, anon, authenticated, service_role;
 
 -- La cuenta autenticada se asigna solo después de validar el JWT en la Edge Function.
 CREATE OR REPLACE FUNCTION public.create_public_order_for_customer(
@@ -391,15 +498,16 @@ BEGIN
     RAISE EXCEPTION 'No fue posible validar el origen de la solicitud.';
   END IF;
 
-  v_response := public.create_public_order_for_customer(
+  v_response := public.create_public_order_for_customer_with_payment_method(
     p_customer_user_id,
     p_business_id,
+    p_payment_method_id,
+    p_payment_method,
     p_customer_name,
     p_customer_phone,
     p_customer_email,
     p_delivery_address,
     p_delivery_notes,
-    p_payment_method,
     p_items
   );
 
