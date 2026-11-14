@@ -1082,7 +1082,7 @@
       const order = data.order;
       clearPendingCheckout();
       const tracking = order.public_tracking_token ? `\nCódigo privado de seguimiento: ${order.public_tracking_token}` : "";
-      window.alert(`Pedido registrado correctamente.\nNúmero de pedido: #${order.order_number}\nTotal: ${money(order.total)}${tracking}\n\nGuarda el código de seguimiento para consultar el estado de tu pedido.`);
+      window.alert(`Pedido registrado correctamente.\nNúmero de pedido: #${order.order_number}\nTotal: ${money(order.total)}\nMétodo de pago: ${order.payment_method_name || "el seleccionado en el checkout"}${tracking}\n\nGuarda el código de seguimiento para consultar el estado de tu pedido.`);
       cart = [];
       event.currentTarget.reset();
       updateCart();
