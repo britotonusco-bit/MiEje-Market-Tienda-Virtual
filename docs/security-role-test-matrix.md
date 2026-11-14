@@ -1119,3 +1119,6 @@ El verificador de integración ahora comprueba: existencia de la relación `cust
 - Se reforzó la cancelación con un índice único parcial para permitir una sola solicitud aprobada por pedido. Así se evita que un pedido se apruebe dos veces y se repita la restitución de inventario o la reversión de costo.
 - Se reutiliza el índice de solicitudes pendientes que ya existe en la base para evitar crear un índice duplicado equivalente.
 - Las observaciones del reembolso ahora también quedan incluidas en los detalles del registro de auditoría.
+
+- Se añadieron índices parciales para pagos/reembolsos completados, cancelaciones aprobadas y gastos pagados. Los filtros de fecha ahora usan intervalos de marcas de tiempo en hora Bogotá, en lugar de convertir cada fila a fecha; así pueden aprovechar los índices.
+- El verificador comprueba la existencia de esos índices y la lógica de reversión de costo.
