@@ -120,6 +120,7 @@ EXECUTE FUNCTION private.log_product_inventory_movement();
 CREATE OR REPLACE FUNCTION public.adjust_business_inventory(
   p_business_id uuid,
   p_product_id uuid,
+  p_expected_inventory integer,
   p_new_inventory integer,
   p_reason text
 )
@@ -137,7 +138,8 @@ BEGIN
       USING ERRCODE = '42501';
   END IF;
 
-  IF p_new_inventory IS NULL OR p_new_inventory < 0 THEN
+  IF p_expected_inventory IS NULL OR p_expected_inventory < 0
+     OR p_new_inventory IS NULL OR p_new_inventory < 0 THEN
     RAISE EXCEPTION 'Las existencias deben ser un número entero igual o mayor que cero.'
       USING ERRCODE = '22023';
   END IF;
@@ -169,6 +171,13 @@ BEGIN
       USING ERRCODE = 'P0002';
   END IF;
 
+  -- Rechazar formularios desactualizados en vez de sobrescribir ventas
+  -- ocurridas mientras el administrador tenía abierto el producto.
+  IF v_product.inventory <> p_expected_inventory THEN
+    RAISE EXCEPTION 'Las existencias cambiaron desde que abriste el producto. Recarga la lista y vuelve a realizar el ajuste.'
+      USING ERRCODE = '40001';
+  END IF;
+
   IF v_product.inventory = p_new_inventory THEN
     RETURN pg_catalog.jsonb_build_object(
       'ok', true,
@@ -197,9 +206,9 @@ BEGIN
 END;
 $function$;
 
-REVOKE ALL ON FUNCTION public.adjust_business_inventory(uuid, uuid, integer, text)
+REVOKE ALL ON FUNCTION public.adjust_business_inventory(uuid, uuid, integer, integer, text)
   FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.adjust_business_inventory(uuid, uuid, integer, text)
+GRANT EXECUTE ON FUNCTION public.adjust_business_inventory(uuid, uuid, integer, integer, text)
   TO authenticated;
 
 -- Antes de desplegar, comprobar:
