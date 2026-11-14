@@ -892,3 +892,20 @@ Se guardaron cambios adicionales en `correcciones-funcionales`:
 **Pruebas pendientes en staging:** compra con Nequi y Bancolombia del mismo negocio; comprobar que cada pedido conserva el método exacto; renombrar/desactivar un método después de la compra y verificar que el pedido histórico no cambia; reintentar una compra con la misma clave; probar método perteneciente a otro negocio; y confirmar que empleado y administrador reciben exactamente los campos previstos por sus permisos.
 
 No se ejecutó SQL, no se desplegó Edge Function y no se modificó `main` ni GitHub Pages.
+
+
+#### Integración del método elegido en tienda, seguimiento e historial del cliente
+
+Se completó la conexión visual del snapshot en los puntos que ya existen:
+
+- `app.js` continúa enviando el ID del método seleccionado en el formulario público. La confirmación del checkout ahora muestra el nombre snapshot devuelto por el servidor.
+- `track-public-order` devuelve el nombre del método elegido junto con el estado y total del pedido. No devuelve instrucciones privadas ni datos de cuenta bancaria.
+- `get_customer_order_history()` agrega el nombre snapshot a cada pedido propio.
+- `cuenta.js` muestra ese nombre en el historial de compras.
+- El panel administrador muestra el mismo nombre en la columna de pago. El panel empleado sigue usando su consulta operativa y no consulta importes ni movimientos financieros.
+
+**Verificación de código:** se volvieron a leer los archivos `app.js`, `cuenta.js`, `panel-live.js`, `track-public-order/index.ts` y los dos borradores SQL. Las referencias al ID y al nombre snapshot están presentes en los puntos esperados.
+
+**Compatibilidad histórica:** los pedidos creados antes de aplicar la migración tendrán `payment_method_id` y `payment_method_name` nulos. No es posible reconstruir con certeza qué cuenta concreta eligió cada cliente a partir del antiguo código general (`transfer`, por ejemplo); la interfaz muestra un valor genérico para esos pedidos antiguos.
+
+No se desplegaron estos archivos ni se ejecutó la migración. La confirmación de funcionamiento requiere instalar primero los borradores en staging y realizar compras con dos métodos distintos del mismo tipo.
