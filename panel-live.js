@@ -66,6 +66,7 @@
       document.querySelector('#payrollForm')?.addEventListener('submit', createPayrollRecord);
       document.querySelector('#storeSettingsForm')?.addEventListener('submit', saveStoreSettings);
       document.querySelector('#productForm')?.addEventListener('submit', saveProduct);
+      document.querySelector('#profitReportForm')?.addEventListener('submit', loadProfitReport);
       document.querySelector('#businessContentForm')?.addEventListener('submit', saveBusinessContent);
       document.querySelector('#businessAiForm')?.addEventListener('submit', saveBusinessAi);
       document.querySelector('#blockRequestForm')?.addEventListener('submit', submitBlockRequest);
@@ -148,6 +149,54 @@
       ['Productos con poco stock', number(products.filter(p => p.is_active && Number(p.inventory || 0) <= 5).length), 'Cinco unidades o menos']
     ]);
     await Promise.all([loadBusinessOrders(), loadCancellationRequests(), loadRefundableOrders(), loadProducts(), loadAccessEvents(businessId, '#accessContainer'), loadAuditEvents(businessId, '#auditContainer')]);
+    initializeProfitReport();
+  }
+
+
+  function initializeProfitReport() {
+    const form = document.querySelector('#profitReportForm');
+    if (!form) return;
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+    form.elements.start_date.value = today.slice(0,8) + '01';
+    form.elements.end_date.value = today;
+    loadProfitReport();
+  }
+
+  async function loadProfitReport(event) {
+    if (event) event.preventDefault();
+    const form = document.querySelector('#profitReportForm');
+    const target = document.querySelector('#profitReportContainer');
+    if (!form || !target) return;
+    const startDate=form.elements.start_date.value, endDate=form.elements.end_date.value;
+    if (!startDate || !endDate || endDate < startDate) {
+      target.innerHTML='<div class="empty">Revisa las fechas: la fecha final no puede ser anterior a la inicial.</div>';
+      return;
+    }
+    target.innerHTML='<div class="empty">Calculando resultados del periodo…</div>';
+    const {data,error}=await db.rpc('get_business_admin_profit_report',{
+      p_business_id:businessId,p_start_date:startDate,p_end_date:endDate
+    });
+    if(error || !data) {
+      target.innerHTML='<div class="empty">El reporte financiero todavía no está disponible. Comprueba que la migración esté instalada en ensayo. '+esc(error?.message || '')+'</div>';
+      return;
+    }
+    const rows=[
+      ['Ventas con pago confirmado',money(data.sales)],
+      ['Reembolsos confirmados',money(data.refunds)],
+      ['Ventas netas',money(data.net_sales)],
+      ['Costo de productos vendidos',money(data.cost_of_sales)],
+      ['Ganancia bruta estimada',money(data.gross_profit_estimate)],
+      ['Gastos operativos pagados',money(data.paid_expenses)],
+      ['Resultado neto estimado',money(data.net_profit_estimate)],
+      ['Pedidos con pago confirmado',number(data.paid_orders)],
+      ['Líneas sin costo histórico',number(data.missing_cost_lines)]
+    ];
+    target.innerHTML='<div class="stats">'+rows.map(([label,value])=>
+      '<article class="stat"><span>'+esc(label)+'</span><strong>'+esc(value)+'</strong></article>'
+    ).join('')+'</div>'+(data.complete_cost_data
+      ? '<p class="message success">Todos los productos vendidos en este periodo tienen costo histórico registrado.</p>'
+      : '<p class="message error">Hay productos vendidos sin costo histórico. El resultado no representa la ganancia real completa.</p>'
+    )+'<p class="muted">Periodo: '+esc(data.start_date)+' a '+esc(data.end_date)+'. '+esc(data.basis)+'</p>';
   }
 
   async function uploadBusinessImage(file, folder) {
