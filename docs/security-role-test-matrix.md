@@ -1124,3 +1124,15 @@ El verificador de integración ahora comprueba: existencia de la relación `cust
 - El verificador comprueba la existencia de esos índices y la lógica de reversión de costo.
 
 - Se aclaró el tratamiento de domicilios: el movimiento de pago contiene el total del pedido (productos más domicilio). El reporte ahora separa el valor de domicilios cobrados sin sumarlo dos veces y el panel lo etiqueta como componente incluido en los cobros. Si el negocio paga a un domiciliario, ese costo debe registrarse como gasto para que el resultado estimado no lo sobrestime.
+
+
+## Aislamiento de importes y escritura directa de pedidos (14 nov 2026)
+
+- En la revisión de permisos se comprobó que RLS por fila no oculta columnas financieras a empleados si el rol `authenticated` conserva un permiso SELECT a nivel de tabla.
+- El borrador `database/orders/order-financial-access-draft.sql` ahora revoca SELECT general sobre `orders` y `order_items`, y concede únicamente columnas operativas necesarias para la cola de pedidos. Los importes, estado/método de pago, correo del cliente, identificador de cuenta y precios por línea quedan fuera de las consultas directas.
+- Los datos financieros del administrador se entregan por RPCs SECURITY DEFINER que validan que el usuario sea administrador activo del negocio solicitado. El historial del cliente se entrega por RPC que valida la propiedad del pedido.
+- Se revoca UPDATE general de `orders` y se conceden únicamente `status`, `delivery_tracking` y `updated_at`; se revocan INSERT/UPDATE/DELETE directos de `order_items`. Los cambios de estado siguen sujetos a la política RLS y al trigger de transición.
+- El verificador ahora comprueba que las columnas financieras/PII no sean legibles directamente, que los campos operativos necesarios sigan disponibles y que no existan permisos generales de escritura sobre pedidos o partidas.
+- Se verificó que el panel de empleados no consulta RPCs financieros ni la tabla de costos; el módulo de costos se carga desde la inicialización exclusiva del panel administrador. El panel técnico consulta el libro de finanzas de la plataforma y nómina por Edge Function, no las tablas `financial_transactions`, `business_expenses`, `product_costs` u `order_item_costs` de cada tienda.
+- Las políticas live aún conservan bypass del propietario técnico en movimientos financieros, gastos, costos, pedidos y reembolsos. La migración de límites reemplaza esos permisos, pero sigue pendiente de validación y aplicación.
+- Estado de pruebas: revisión estática de código, políticas, grants y firmas de funciones. No hay negocios ni pedidos de ensayo en el proyecto Supabase; no se ejecutaron pruebas con usuarios A/B ni llamadas reales con roles de empleado/administrador.
