@@ -51,8 +51,11 @@ BEGIN
   END IF;
 
   IF p_items IS NULL
-     OR JSONB_TYPEOF(p_items) IS DISTINCT FROM 'array'
-     OR JSONB_ARRAY_LENGTH(p_items) < 1
+     OR JSONB_TYPEOF(p_items) IS DISTINCT FROM 'array' THEN
+    RAISE EXCEPTION 'El pedido debe incluir una lista de productos válida.';
+  END IF;
+
+  IF JSONB_ARRAY_LENGTH(p_items) < 1
      OR JSONB_ARRAY_LENGTH(p_items) > 30 THEN
     RAISE EXCEPTION 'El pedido debe incluir entre 1 y 30 productos.';
   END IF;
