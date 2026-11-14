@@ -104,3 +104,13 @@ Solo entonces preparar el PR de integración. La fusión/publicación y cualquie
 - `verify-order-financial-access.sql`: verificador financiero de pedidos existente.
 - `verify-integration-package.sql`: comprueba también tablas, RLS y grants del libro financiero y nómina.
 - `docs/security-role-test-matrix.md`: matriz detallada de permisos y pruebas.
+
+## Bloqueos confirmados en la auditoría de pedidos — 14/11/2026
+
+- La Edge Function activa `create-public-order` es versión 3 y no implementa la clave idempotente que ya envía `app.js`. Antes de producción deben aplicarse las migraciones de clientes y checkout idempotente, y desplegarse la Edge Function de esta rama. Hasta entonces, un reintento tras perder la respuesta puede generar pedidos duplicados.
+- La función activa de transición de estado y las políticas activas de `orders`/`order_items` conservan un bypass de `platform_owner`. La migración `business-admin-boundaries.sql` contiene la sustitución por membresías activas; el verificador ahora comprueba que no reaparezca el bypass.
+- El panel ahora captura y muestra `delivery_tracking` al pasar un pedido a `out_for_delivery`. Esta modificación requiere que la rama se publique junto con las migraciones de permisos; no cambia el sitio publicado.
+- La función activa `track-public-order` es versión 1. La versión de la rama agrega `Cache-Control: no-store, private`.
+- La base activa no contiene datos de negocio/productos/pedidos para una prueba de compra y entrega real. Las pruebas de concurrencia, aislamiento A/B, cancelación y restitución de inventario siguen pendientes en un entorno de ensayo.
+
+**No desplegar parcialmente:** el código idempotente de la Edge Function depende de las RPC y tablas creadas por las migraciones del paquete. No desplegar esa función antes de aplicar y verificar sus dependencias en un entorno de pruebas.
