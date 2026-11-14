@@ -623,7 +623,7 @@ Si una restitución falla, PostgreSQL revierte también la aprobación y el camb
 
 ### 6. Estados y consistencia funcional
 
-Los estados live continúan siendo `pending`, `confirmed`, `preparing`, `ready`, `out_for_delivery`, `delivered` y `cancelled`, porque la migración aún no se ha ejecutado. En la rama se preparó la conversión a `received`, `confirmed`, `preparing`, `ready`, `on_the_way`, `delivered` y `cancelled`, junto con el cambio de trigger, valor predeterminado, etiquetas de paneles, seguimiento público e historial de clientes.
+Los estados live continúan siendo `pending`, `confirmed`, `preparing`, `ready`, `out_for_delivery`, `delivered` y `cancelled`, porque la migración aún no se ha ejecutado. En la rama se preparó la conversión a `received`, `confirmed`, `preparing`, `ready`, `on_the_way`, `delivered` y `cancelled`. La conversión de datos, la restricción CHECK, el valor predeterminado, la función de transición y la sustitución de `create_public_order` se ejecutan dentro de una sola transacción en `database/inventory/checkout-inventory-lock-order-draft.sql`, después de `database/inventory/inventory-movements-draft.sql`. Las etiquetas del panel, seguimiento público e historial de clientes ya usan los nombres canónicos.
 
 ### 7. Estado de datos y pruebas
 
@@ -964,7 +964,7 @@ Dependencias determinantes:
 - Ejecutar el paquete completo en staging y corregir cualquier error real de PostgreSQL.
 - Revisar grants y RLS después de todas las migraciones, no archivo por archivo de forma aislada.
 - Probar concurrencia del checkout, inventario, idempotencia, cancelación y reembolso.
-- Aplicar en un entorno de pruebas la migración de estados y verificar cada transición, cancelación, historial y seguimiento.
+- Ejecutar primero `database/inventory/inventory-movements-draft.sql` y luego `database/inventory/checkout-inventory-lock-order-draft.sql` en un entorno de pruebas; verificar la transacción completa y cada transición, cancelación, historial y seguimiento.
 - Desplegar Edge Functions solo después de que las firmas RPC instaladas coincidan con sus llamadas.
 
 **Estado:** las dos correcciones fueron guardadas y verificadas en `correcciones-funcionales`. Supabase Independiente permanece sin cambios: no se ejecutó SQL, no se desplegaron Edge Functions y no se modificó `main` ni GitHub Pages.
