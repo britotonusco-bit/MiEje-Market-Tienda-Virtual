@@ -156,7 +156,8 @@ BEGIN
       'currency', 'COP',
       'refund_method', v_method,
       'provider', v_provider,
-      'reference', v_reference
+      'reference', v_reference,
+      'notes', v_notes
     )
   );
 
