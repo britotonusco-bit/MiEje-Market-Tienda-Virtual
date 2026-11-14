@@ -394,10 +394,33 @@ BEGIN
   END IF;
 
   IF has_column_privilege('authenticated','public.orders','total','SELECT')
+     OR has_column_privilege('authenticated','public.orders','subtotal','SELECT')
+     OR has_column_privilege('authenticated','public.orders','delivery_fee','SELECT')
+     OR has_column_privilege('authenticated','public.orders','payment_method','SELECT')
      OR has_column_privilege('authenticated','public.orders','payment_status','SELECT')
+     OR has_column_privilege('authenticated','public.orders','customer_email','SELECT')
+     OR has_column_privilege('authenticated','public.orders','customer_user_id','SELECT')
+     OR has_column_privilege('authenticated','public.order_items','product_id','SELECT')
      OR has_column_privilege('authenticated','public.order_items','unit_price','SELECT')
-     OR has_column_privilege('authenticated','public.order_items','line_total','SELECT') THEN
-    RAISE EXCEPTION 'FALLO: authenticated conserva lectura directa de importes financieros.';
+     OR has_column_privilege('authenticated','public.order_items','line_total','SELECT')
+     OR has_table_privilege('authenticated','public.orders','SELECT')
+     OR has_table_privilege('authenticated','public.order_items','SELECT')
+     OR NOT has_column_privilege('authenticated','public.orders','status','SELECT')
+     OR NOT has_column_privilege('authenticated','public.orders','business_id','SELECT')
+     OR NOT has_column_privilege('authenticated','public.order_items','product_name','SELECT')
+     OR NOT has_column_privilege('authenticated','public.order_items','quantity','SELECT') THEN
+    RAISE EXCEPTION 'FALLO: columnas de pedidos visibles/no visibles no coinciden con el mínimo operativo.';
+  END IF;
+
+  IF has_table_privilege('authenticated','public.orders','UPDATE')
+     OR has_table_privilege('authenticated','public.order_items','INSERT')
+     OR has_table_privilege('authenticated','public.order_items','UPDATE')
+     OR has_table_privilege('authenticated','public.order_items','DELETE')
+     OR NOT has_column_privilege('authenticated','public.orders','status','UPDATE')
+     OR NOT has_column_privilege('authenticated','public.orders','delivery_tracking','UPDATE')
+     OR has_column_privilege('authenticated','public.orders','payment_status','UPDATE')
+     OR has_column_privilege('authenticated','public.orders','total','UPDATE') THEN
+    RAISE EXCEPTION 'FALLO: los paneles conservan escritura directa de columnas financieras o líneas de pedido.';
   END IF;
 
   IF NOT EXISTS (
