@@ -9,11 +9,11 @@
   let cachedBusinesses = [];
   let cachedProducts = [];
   const statusLabels = {
-    pending: 'Recibido', confirmed: 'Confirmado', preparing: 'En preparación',
-    ready: 'Listo', out_for_delivery: 'En camino', delivered: 'Entregado', cancelled: 'Cancelado'
+    received: 'Recibido', confirmed: 'Confirmado', preparing: 'En preparación',
+    ready: 'Listo', on_the_way: 'En camino', delivered: 'Entregado', cancelled: 'Cancelado'
   };
-  const nextStatus = { pending: 'confirmed', confirmed: 'preparing', preparing: 'ready', ready: 'out_for_delivery', out_for_delivery: 'delivered' };
-  const statusClass = { pending: 'yellow', confirmed: 'blue', preparing: 'blue', ready: 'green', out_for_delivery: 'blue', delivered: 'green', cancelled: 'red' };
+  const nextStatus = { received: 'confirmed', confirmed: 'preparing', preparing: 'ready', ready: 'on_the_way', on_the_way: 'delivered' };
+  const statusClass = { received: 'yellow', confirmed: 'blue', preparing: 'blue', ready: 'green', on_the_way: 'blue', delivered: 'green', cancelled: 'red' };
 
   document.addEventListener('DOMContentLoaded', boot);
 
@@ -1848,7 +1848,7 @@
 
     // Al iniciar el reparto, guardar una referencia que el cliente pueda consultar
     // con su código privado de seguimiento.
-    if (next === 'out_for_delivery') {
+    if (next === 'on_the_way') {
       const tracking = window.prompt(
         'Ingresa el enlace o referencia de seguimiento. Si no usas transportadora, escribe por ejemplo: Domiciliario del negocio.',
         'Domiciliario del negocio'
