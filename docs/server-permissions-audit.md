@@ -718,3 +718,11 @@ No aplicar esta secuencia directamente en producción sin pruebas. En particular
 - Lectura y verificación de archivos en GitHub: **realizadas**.
 - Migraciones SQL aplicadas, funciones desplegadas y pruebas concurrentes: **ninguna**.
 - GitHub Pages y `main`: **sin cambios**.
+
+
+### 6. Integración adicional del historial y permisos de inventario
+
+- `panel-negocio.html` incorpora una sección de historial de inventario con botón de actualización.
+- `panel-live.js` consulta los últimos 100 movimientos del negocio autenticado, muestra fecha, producto, tipo, saldos, variación y motivo. La consulta queda protegida por la política RLS de administradores activos.
+- `database/security/business-admin-boundaries.sql` deja de conceder UPDATE directo de la columna `products.inventory` a `authenticated`. Los cambios de existencias deben pasar por `adjust_business_inventory`; la función `SECURITY DEFINER` realiza el UPDATE después de validar el rol y el negocio.
+- El historial solo se podrá consultar cuando la migración de movimientos esté instalada. Si se despliega el panel antes de esa migración, la consulta mostrará el error de tabla/función ausente; por eso debe respetarse el orden de despliegue.
