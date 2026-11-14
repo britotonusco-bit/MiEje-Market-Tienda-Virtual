@@ -211,6 +211,12 @@ BEGIN
         AND oi.product_id IS NOT NULL
       GROUP BY oi.product_id
     )
+    PERFORM pg_catalog.set_config(
+      'app.inventory_movement_reason',
+      'Restitución por cancelación del pedido ' || v_request.order_id::text,
+      true
+    );
+
     UPDATE public.products p
     SET inventory = p.inventory + quantities.quantity,
         updated_at = pg_catalog.now()
