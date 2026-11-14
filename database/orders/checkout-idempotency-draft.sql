@@ -158,7 +158,7 @@ BEGIN
     RAISE EXCEPTION 'No fue posible guardar el método de pago del pedido.';
   END IF;
 
-  RETURN v_order;
+  RETURN v_order || jsonb_build_object('payment_method_name', v_method.display_name);
 END;
 $function$;
 
