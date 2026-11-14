@@ -191,3 +191,34 @@ Se ajustó el código de la rama para que:
 ### Estado de validación
 
 Los cambios se guardaron únicamente en la rama `correcciones-funcionales`. La Edge Function no se desplegó y la migración no se ejecutó. Se requiere validación de sintaxis TypeScript/JavaScript y prueba integrada en un entorno de ensayo antes de considerar el flujo operativo.
+
+
+## Cuarta revisión: RPC de pedidos, cancelaciones, pagos, reembolsos y gastos
+
+Se contrastaron las llamadas de `panel-live.js` con las funciones SQL preparadas para la base de datos.
+
+### Resultado de autorización por operación
+
+- `get_business_admin_order_financials`: el RPC exige `business_admin` activo del negocio solicitado. El panel administrador lo utiliza para totales y pedidos con datos financieros. El panel empleado no lo invoca.
+- `get_business_admin_profit_report`: exige `business_admin` activo y devuelve el informe financiero del negocio. Solo se llama desde la ruta de administración.
+- `mark_order_payment_received`: exige `business_admin` del negocio del pedido, comprueba que el pedido siga pendiente de pago y registra el movimiento de ingreso. La interfaz solo muestra la acción de confirmar pago al administrador.
+- `request_order_cancellation`: admite `business_admin` y `employee` activos del negocio; exige motivo, bloquea el pedido y evita solicitudes pendientes duplicadas. La interfaz permite al empleado registrar la solicitud, pero no decidirla.
+- `decide_order_cancellation`: exige `business_admin` activo del negocio asociado; valida que la solicitud siga pendiente y que el pedido no haya terminado. La bandeja y los botones de decisión solo se cargan en el panel administrador.
+- `complete_order_refund`: exige `business_admin` activo, pedido cancelado y pago conciliado por el importe exacto; exige referencia del reembolso y evita registrar dos reembolsos completados.
+- `register_business_expense`, `pay_business_expense`, `void_business_expense` y `attach_business_expense_receipt`: exigen `business_admin` activo del negocio y rechazan expresamente al propietario técnico. Las acciones de gastos solo se cargan en el panel administrador.
+
+### Protección de pedidos y datos financieros
+
+- El borrador retira la lectura general de `orders` y concede a los paneles únicamente columnas operativas. Importes, método y estado de pago se entregan al administrador mediante RPC validado.
+- Empleados y administradores leen nombres y cantidades de `order_items`, no precios unitarios ni totales de línea.
+- La actualización directa de pedidos queda limitada a `status`, `delivery_tracking` y `updated_at`; el trigger valida negocio activo, rol y transición permitida.
+- La transición a `cancelled` requiere una solicitud aprobada por el mismo usuario que ejecuta el cambio. La aprobación y el cambio de estado se realizan en la función de decisión.
+- Las solicitudes de cancelación solo son legibles por administradores; empleados únicamente pueden crearlas mediante la función controlada.
+
+### Diferencia de vocabulario del flujo de pedidos pendiente de decisión
+
+El código actual y los borradores coinciden entre sí en estos estados: `pending → confirmed → preparing → ready → out_for_delivery → delivered`, además de `cancelled`. Esto no coincide literalmente con la nomenclatura funcional solicitada anteriormente (`received` y `on_the_way`). No se cambió el flujo en esta revisión porque implica actualizar conjuntamente creación del pedido, restricciones de base de datos, trigger, etiquetas, filtros, seguimiento e historial. Debe normalizarse en una corrección dedicada antes de pruebas finales para evitar estados incompatibles.
+
+### Estado
+
+Esta revisión no encontró una llamada de la interfaz que permita al empleado confirmar pagos, registrar reembolsos, consultar reportes financieros o administrar gastos. Las restricciones críticas están en funciones SQL y triggers, no dependen solo de ocultar botones. El resultado es una revisión estática de los borradores: no demuestra que las funciones estén instaladas ni que el comportamiento se haya probado en Supabase.
