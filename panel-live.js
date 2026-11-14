@@ -142,8 +142,8 @@
       .reduce((sum, o) => sum + Number(o.total || 0), 0);
     renderStats([
       ['Pedidos de hoy', number(todayOrders.length), 'Pedidos creados hoy, sin cancelados'],
-      ['Ventas pagadas hoy', money(todayPaidSales), 'Solo pedidos con pago confirmado'],
-      ['Dinero recibido', money(received), 'Total histórico de pedidos pagados'],
+      ['Pedidos de hoy con pago confirmado', money(todayPaidSales), 'Importe de pedidos creados hoy cuyo pago figura confirmado'],
+      ['Total de pedidos con pago confirmado', money(received), 'Suma de pedidos cuyo estado de pago figura como confirmado'],
       ['Pedidos abiertos', number(orders.filter(o => !['delivered','cancelled'].includes(o.status)).length), 'Pendientes de completar'],
       ['Productos con poco stock', number(products.filter(p => p.is_active && Number(p.inventory || 0) <= 5).length), 'Cinco unidades o menos']
     ]);
