@@ -67,6 +67,10 @@
       document.querySelector('#storeSettingsForm')?.addEventListener('submit', saveStoreSettings);
       document.querySelector('#productForm')?.addEventListener('submit', saveProduct);
       document.querySelector('#profitReportForm')?.addEventListener('submit', loadProfitReport);
+      document.querySelector('#businessExpenseForm')?.addEventListener('submit', saveBusinessExpense);
+      document.querySelector('#refreshExpenses')?.addEventListener('click', loadBusinessExpenses);
+      document.querySelector('#businessExpensesContainer')?.addEventListener('click', handleExpenseAction);
+      document.querySelector('#businessExpensesContainer')?.addEventListener('change', handleExpenseControlChange);
       document.querySelector('#businessContentForm')?.addEventListener('submit', saveBusinessContent);
       document.querySelector('#businessAiForm')?.addEventListener('submit', saveBusinessAi);
       document.querySelector('#blockRequestForm')?.addEventListener('submit', submitBlockRequest);
@@ -150,6 +154,7 @@
     ]);
     await Promise.all([loadBusinessOrders(), loadCancellationRequests(), loadRefundableOrders(), loadProducts(), loadAccessEvents(businessId, '#accessContainer'), loadAuditEvents(businessId, '#auditContainer')]);
     initializeProfitReport();
+    await loadBusinessExpenses();
   }
 
 
@@ -157,6 +162,8 @@
     const form = document.querySelector('#profitReportForm');
     if (!form) return;
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+    const expenseForm = document.querySelector('#businessExpenseForm');
+    if (expenseForm) expenseForm.elements.expense_date.value = today;
     form.elements.start_date.value = today.slice(0,8) + '01';
     form.elements.end_date.value = today;
     loadProfitReport();
@@ -197,6 +204,165 @@
       ? '<p class="message success">Todos los productos vendidos en este periodo tienen costo histórico registrado.</p>'
       : '<p class="message error">Hay productos vendidos sin costo histórico. El resultado no representa la ganancia real completa.</p>'
     )+'<p class="muted">Periodo: '+esc(data.start_date)+' a '+esc(data.end_date)+'. '+esc(data.basis)+'</p>';
+  }
+
+  async function loadBusinessExpenses() {
+    const target = document.querySelector('#businessExpensesContainer');
+    if (!target || !businessId || panel !== 'business_admin') return;
+    target.innerHTML = '<div class="empty">Cargando gastos…</div>';
+    const { data, error } = await db.from('business_expenses')
+      .select('id,expense_date,category,description,amount,payment_status,payment_method,transaction_reference,supplier,receipt_path,notes,paid_at,status,void_reason,voided_at,created_at')
+      .eq('business_id', businessId)
+      .order('expense_date', { ascending: false })
+      .limit(250);
+    if (error) {
+      target.innerHTML = '<div class="empty">No se pudieron cargar los gastos. Comprueba que las políticas de lectura del administrador estén aplicadas. '+esc(error.message)+'</div>';
+      return;
+    }
+    renderBusinessExpenses(data || []);
+  }
+
+  function renderBusinessExpenses(items) {
+    const target = document.querySelector('#businessExpensesContainer');
+    if (!target) return;
+    if (!items.length) {
+      target.innerHTML = '<div class="empty">Todavía no hay gastos registrados en este negocio.</div>';
+      return;
+    }
+    const rows = items.map(item => {
+      const status = item.status === 'voided' ? 'Anulado' : (item.payment_status === 'paid' ? 'Pagado' : 'Pendiente');
+      const payment = item.payment_method ? ({cash:'Efectivo',transfer:'Transferencia',card:'Tarjeta',other:'Otro'}[item.payment_method] || item.payment_method) : '—';
+      let actions = '';
+      if (item.status === 'active' && item.payment_status === 'pending') {
+        actions = '<div class="form-grid"><label>Método<select class="field" data-expense-method="'+esc(item.id)+'"><option value="cash">Efectivo</option><option value="transfer">Transferencia</option><option value="card">Tarjeta</option><option value="other">Otro</option></select></label><label>Referencia (obligatoria para transferencia/tarjeta)<input class="field" data-expense-reference="'+esc(item.id)+'" maxlength="160"></label><button class="button secondary" type="button" data-expense-action="pay" data-expense-id="'+esc(item.id)+'">Confirmar pago</button><button class="button secondary" type="button" data-expense-action="void" data-expense-id="'+esc(item.id)+'">Anular gasto</button></div>';
+      }
+      const receipt = item.receipt_path
+        ? '<button class="button secondary" type="button" data-expense-action="receipt" data-expense-id="'+esc(item.id)+'">Ver comprobante</button>'
+        : (item.status === 'active' ? '<label>Adjuntar comprobante<input class="field" type="file" data-expense-file="'+esc(item.id)+'" accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"></label>' : '—');
+      return '<tr><td>'+esc(item.expense_date)+'</td><td><strong>'+esc(item.description)+'</strong><br><small>'+esc(item.category)+(item.supplier ? ' · '+esc(item.supplier) : '')+'</small></td><td>'+esc(money(item.amount))+'</td><td>'+esc(status)+'</td><td>'+esc(payment)+(item.transaction_reference ? '<br><small>Ref.: '+esc(item.transaction_reference)+'</small>' : '')+'</td><td>'+receipt+'</td><td>'+actions+(item.status === 'voided' ? '<small>Motivo: '+esc(item.void_reason || '—')+'</small>' : '')+'</td></tr>';
+    });
+    target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Detalle</th><th>Valor</th><th>Estado</th><th>Pago</th><th>Comprobante</th><th>Acciones</th></tr></thead><tbody>'+rows.join('')+'</tbody></table></div><p class="muted">Se muestran hasta 250 registros recientes. Los gastos anulados se conservan en el historial y no se incluyen como gastos pagados en el reporte.</p>';
+  }
+
+  function handleExpenseControlChange(event) {
+    const fileInput = event.target.closest('[data-expense-file]');
+    if (fileInput && fileInput.files?.[0]) uploadExpenseReceipt(fileInput.dataset.expenseFile, fileInput.files[0]);
+  }
+
+  async function handleExpenseAction(event) {
+    const button = event.target.closest('[data-expense-action]');
+    if (!button) return;
+    const id = button.dataset.expenseId;
+    const action = button.dataset.expenseAction;
+    button.disabled = true;
+    try {
+      if (action === 'pay') {
+        const method = document.querySelector('[data-expense-method="'+CSS.escape(id)+'"]')?.value;
+        const reference = document.querySelector('[data-expense-reference="'+CSS.escape(id)+'"]')?.value.trim() || null;
+        if (['transfer','card'].includes(method) && !reference) throw new Error('Debes escribir la referencia para transferencia o tarjeta.');
+        const { error } = await db.rpc('pay_business_expense', {
+          p_expense_id:id, p_payment_method:method, p_transaction_reference:reference
+        });
+        if (error) throw error;
+        await loadBusinessExpenses();
+      } else if (action === 'void') {
+        const reason = window.prompt('Escribe el motivo de anulación (mínimo 3 caracteres):');
+        if (reason === null) return;
+        if (reason.trim().length < 3) throw new Error('El motivo debe tener al menos 3 caracteres.');
+        const { error } = await db.rpc('void_business_expense', { p_expense_id:id, p_void_reason:reason.trim() });
+        if (error) throw error;
+        await loadBusinessExpenses();
+      } else if (action === 'receipt') {
+        const { data, error } = await db.storage.from('business-expense-receipts').createSignedUrl(
+          button.dataset.receiptPath || await getExpenseReceiptPath(id), 300
+        );
+        if (error || !data?.signedUrl) throw error || new Error('No se pudo crear el enlace temporal.');
+        window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+      }
+    } catch (error) {
+      window.alert('No se pudo completar la acción: '+(error.message || 'Error desconocido'));
+      button.disabled = false;
+    }
+  }
+
+  async function getExpenseReceiptPath(id) {
+    const { data, error } = await db.from('business_expenses').select('receipt_path')
+      .eq('id',id).eq('business_id',businessId).maybeSingle();
+    if (error) throw error;
+    if (!data?.receipt_path) throw new Error('Este gasto no tiene comprobante asociado.');
+    return data.receipt_path;
+  }
+
+  async function uploadExpenseReceipt(expenseId, file) {
+    const allowed = new Set(['application/pdf','image/jpeg','image/png','image/webp']);
+    if (!allowed.has(file.type) || file.size > 5*1024*1024) {
+      window.alert('El comprobante debe ser PDF, JPG, PNG o WEBP y no superar 5 MB.');
+      return;
+    }
+    const extension = file.type === 'application/pdf' ? 'pdf' : file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1];
+    const path = businessId+'/'+expenseId+'/'+crypto.randomUUID()+'.'+extension;
+    const { error: uploadError } = await db.storage.from('business-expense-receipts').upload(path,file,{
+      cacheControl:'0',upsert:false,contentType:file.type
+    });
+    if (uploadError) {
+      window.alert('No se pudo subir el comprobante: '+uploadError.message);
+      return;
+    }
+    const { error: attachError } = await db.rpc('attach_business_expense_receipt',{
+      p_expense_id:expenseId,p_receipt_path:path
+    });
+    if (attachError) {
+      window.alert('El archivo quedó cargado pero no se pudo asociar al gasto. No lo vuelvas a subir con otro nombre; requiere revisión técnica. '+attachError.message);
+      return;
+    }
+    await loadBusinessExpenses();
+  }
+
+  async function saveBusinessExpense(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#businessExpenseMessage');
+    const submit = form.querySelector('[type="submit"]');
+    const file = form.elements.receipt.files?.[0] || null;
+    const amount = Number(form.elements.amount.value);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      message.textContent = 'El valor del gasto debe ser mayor que cero.';
+      return;
+    }
+    if (file && (!new Set(['application/pdf','image/jpeg','image/png','image/webp']).has(file.type) || file.size > 5*1024*1024)) {
+      message.textContent = 'El comprobante debe ser PDF, JPG, PNG o WEBP y no superar 5 MB.';
+      return;
+    }
+    submit.disabled = true;
+    message.textContent = 'Registrando gasto…';
+    try {
+      const { data: expenseId, error } = await db.rpc('register_business_expense',{
+        p_business_id:businessId,
+        p_category:form.elements.category.value,
+        p_description:form.elements.description.value.trim(),
+        p_amount:amount,
+        p_expense_date:form.elements.expense_date.value,
+        p_payment_status:'pending',
+        p_payment_method:null,
+        p_supplier:form.elements.supplier.value.trim() || null,
+        p_transaction_reference:form.elements.transaction_reference.value.trim() || null,
+        p_receipt_path:null,
+        p_notes:form.elements.notes.value.trim() || null
+      });
+      if (error) throw error;
+      if (file) {
+        await uploadExpenseReceipt(expenseId,file);
+      }
+      form.reset();
+      form.elements.expense_date.value = new Date().toLocaleDateString('en-CA',{timeZone:'America/Bogota'});
+      message.textContent = 'Gasto registrado como pendiente. Confirma el pago solo después de realizarlo.';
+      await loadBusinessExpenses();
+      await loadProfitReport();
+    } catch (error) {
+      message.textContent = 'No se pudo registrar el gasto: '+(error.message || 'Error desconocido');
+    } finally {
+      submit.disabled = false;
+    }
   }
 
   async function uploadBusinessImage(file, folder) {
