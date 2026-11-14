@@ -164,8 +164,8 @@ BEGIN
     TRIM(p_delivery_address),
     NULLIF(TRIM(COALESCE(p_delivery_notes, '')), ''),
     p_payment_method,
-    'pending',
-    'pending',
+    'pending', -- payment_status remains pending until reconciled
+    'received',
     v_subtotal,
     v_business.delivery_fee,
     v_total
