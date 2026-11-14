@@ -203,7 +203,7 @@
     target.innerHTML='<div class="stats">'+rows.map(([label,value])=>
       '<article class="stat"><span>'+esc(label)+'</span><strong>'+esc(value)+'</strong></article>'
     ).join('')+'</div>'+(data.complete_cost_data
-      ? '<p class="message success">Todos los productos vendidos en este periodo tienen costo histórico registrado.</p>'
+      ? '<p class="message success">Todos los movimientos de costo del periodo tienen costo histórico registrado.</p>'
       : '<p class="message error">Hay productos vendidos sin costo histórico. El resultado no representa la ganancia real completa.</p>'
     )+'<p class="muted">Periodo: '+esc(data.start_date)+' a '+esc(data.end_date)+'. '+esc(data.basis)+'</p>';
   }
