@@ -219,6 +219,7 @@ BEGIN
         'order_number', owned.order_number,
         'status', owned.status,
         'payment_status', owned.payment_status,
+        'payment_method_name', owned.payment_method_name,
         'subtotal', owned.subtotal,
         'delivery_fee', owned.delivery_fee,
         'total', owned.total,
@@ -246,7 +247,7 @@ BEGIN
   INTO v_result
   FROM (
     SELECT o.id, o.order_number, o.status, o.payment_status,
-           o.subtotal, o.delivery_fee, o.total, o.created_at,
+           o.payment_method_name, o.subtotal, o.delivery_fee, o.total, o.created_at,
            b.name AS business_name
     FROM public.orders o
     JOIN public.businesses b ON b.id = o.business_id
