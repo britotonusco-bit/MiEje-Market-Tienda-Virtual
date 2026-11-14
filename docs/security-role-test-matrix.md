@@ -1049,3 +1049,15 @@ El verificador de integración ahora comprueba: existencia de la relación `cust
 8. Ventas, costo de ventas, ganancia bruta, gastos y ganancia neta coinciden con movimientos de prueba conocidos.
 
 **Estado:** correcciones de interfaz, políticas y verificador preparadas en `correcciones-funcionales`. No se aplicaron migraciones ni se desplegaron funciones. La utilidad neta y los reportes completos siguen pendientes de implementación y pruebas; no se consideran listos para producción.
+## Reporte financiero por periodo — 14/11/2026
+
+- El resumen anterior suma el total de pedidos cuyo pago figura confirmado. No descuenta reembolsos, costos ni gastos y no debe llamarse ganancia.
+- `financial_transactions` diferencia pagos y reembolsos. Solo se cuentan movimientos `completed`, ubicados por `completed_at` en hora de Bogotá.
+- `business_expenses` solo se descuenta cuando está activo, pagado y tiene `paid_at`. Los gastos pendientes y anulados quedan fuera.
+- Se añadió al borrador financiero el RPC `get_business_admin_profit_report(uuid,date,date)`, protegido para el administrador activo del negocio y con rango máximo de 367 días.
+- El RPC devuelve ventas, reembolsos, ventas netas, costo histórico, ganancia bruta estimada, gastos pagados y resultado neto estimado. También informa líneas sin costo histórico.
+- El panel incorpora un selector de fechas y resultados por periodo. Si el RPC no está instalado, informa que el reporte no está disponible; no inventa valores.
+- El cálculo es una estimación operativa, no un estado contable certificado. No incluye impuestos, comisiones bancarias, depreciación ni cargos que el negocio no haya registrado.
+- Pruebas obligatorias: periodos diario/mensual/anual; pagos y reembolsos en fechas distintas; gastos pagados/pendientes/anulados; costos ausentes; aislamiento entre negocios; fechas inválidas; comparación con movimientos de prueba.
+
+**Estado:** reporte preparado en rama y migración pendiente. No se ejecutó SQL ni se publicó en GitHub Pages.
