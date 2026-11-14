@@ -265,6 +265,35 @@ BEGIN
     RAISE EXCEPTION 'FALLO: faltan políticas RLS de favoritos.';
   END IF;
 
+  IF has_table_privilege('anon','public.customer_favorites','SELECT')
+     OR has_table_privilege('anon','public.customer_favorites','INSERT')
+     OR has_table_privilege('anon','public.customer_favorites','DELETE')
+     OR NOT has_table_privilege('authenticated','public.customer_favorites','SELECT')
+     OR NOT has_table_privilege('authenticated','public.customer_favorites','INSERT')
+     OR NOT has_table_privilege('authenticated','public.customer_favorites','DELETE')
+     OR has_table_privilege('authenticated','public.customer_favorites','UPDATE') THEN
+    RAISE EXCEPTION 'FALLO: los permisos de favoritos no son exclusivos del cliente autenticado.';
+  END IF;
+
+  IF NOT has_function_privilege('authenticated',
+       'public.get_customer_order_history()','EXECUTE')
+     OR has_function_privilege('anon',
+       'public.get_customer_order_history()','EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: el historial no está limitado a sesiones autenticadas.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint c
+    JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=ANY(c.conkey)
+    WHERE c.conrelid='public.orders'::regclass
+      AND c.contype='f'
+      AND a.attname='customer_user_id'
+      AND c.confdeltype='n'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: borrar una cuenta podría no conservar los pedidos con customer_user_id en NULL.';
+  END IF;
+
   IF NOT EXISTS (
     SELECT 1 FROM pg_policies
     WHERE schemaname='public' AND tablename='business_content_pages'
