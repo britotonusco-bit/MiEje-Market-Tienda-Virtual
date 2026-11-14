@@ -320,6 +320,82 @@ GRANT SELECT (
 ) ON TABLE public.order_items TO authenticated;
 
 
+
+CREATE OR REPLACE FUNCTION public.get_business_admin_profit_report(
+  p_business_id uuid, p_start_date date, p_end_date date
+)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = ''
+AS $function$
+DECLARE
+  v_actor uuid := auth.uid();
+  v_result jsonb;
+BEGIN
+  IF v_actor IS NULL THEN RAISE EXCEPTION 'Debes iniciar sesión.' USING ERRCODE = '42501'; END IF;
+  IF p_start_date IS NULL OR p_end_date IS NULL OR p_end_date < p_start_date OR p_end_date - p_start_date > 366 THEN
+    RAISE EXCEPTION 'Selecciona un periodo válido de hasta 367 días.' USING ERRCODE = '22023';
+  END IF;
+  IF NOT private.business_is_active(p_business_id)
+     OR NOT private.has_business_role(p_business_id, ARRAY['business_admin']::text[]) THEN
+    RAISE EXCEPTION 'Solo el administrador activo del negocio puede consultar este reporte.' USING ERRCODE = '42501';
+  END IF;
+  WITH period_payments AS (
+    SELECT ft.order_id, ft.amount
+    FROM public.financial_transactions ft
+    WHERE ft.business_id=p_business_id AND ft.transaction_type='payment_received'
+      AND ft.status='completed'
+      AND (ft.completed_at AT TIME ZONE 'America/Bogota')::date BETWEEN p_start_date AND p_end_date
+  ),
+  period_refunds AS (
+    SELECT COALESCE(sum(ft.amount),0)::numeric(14,2) amount
+    FROM public.financial_transactions ft
+    WHERE ft.business_id=p_business_id AND ft.transaction_type='refund'
+      AND ft.status='completed'
+      AND (ft.completed_at AT TIME ZONE 'America/Bogota')::date BETWEEN p_start_date AND p_end_date
+  ),
+  order_costs AS (
+    SELECT pp.order_id,
+      count(*) FILTER (WHERE oic.unit_cost IS NULL)::integer missing_cost_lines,
+      COALESCE(sum(oic.unit_cost*oi.quantity) FILTER (WHERE oic.unit_cost IS NOT NULL),0)::numeric(14,2) cost_amount
+    FROM period_payments pp
+    JOIN public.orders o ON o.id=pp.order_id AND o.business_id=p_business_id
+    JOIN public.order_items oi ON oi.order_id=o.id
+    LEFT JOIN public.order_item_costs oic ON oic.order_item_id=oi.id
+      AND oic.order_id=o.id AND oic.business_id=p_business_id
+    WHERE o.status <> 'cancelled'
+    GROUP BY pp.order_id
+  ),
+  expense_totals AS (
+    SELECT COALESCE(sum(be.amount),0)::numeric(14,2) amount
+    FROM public.business_expenses be
+    WHERE be.business_id=p_business_id AND be.status='active'
+      AND be.payment_status='paid' AND be.paid_at IS NOT NULL
+      AND (be.paid_at AT TIME ZONE 'America/Bogota')::date BETWEEN p_start_date AND p_end_date
+  ),
+  totals AS (
+    SELECT
+      COALESCE((SELECT sum(amount) FROM period_payments),0)::numeric(14,2) sales,
+      (SELECT amount FROM period_refunds) refunds,
+      COALESCE((SELECT sum(cost_amount) FROM order_costs),0)::numeric(14,2) cost_of_sales,
+      COALESCE((SELECT sum(missing_cost_lines) FROM order_costs),0)::integer missing_cost_lines,
+      (SELECT amount FROM expense_totals) paid_expenses,
+      (SELECT count(*) FROM period_payments)::integer paid_orders
+  )
+  SELECT jsonb_build_object(
+    'start_date',p_start_date,'end_date',p_end_date,'sales',sales,'refunds',refunds,
+    'net_sales',sales-refunds,'cost_of_sales',cost_of_sales,
+    'gross_profit_estimate',sales-refunds-cost_of_sales,
+    'paid_expenses',paid_expenses,
+    'net_profit_estimate',sales-refunds-cost_of_sales-paid_expenses,
+    'missing_cost_lines',missing_cost_lines,'paid_orders',paid_orders,
+    'complete_cost_data',missing_cost_lines=0,
+    'basis','Pagos y reembolsos confirmados por fecha de movimiento; costos asociados a pedidos pagados en el periodo; gastos por fecha de pago. Resultado estimado, no estado contable certificado.'
+  ) INTO v_result FROM totals;
+  RETURN v_result;
+END;
+$function$;
+REVOKE ALL ON FUNCTION public.get_business_admin_profit_report(uuid,date,date) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_business_admin_profit_report(uuid,date,date) TO authenticated;
+
 -- PRUEBAS OBLIGATORIAS EN ENSAYO:
 -- 1) Un empleado no puede leer orders.total, subtotal, delivery_fee ni payment_status.
 -- 2) Un empleado no puede leer order_items.unit_price ni line_total.
