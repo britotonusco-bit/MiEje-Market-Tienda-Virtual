@@ -596,8 +596,19 @@ BEGIN
     RAISE EXCEPTION 'FALLO: el reporte no revierte el costo de inventario en la fecha de aprobación de cancelación.';
   END IF;
   IF NOT has_function_privilege('authenticated','public.get_business_admin_profit_report(uuid,date,date)','EXECUTE')
-     OR has_function_privilege('anon','public.get_business_admin_profit_report(uuid,date,date)','EXECUTE') THEN
-    RAISE EXCEPTION 'FALLO: privilegios incorrectos en el reporte financiero.';
+     OR has_function_privilege('anon','public.get_business_admin_profit_report(uuid,date,date)','EXECUTE')
+     OR NOT (
+       SELECT p.prosecdef
+       FROM pg_proc p
+       WHERE p.oid='public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     )
+     OR position('has_business_role' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0
+     OR position('business_is_active' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: el reporte financiero no está limitado al administrador activo del negocio.';
   END IF;
 
 
