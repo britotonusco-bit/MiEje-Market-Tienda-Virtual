@@ -204,6 +204,22 @@ BEGIN
     WHERE oi.order_id = v_request.order_id
       AND oi.product_id IS NOT NULL;
 
+    -- Adquirir los locks de productos en orden UUID ascendente.
+    -- Así, dos cancelaciones que compartan productos evitan bloquearlos
+    -- en órdenes opuestos.
+    PERFORM p.id
+    FROM public.products AS p
+    JOIN (
+      SELECT oi.product_id
+      FROM public.order_items AS oi
+      WHERE oi.order_id = v_request.order_id
+        AND oi.product_id IS NOT NULL
+      GROUP BY oi.product_id
+    ) AS affected ON affected.product_id = p.id
+    WHERE p.business_id = v_request.business_id
+    ORDER BY p.id
+    FOR UPDATE OF p;
+
     PERFORM pg_catalog.set_config(
       'app.inventory_movement_reason',
       'Restitución por cancelación del pedido ' || v_request.order_id::text,
