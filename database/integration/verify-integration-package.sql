@@ -738,6 +738,64 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'FALLO: no debe existir lectura pública de comprobantes de gastos.';
   END IF;
+
+  -- Cuentas internas: los clientes autenticados no pueden crear ni cambiar membresías.
+  IF has_table_privilege('authenticated','public.business_memberships','INSERT')
+     OR has_table_privilege('authenticated','public.business_memberships','UPDATE')
+     OR has_table_privilege('authenticated','public.business_memberships','DELETE')
+     OR has_table_privilege('anon','public.business_memberships','SELECT') THEN
+    RAISE EXCEPTION 'FALLO: authenticated/anon tienen privilegios indebidos sobre membresías.';
+  END IF;
+
+  -- El usuario solo puede modificar datos de presentación; nunca su rol o bloqueo.
+  IF has_column_privilege('authenticated','public.profiles','platform_role','UPDATE')
+     OR has_column_privilege('authenticated','public.profiles','is_blocked','UPDATE')
+     OR has_column_privilege('authenticated','public.profiles','blocked_reason','UPDATE')
+     OR has_column_privilege('authenticated','public.profiles','id','UPDATE')
+     OR NOT has_column_privilege('authenticated','public.profiles','display_name','UPDATE')
+     OR NOT has_column_privilege('authenticated','public.profiles','avatar_url','UPDATE')
+     OR NOT has_column_privilege('authenticated','public.profiles','phone','UPDATE') THEN
+    RAISE EXCEPTION 'FALLO: los privilegios de profiles permiten alterar roles/bloqueos o impiden editar datos propios.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='profiles'
+      AND policyname='profiles_select_self_or_same_business_admin'
+      AND cmd='SELECT' AND qual NOT ILIKE '%is_platform_owner%'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='business_memberships'
+      AND policyname='memberships_select_self_admin_owner'
+      AND cmd='SELECT' AND qual NOT ILIKE '%is_platform_owner%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: profiles/memberships conservan lectura global del propietario o faltan políticas limitadas.';
+  END IF;
+
+  -- Solicitudes de bloqueo: solo admin del negocio crea; solo servicio resuelve.
+  IF to_regclass('public.access_block_requests') IS NULL
+     OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid='public.access_block_requests'::regclass)
+     OR to_regprocedure('public.resolve_access_block_request(uuid,text,text,uuid)') IS NULL THEN
+    RAISE EXCEPTION 'FALLO: faltan la tabla protegida o la RPC de resolución de bloqueos.';
+  END IF;
+  IF has_table_privilege('anon','public.access_block_requests','SELECT')
+     OR has_table_privilege('authenticated','public.access_block_requests','SELECT')
+     OR has_table_privilege('authenticated','public.access_block_requests','UPDATE')
+     OR has_table_privilege('authenticated','public.access_block_requests','DELETE')
+     OR has_function_privilege('anon','public.resolve_access_block_request(uuid,text,text,uuid)','EXECUTE')
+     OR has_function_privilege('authenticated','public.resolve_access_block_request(uuid,text,text,uuid)','EXECUTE')
+     OR NOT has_function_privilege('service_role','public.resolve_access_block_request(uuid,text,text,uuid)','EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: las solicitudes de bloqueo o su RPC tienen privilegios excesivos.';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='access_block_requests'
+      AND policyname='access_block_requests_admin_submit'
+      AND cmd='INSERT' AND with_check ILIKE '%business_admin%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: falta la política de solicitud de bloqueo limitada al administrador del negocio.';
+  END IF;
+
   RAISE NOTICE 'OK: estructura, RPCs, RLS, privilegios y buckets del paquete están presentes.';
 END
 $verify$;
