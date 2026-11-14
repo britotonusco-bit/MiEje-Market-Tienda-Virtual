@@ -153,7 +153,6 @@
       } else {
         const stillAllowed = (access.memberships || []).some(item =>
           item.business_id === businessId &&
-          item.business?.status === 'active' &&
           item.role === panel
         );
         if (!stillAllowed) throw new Error('Tu acceso a este negocio fue suspendido o retirado.');
