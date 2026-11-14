@@ -1115,3 +1115,7 @@ El verificador de integración ahora comprueba: existencia de la relación `cust
 - El resultado expone por separado costo bruto de productos, reversión de costo por cancelaciones y costo neto del periodo. Los movimientos se agrupan por fecha local de Bogotá.
 - El cálculo sigue siendo estimado y basado en movimientos. No equivale a estados financieros certificados ni incluye impuestos, comisiones, depreciación o costos que no fueron registrados.
 - El verificador de integración comprueba que el RPC incluya la fecha de aprobación de cancelación y el indicador de reversión de costo.
+
+- Se reforzó la cancelación con un índice único parcial para permitir una sola solicitud aprobada por pedido. Así se evita que un pedido se apruebe dos veces y se repita la restitución de inventario o la reversión de costo.
+- Se reutiliza el índice de solicitudes pendientes que ya existe en la base para evitar crear un índice duplicado equivalente.
+- Las observaciones del reembolso ahora también quedan incluidas en los detalles del registro de auditoría.
