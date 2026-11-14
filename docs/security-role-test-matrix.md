@@ -1136,3 +1136,30 @@ El verificador de integración ahora comprueba: existencia de la relación `cust
 - Se verificó que el panel de empleados no consulta RPCs financieros ni la tabla de costos; el módulo de costos se carga desde la inicialización exclusiva del panel administrador. El panel técnico consulta el libro de finanzas de la plataforma y nómina por Edge Function, no las tablas `financial_transactions`, `business_expenses`, `product_costs` u `order_item_costs` de cada tienda.
 - Las políticas live aún conservan bypass del propietario técnico en movimientos financieros, gastos, costos, pedidos y reembolsos. La migración de límites reemplaza esos permisos, pero sigue pendiente de validación y aplicación.
 - Estado de pruebas: revisión estática de código, políticas, grants y firmas de funciones. No hay negocios ni pedidos de ensayo en el proyecto Supabase; no se ejecutaron pruebas con usuarios A/B ni llamadas reales con roles de empleado/administrador.
+
+
+## Auditoría de Storage y documentos privados (14 nov 2026)
+
+### Estado observado en Supabase activo
+- `business-assets` está configurado como bucket público (PNG/JPEG/WEBP, máximo 5 MB). Su contenido es descargable públicamente por diseño; solo debe contener logos e imágenes de productos. Las políticas RLS de Storage controlan la carga, modificación y eliminación autenticadas, pero no convierten un bucket público en privado.
+- Las políticas live de `business-assets` contienen una referencia de ruta incorrecta: intentan derivar el identificador de negocio desde `storage.foldername(b.name)`, aunque la ruta corresponde a `storage.objects.name`. Esto puede impedir la autorización correcta de las operaciones de Storage.
+- `job-applications-private` está privado, permite PDF/DOC/DOCX hasta 5 MB. La lectura live se limita a administradores autenticados de negocio, pero su política no valida estrictamente la profundidad de ruta y el nombre del archivo.
+- El bucket `business-expense-receipts` aún no existe en Supabase live. Los comprobantes de gastos no están listos para producción.
+- No se encontraron políticas de Storage para anon en los buckets privados inspeccionados. Las políticas de lectura de hojas de vida y comprobantes se conceden a authenticated con comprobación del rol administrador.
+- El panel crea enlaces firmados de 300 segundos para hojas de vida y comprobantes. La creación de enlaces de descarga para hojas de vida depende de la política SELECT de Storage y de la RLS de postulaciones del negocio.
+- La Edge Function pública de postulaciones genera enlaces firmados de carga de 30 minutos tras validar vacante, tamaño declarado, extensión y MIME declarado; verifica la sesión y la existencia/tamaño del archivo antes de registrar la postulación. No se encontró análisis antivirus ni validación de firma binaria del archivo, por lo que esto sigue siendo una limitación de seguridad.
+
+### Correcciones preparadas en la rama
+- `database/security/storage-policy-fix.sql` valida la ruta desde `storage.objects.name`, exige exactamente dos carpetas para imágenes comerciales y restringe las operaciones a rutas `<business_uuid>/logo/<archivo>` o `<business_uuid>/products/<archivo>`.
+- El mismo SQL restringe la lectura de hojas de vida a la ruta exacta `<business_uuid>/<application_uuid>/<uuid>.(pdf|doc|docx)`, con negocio activo y rol `business_admin`.
+- `database/finance/expense-receipts-storage-draft.sql` crea un bucket privado de 5 MB con lectura/carga limitada al administrador activo del negocio dueño del gasto. La lectura conserva comprobantes de gastos anulados para auditoría; las nuevas cargas solo se permiten en gastos activos.
+- `database/integration/verify-integration-package.sql` comprueba privacidad del bucket de gastos, políticas por rol, ausencia de políticas anon en buckets privados y que las rutas de imágenes no se calculen desde `businesses.name`.
+
+### Pruebas pendientes
+- Crear dos negocios de prueba A/B con administradores y empleados independientes; intentar listar, descargar, generar enlaces firmados, subir, reemplazar y borrar archivos cruzados.
+- Confirmar que empleado A y empleado B no pueden crear enlaces ni descargar hojas de vida o comprobantes.
+- Confirmar que el propietario técnico no obtiene acceso por Data API a archivos privados de negocios.
+- Confirmar que anon puede descargar imágenes comerciales públicas, pero no hojas de vida ni comprobantes.
+- Probar rutas mal formadas, carpetas adicionales, nombres no UUID, archivos MIME/extensión inconsistentes, archivos superiores a 5 MB y tokens de carga vencidos/reutilizados.
+- Incorporar análisis antivirus/validación de contenido real para documentos antes de considerarlos seguros.
+- No hay archivos ni postulaciones reales de ensayo para probar los flujos completos. No se ejecutaron migraciones ni cambios de Storage en Supabase live.
