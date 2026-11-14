@@ -385,13 +385,29 @@ Deno.serve(async (req: Request) => {
       const limitValue = Number(body.limit ?? 100);
       const limit = Number.isInteger(limitValue) ? Math.min(Math.max(limitValue, 1), 500) : 100;
       let query = admin.from("audit_logs")
-        .select("id,business_id,actor_id,action,entity_type,entity_id,details,created_at")
+        .select("id,business_id,actor_id,action,entity_type,entity_id,details,created_at", { count: "exact" })
         .order("created_at", { ascending: false })
         .limit(limit);
       if (businessId) query = query.eq("business_id", businessId);
-      const { data, error } = await query;
+      const { data, error, count } = await query;
       if (error) throw error;
-      return reply(200, { ok: true, audit_logs: data ?? [] });
+
+      const actorIds = [...new Set((data ?? []).map((row: any) => row.actor_id).filter(Boolean))];
+      const actorNames = new Map<string, string>();
+      if (actorIds.length) {
+        const { data: profiles, error: profilesError } = await admin.from("profiles")
+          .select("id,display_name")
+          .in("id", actorIds);
+        if (profilesError) throw profilesError;
+        for (const profile of profiles ?? []) {
+          actorNames.set(profile.id, profile.display_name ?? "");
+        }
+      }
+      const auditLogs = (data ?? []).map((row: any) => ({
+        ...row,
+        actor_name: actorNames.get(row.actor_id) || null,
+      }));
+      return reply(200, { ok: true, audit_logs: auditLogs, audit_count: count ?? auditLogs.length });
     }
 
     if (action === "list_content_moderation") {
