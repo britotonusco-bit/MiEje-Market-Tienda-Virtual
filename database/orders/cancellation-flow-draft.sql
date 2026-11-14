@@ -13,9 +13,16 @@
 -- 5) No procesa reembolsos. Si el pedido ya estaba pagado, el reembolso debe
 --    registrarse y completarse mediante un flujo financiero separado.
 
-CREATE UNIQUE INDEX IF NOT EXISTS order_cancellation_one_pending_per_order
-ON public.order_cancellation_requests (business_id, order_id)
+-- Reutilizar el índice pendiente ya existente para no duplicarlo.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_pending_cancellation_per_order
+ON public.order_cancellation_requests (order_id)
 WHERE status = 'pending';
+
+-- Un pedido solo puede tener una cancelación aprobada: evita una segunda
+-- restitución de inventario y una segunda reversión de costo para el mismo pedido.
+CREATE UNIQUE INDEX IF NOT EXISTS order_cancellation_one_approved_per_order
+ON public.order_cancellation_requests (business_id, order_id)
+WHERE status = 'approved';
 
 CREATE OR REPLACE FUNCTION public.request_order_cancellation(
   p_business_id uuid,
