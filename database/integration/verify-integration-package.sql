@@ -540,6 +540,29 @@ BEGIN
      OR has_function_privilege('anon','public.get_business_admin_profit_report(uuid,date,date)','EXECUTE') THEN
     RAISE EXCEPTION 'FALLO: privilegios incorrectos en el reporte financiero.';
   END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM storage.buckets
+    WHERE id='business-expense-receipts' AND public=false
+      AND file_size_limit=5242880
+  ) THEN
+    RAISE EXCEPTION 'FALLO: el bucket privado de comprobantes de gastos no está configurado.';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname='storage' AND tablename='objects'
+      AND policyname='business_expense_receipts_admin_read' AND cmd='SELECT'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname='storage' AND tablename='objects'
+      AND policyname='business_expense_receipts_admin_upload' AND cmd='INSERT'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: faltan políticas privadas para comprobantes de gastos.';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname='storage' AND tablename='objects'
+      AND policyname='business_expense_receipts_public_read'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: no debe existir lectura pública de comprobantes de gastos.';
+  END IF;
   RAISE NOTICE 'OK: estructura, RPCs, RLS, privilegios y buckets del paquete están presentes.';
 END
 $verify$;
