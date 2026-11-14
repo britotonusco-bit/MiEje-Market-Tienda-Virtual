@@ -357,3 +357,14 @@ Se confirmó un error real en las políticas instaladas de gestión de imágenes
 El diseño de comprobantes privados está preparado en los borradores, pero no está instalado. No se encontraron objetos en Storage durante la consulta, así que no hubo datos reales para realizar pruebas de lectura o descarga.
 
 No se ejecutó SQL, no se modificaron buckets, no se desplegaron funciones y no se cambiaron políticas en Supabase. Esta revisión fue de solo lectura en el proyecto y de análisis estático de los archivos de la rama.
+
+
+### Ajuste posterior a la sexta revisión
+
+Se reforzó el borrador `database/security/storage-policy-fix.sql` para que la política de lectura de `job-applications-private` no se limite a validar el UUID del negocio y el rol. Ahora también exige que el segundo segmento de la ruta corresponda al ID de una postulación existente, que esa postulación pertenezca al mismo negocio y que `job_applications.resume_path` coincida exactamente con el nombre del objeto.
+
+La comprobación se verificó leyendo nuevamente el archivo de la rama. También se comprobó que esta condición quedó dentro de la política del bucket privado y no se añadió accidentalmente a las políticas de `business-assets`.
+
+- SHA del borrador actualizado: `49b002e7621da70594adc64960b32b24f813e45e`.
+- Rama: `correcciones-funcionales`.
+- No se ejecutó la migración ni se cambió la política instalada en Supabase.
