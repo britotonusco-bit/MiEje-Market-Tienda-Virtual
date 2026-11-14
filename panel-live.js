@@ -517,6 +517,7 @@
         const inventoryResult = await db.rpc('adjust_business_inventory', {
           p_business_id: businessId,
           p_product_id: id,
+          p_expected_inventory: Number(existingProduct.inventory),
           p_new_inventory: inventory,
           p_reason: inventoryReason
         });
