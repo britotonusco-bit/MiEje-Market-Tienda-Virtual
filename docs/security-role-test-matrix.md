@@ -1105,3 +1105,6 @@ El verificador de integración ahora comprueba: existencia de la relación `cust
 - Se confirmó que `orders.payment_status` admite `refunded`, y que `financial_transactions` admite el tipo `refund` y estado `completed`.
 - Se detectó y corrigió en el borrador un vacío de conciliación: antes bastaba con que el pedido dijera `paid`; ahora `complete_order_refund` exige exactamente un movimiento `payment_received` completado en COP cuyo importe coincida con el total del pedido. Esto impide registrar un reembolso sin ingreso financiero verificable, con pago duplicado o con valor diferente.
 - El informe financiero usa fecha de movimiento en hora Bogotá: pagos y reembolsos pueden caer en periodos distintos. Por ello el resultado por periodo es un resumen de movimientos, no un estado de resultados por cohorte de pedidos ni contabilidad de causación. Para evitar interpretar como ganancia definitiva un pago que después se reembolsa, la conciliación por pedido debe revisarse junto con la bandeja de reembolsos pendientes.
+
+- Se corrigió el RPC de confirmación de pago para conservar las observaciones opcionales dentro de `audit_logs.details`; antes el panel las solicitaba, pero la función las validaba y luego descartaba.
+- Se añadieron accesos de navegación visibles a las secciones de solicitudes de cancelación y reembolsos del panel administrador.
