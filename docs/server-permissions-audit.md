@@ -968,3 +968,50 @@ Dependencias determinantes:
 - Desplegar Edge Functions solo después de que las firmas RPC instaladas coincidan con sus llamadas.
 
 **Estado:** las dos correcciones fueron guardadas y verificadas en `correcciones-funcionales`. Supabase Independiente permanece sin cambios: no se ejecutó SQL, no se desplegaron Edge Functions y no se modificó `main` ni GitHub Pages.
+## Revisión de integridad de cancelaciones, inventario y reembolsos
+
+Se revisaron `database/orders/cancellation-flow-draft.sql`, `database/inventory/inventory-movements-draft.sql`, `database/orders/refund-flow-draft.sql`, el panel y el esquema live de Supabase Independiente.
+
+### Cancelación e inventario
+
+- La solicitud bloquea primero el pedido y evita duplicar solicitudes pendientes.
+- La decisión bloquea pedido y solicitud en el mismo orden, reduciendo el riesgo de deadlocks entre solicitud y aprobación simultáneas.
+- Solo el administrador activo del negocio puede aprobar o rechazar; empleados pueden solicitar, pero no decidir.
+- La aprobación actualiza la solicitud, cambia el pedido a `cancelled`, bloquea los productos por UUID ascendente y restituye las cantidades agregadas por producto dentro de una misma transacción.
+- La función compara el número de productos afectados con el número de productos realmente actualizados. Si falta alguno, lanza una excepción y revierte también la aprobación y el cambio de estado.
+- Un índice único parcial impide más de una solicitud aprobada por pedido. Una segunda aprobación no puede devolver inventario otra vez.
+- El movimiento `cancellation_return` se registra mediante el trigger de inventario en la misma transacción.
+- Se reforzó la validación del servidor: el rechazo exige una respuesta de al menos cinco caracteres. No depende únicamente de la validación de la interfaz.
+
+### Conservación del historial de productos
+
+La FK live `order_items_product_id_fkey` usaba `ON DELETE SET NULL`. Eso podía borrar la referencia del producto de una línea histórica y dejar sin vínculo la restitución futura.
+
+Se cambió el borrador `database/inventory/inventory-movements-draft.sql` para que la FK use `ON DELETE RESTRICT`. Los productos que ya forman parte de pedidos deben desactivarse en vez de eliminarse. Esto conserva la referencia necesaria para el historial y la devolución de existencias.
+
+### Reembolsos
+
+- El borrador exige que el pedido esté cancelado y figure como pagado.
+- Comprueba que exista exactamente un ingreso completado por el importe total del pedido y en COP.
+- Exige una solicitud de cancelación aprobada y una referencia del reembolso.
+- Registra la transacción, el detalle del reembolso, el estado `refunded` y la auditoría dentro de la misma transacción.
+- El índice único parcial impide dos reembolsos completados para el mismo pedido.
+- El procedimiento registra un reembolso realizado fuera de MiEje; no transfiere dinero ni se conecta a una pasarela.
+
+### Estado live y límites de prueba
+
+La consulta de solo lectura confirmó que Supabase Independiente aún tiene `ON DELETE SET NULL` en la FK de `order_items.product_id`. También confirmó cero productos, pedidos, líneas de pedido y solicitudes de cancelación. Por tanto, no hay datos con los que ejecutar pruebas reales de cancelación, concurrencia, restitución o reembolso.
+
+Las correcciones están guardadas en `correcciones-funcionales`. No se ejecutó SQL, no se desplegaron funciones y no se modificó `main` ni GitHub Pages.
+
+### Pruebas obligatorias antes de activar
+
+1. Solicitud por empleado y administrador del mismo negocio; rechazo de un miembro de otro negocio.
+2. Aprobación/rechazo solo por administrador activo; rechazo sin motivo debe fallar en RPC.
+3. Cancelación de pedido con uno o varios productos; validar cantidades exactas y movimientos `cancellation_return`.
+4. Dos aprobaciones concurrentes; exactamente una debe completarse y el inventario debe aumentar una sola vez.
+5. Pedido entregado o ya cancelado no puede cancelarse.
+6. Producto asociado a un pedido no puede eliminarse; sí debe poder desactivarse.
+7. Error simulado al restituir uno de varios productos debe revertir solicitud, pedido e inventario.
+8. Reembolso solo con pago conciliado exacto, cancelación aprobada y referencia; un segundo reembolso debe fallar.
+9. Verificar que un pedido cancelado y pagado quede en `payment_status = 'paid'` hasta que se registre el reembolso; después debe quedar `refunded`.
