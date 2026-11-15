@@ -6,6 +6,17 @@
 -- La lectura continúa bajo la política RLS del administrador del negocio.
 REVOKE INSERT, UPDATE ON TABLE public.business_payment_methods
   FROM PUBLIC, anon, authenticated;
+-- También retirar los grants por columna que ya existían en la tabla.
+REVOKE INSERT (
+  id, business_id, method_code, display_name, provider, account_holder,
+  account_type, account_reference, public_instructions, is_enabled,
+  sort_order, created_at, updated_at
+) ON TABLE public.business_payment_methods FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE (
+  id, business_id, method_code, display_name, provider, account_holder,
+  account_type, account_reference, public_instructions, is_enabled,
+  sort_order, created_at, updated_at
+) ON TABLE public.business_payment_methods FROM PUBLIC, anon, authenticated;
 
 CREATE OR REPLACE FUNCTION public.save_business_payment_methods(
   p_business_id uuid,
