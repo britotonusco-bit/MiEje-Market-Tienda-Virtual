@@ -454,6 +454,9 @@ DECLARE
   v_existing_hash text;
   v_existing_response jsonb;
   v_response jsonb;
+  v_ip_hash text;
+  v_reserved_ip_hash text;
+  v_reserved_request_hash text;
 BEGIN
   IF p_idempotency_key IS NULL THEN
     RAISE EXCEPTION 'Se requiere una clave de pedido válida.';
@@ -487,11 +490,27 @@ BEGIN
     RETURN v_existing_response;
   END IF;
 
-  -- La reserva de IP se realiza antes, mediante una RPC independiente.
-  -- Aquí solo se valida el formato; no se consume otra vez el límite.
+  -- Exigir la reserva de IP creada por reserve_checkout_rate_limit().
+  -- La RPC de creación no debe poder ejecutarse saltándose el límite.
   IF p_ip IS NULL OR pg_catalog.length(pg_catalog.btrim(p_ip)) < 3
      OR pg_catalog.length(p_ip) > 100 THEN
     RAISE EXCEPTION 'No fue posible validar el origen de la solicitud.';
+  END IF;
+
+  v_ip_hash := pg_catalog.encode(
+    extensions.digest(pg_catalog.btrim(p_ip), 'sha256'), 'hex'
+  );
+
+  SELECT ip_hash, request_hash
+  INTO v_reserved_ip_hash, v_reserved_request_hash
+  FROM private.checkout_rate_limit_reservations
+  WHERE idempotency_key = p_idempotency_key
+  FOR UPDATE;
+
+  IF NOT FOUND
+     OR v_reserved_ip_hash <> v_ip_hash
+     OR v_reserved_request_hash <> v_request_hash THEN
+    RAISE EXCEPTION 'El intento no tiene una reserva de seguridad válida. Vuelve a iniciar el checkout.';
   END IF;
 
   v_response := public.create_public_order_for_customer_with_payment_method(
