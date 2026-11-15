@@ -85,15 +85,21 @@ Deno.serve(async (req: Request) => {
     const finalDeliveryNotes = deliveryNotes || null;
 
     const normalizedItems = items.map((item: any) => ({
-      product_id: textValue(item?.product_id, 80),
+      // Canonicalizar UUID antes de calcular el hash de idempotencia y
+      // comparar duplicados: PostgreSQL trata mayúsculas/minúsculas igual.
+      product_id: textValue(item?.product_id, 80).toLowerCase(),
       quantity: Number(item?.quantity),
     }));
 
     if (normalizedItems.some((item: any) =>
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item.product_id)
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(item.product_id)
       || !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 99
     )) {
       return reply(400, { error: "Hay un producto o una cantidad inválidos." });
+    }
+
+    if (new Set(normalizedItems.map((item: any) => item.product_id)).size !== normalizedItems.length) {
+      return reply(400, { error: "No repitas el mismo producto; ajusta su cantidad." });
     }
 
     const requestArgs = {
