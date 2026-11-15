@@ -2,6 +2,11 @@
 -- Guardado atómico de métodos de pago de un negocio.
 -- BORRADOR: instalar después de business-admin-boundaries.sql y probar en staging.
 
+-- Forzar que las escrituras autenticadas pasen por la RPC transaccional.
+-- La lectura continúa bajo la política RLS del administrador del negocio.
+REVOKE INSERT, UPDATE ON TABLE public.business_payment_methods
+  FROM PUBLIC, anon, authenticated;
+
 CREATE OR REPLACE FUNCTION public.save_business_payment_methods(
   p_business_id uuid,
   p_methods jsonb
