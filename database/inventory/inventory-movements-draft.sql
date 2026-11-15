@@ -27,6 +27,17 @@ CREATE TABLE IF NOT EXISTS public.inventory_movements (
     CHECK (quantity_delta = quantity_after - quantity_before)
 );
 
+-- Conservar la relación histórica entre una línea de pedido y su producto.
+-- Los productos vendidos deben desactivarse, no borrarse: una cancelación posterior
+-- necesita la referencia para restituir existencias y el historial debe seguir íntegro.
+ALTER TABLE public.order_items
+  DROP CONSTRAINT IF EXISTS order_items_product_id_fkey;
+ALTER TABLE public.order_items
+  ADD CONSTRAINT order_items_product_id_fkey
+  FOREIGN KEY (product_id)
+  REFERENCES public.products(id)
+  ON DELETE RESTRICT;
+
 CREATE INDEX IF NOT EXISTS inventory_movements_business_created_idx
   ON public.inventory_movements (business_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS inventory_movements_product_created_idx
