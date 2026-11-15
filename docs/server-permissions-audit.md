@@ -1070,7 +1070,7 @@ Se corrigió el guardado de métodos de pago del administrador. Antes el navegad
 Se añadió `database/security/business-payment-methods-atomic-draft.sql`, que debe instalarse después de `business-admin-boundaries.sql`. La RPC `save_business_payment_methods(p_business_id, p_methods)`:
 
 - exige sesión autenticada, membresía activa `business_admin` y negocio activo;
-- bloquea la fila del negocio y serializa los cambios simultáneos de configuración;
+- bloquea la fila del negocio y la membresía/perfil del administrador durante la operación, y serializa los cambios simultáneos de configuración;
 - valida el arreglo completo (1 a 20 métodos), códigos permitidos, nombres, instrucciones y nombres duplicados antes de escribir;
 - conserva IDs existentes cuando puede, actualiza/crea los métodos enviados y desactiva los omitidos sin borrarlos;
 - ejecuta todas las modificaciones en una única transacción PostgreSQL;
