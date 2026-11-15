@@ -131,6 +131,13 @@ BEGIN
     RAISE EXCEPTION 'La respuesta no puede superar 2000 caracteres.' USING ERRCODE = '22023';
   END IF;
 
+  -- La razón del rechazo se valida en servidor; no depender solo del formulario.
+  IF p_decision = 'rejected'
+     AND (v_response IS NULL OR pg_catalog.char_length(v_response) < 5) THEN
+    RAISE EXCEPTION 'Indica un motivo de rechazo de al menos 5 caracteres.'
+      USING ERRCODE = '22023';
+  END IF;
+
   -- Obtener las referencias sin bloquear y fijar un orden de bloqueo estable:
   -- primero el pedido y después la solicitud. request_order_cancellation()
   -- también bloquea primero el pedido, evitando invertir el orden entre flujos.
