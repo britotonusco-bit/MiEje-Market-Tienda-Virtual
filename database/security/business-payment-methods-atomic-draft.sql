@@ -47,9 +47,9 @@ BEGIN
     WHERE pg_catalog.jsonb_typeof(value) <> 'object'
        OR pg_catalog.jsonb_typeof(value->'method_code') <> 'string'
        OR pg_catalog.jsonb_typeof(value->'display_name') <> 'string'
-       OR pg_catalog.char_length(pg_catalog.btrim(value->>'display_name')) < 2
-       OR pg_catalog.char_length(pg_catalog.btrim(value->>'display_name')) > 100
-       OR pg_catalog.coalesce(value->>'method_code', '') NOT IN ('cash','transfer','card','other')
+       OR COALESCE(pg_catalog.char_length(pg_catalog.btrim(value->>'display_name')), 0) < 2
+       OR COALESCE(pg_catalog.char_length(pg_catalog.btrim(value->>'display_name')), 0) > 100
+       OR COALESCE(value->>'method_code', '') NOT IN ('cash','transfer','card','other')
        OR (
          value ? 'public_instructions'
          AND value->'public_instructions' <> 'null'::jsonb
