@@ -1063,3 +1063,21 @@ Pruebas integrales obligatorias en staging:
 9. Revisión de grants/RLS y pruebas con cuentas separadas de administrador, empleado y cliente.
 
 **Estado:** corrección de verificación de reserva guardada y verificada en `correcciones-funcionales`. Ninguna migración fue ejecutada ni se desplegó una Edge Function; `main` y GitHub Pages no fueron modificados.
+## Guardado transaccional de métodos de pago
+
+Se corrigió el guardado de métodos de pago del administrador. Antes el navegador ejecutaba varias operaciones INSERT/UPDATE por separado; un fallo intermedio podía dejar una lista parcialmente modificada.
+
+Se añadió `database/security/business-payment-methods-atomic-draft.sql`, que debe instalarse después de `business-admin-boundaries.sql`. La RPC `save_business_payment_methods(p_business_id, p_methods)`:
+
+- exige sesión autenticada, membresía activa `business_admin` y negocio activo;
+- bloquea la fila del negocio y serializa los cambios simultáneos de configuración;
+- valida el arreglo completo (1 a 20 métodos), códigos permitidos, nombres, instrucciones y nombres duplicados antes de escribir;
+- conserva IDs existentes cuando puede, actualiza/crea los métodos enviados y desactiva los omitidos sin borrarlos;
+- ejecuta todas las modificaciones en una única transacción PostgreSQL;
+- solo concede EXECUTE a `authenticated`; además revoca INSERT/UPDATE directos, incluidos grants por columna, para que el panel tenga que utilizar la RPC.
+
+`panel-live.js` ahora envía la lista completa en una sola llamada RPC. Si la función falla, los cambios de métodos de pago se revierten íntegramente.
+
+**Alcance:** los métodos de pago sí se guardan atómicamente entre sí. Los datos generales del negocio y la carga del logo siguen siendo operaciones separadas; por tanto, un fallo de métodos puede dejar guardados los datos generales, pero no una lista de pagos a medias. La interfaz informa esa situación.
+
+**Estado:** SQL y panel guardados y verificados en `correcciones-funcionales`. La migración no se ejecutó. Antes de producción hay que probar permisos de administrador/empleado/owner, actualización de métodos existentes, renombrado, desactivación, rollback forzado, y que el panel público siga mostrando solo métodos habilitados.
