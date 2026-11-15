@@ -1114,3 +1114,22 @@ El panel del empleado carga pedidos y permite avanzar su estado y registrar info
 6. En live, el rol `authenticated` todavía tiene grants de lectura de columnas financieras de `orders` (incluidos subtotal, domicilio, total y estado de pago). Aunque la interfaz del empleado no muestra esos importes, el navegador podría consultarlos directamente. `order-financial-access-draft.sql` retira esas columnas del acceso general y entrega el reporte financiero solo mediante RPC al administrador; hasta instalar esa migración, la separación financiera entre empleado y administrador no está cerrada.
 
 **Estado:** revisión estática y consultas de solo lectura completadas. Esta actualización documenta las dependencias y límites encontrados. No se ejecutó SQL, no se desplegó ninguna Edge Function y no se modificaron `main` ni GitHub Pages.
+
+
+## Revisión de integridad del carrito y normalización de UUID
+
+Se encontró un caso límite en el checkout: la validación de productos repetidos comparaba el UUID como texto. Una solicitud podía incluir el mismo UUID con letras en mayúsculas y minúsculas; PostgreSQL los interpreta como el mismo identificador, pero la comparación textual los consideraba distintos. En el borrador de inventario, ambas líneas podían validar contra las mismas existencias antes de que comenzaran los descuentos y luego descontarse por separado.
+
+Correcciones guardadas en `correcciones-funcionales`:
+
+- `create-public-order/index.ts` convierte los UUID de producto a minúsculas antes de calcular la huella de idempotencia y rechaza IDs duplicados en el propio endpoint.
+- `checkout-inventory-lock-order-draft.sql` valida primero el formato de UUID y la cantidad, limita la cantidad máxima y compara los duplicados como tipo `uuid`, no como texto.
+- Se conserva la validación SQL aunque la Edge Function ya rechace duplicados: el control de inventario no debe depender solo del cliente HTTP.
+
+Pruebas obligatorias añadidas:
+1. Enviar el mismo UUID una vez en minúsculas y otra en mayúsculas; la Edge Function debe rechazarlo.
+2. Invocar la función SQL con ambos formatos; debe rechazar el carrito antes de bloquear o descontar existencias.
+3. Enviar dos productos distintos en orden inverso en dos checkouts concurrentes; no debe haber deadlock ni sobreventa.
+4. Simular inventario insuficiente en uno de varios productos; pedido, líneas, movimientos y descuentos deben revertirse juntos.
+
+**Estado:** corrección estática guardada en la rama. No se ejecutó SQL ni se desplegó la Edge Function. Supabase live continúa sin productos ni pedidos de prueba, por lo que la validación dinámica queda pendiente de staging.
