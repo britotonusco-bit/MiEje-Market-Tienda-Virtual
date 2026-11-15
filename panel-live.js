@@ -1143,53 +1143,25 @@
         throw new Error('No se pudieron guardar los datos del negocio: ' + (businessError?.message || 'No se encontró el negocio o no tienes permiso para modificarlo.'));
       }
       try {
-        const entries = paymentEntries;
         const methodCodeFor = label => {
-          const normalized = label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+          const normalized = label.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase();
           if (normalized.includes('efectivo') || normalized.includes('contra entrega')) return 'cash';
           if (normalized.includes('transfer') || normalized.includes('nequi') || normalized.includes('bancolombia') || normalized.includes('daviplata')) return 'transfer';
           if (normalized.includes('tarjeta') || normalized.includes('card')) return 'card';
           return 'other';
         };
-        const methods = entries.map((item, sortOrder) => ({ ...item, methodCode: methodCodeFor(item.displayName), sortOrder }));
-        const { data: existing, error: readError } = await db.from('business_payment_methods')
-          .select('id,method_code,display_name,is_enabled,sort_order')
-          .eq('business_id', businessId);
-        if (readError) throw readError;
-        const byCode = new Map();
-        (existing || []).forEach(row => {
-          if (!byCode.has(row.method_code)) byCode.set(row.method_code, []);
-          byCode.get(row.method_code).push(row);
+        const methods = paymentEntries.map((item, sortOrder) => ({
+          method_code: methodCodeFor(item.displayName),
+          display_name: item.displayName,
+          public_instructions: item.publicInstructions || null,
+          sort_order: sortOrder
+        }));
+        const { data: savedMethods, error: methodsError } = await db.rpc('save_business_payment_methods', {
+          p_business_id: businessId,
+          p_methods: methods
         });
-        const retained = new Set();
-        for (const method of methods) {
-          const candidates = byCode.get(method.methodCode) || [];
-          const exactIndex = candidates.findIndex(row =>
-            String(row.display_name || '').trim().toLocaleLowerCase()
-              === method.displayName.trim().toLocaleLowerCase()
-          );
-          // Conservar el ID de la misma cuenta/método incluso si el negocio
-          // reordena la lista; solo usar otro ID del mismo tipo al renombrarlo.
-          const old = exactIndex >= 0 ? candidates.splice(exactIndex, 1)[0] : candidates.shift();
-          if (old) {
-            const { data: updatedMethod, error } = await db.from('business_payment_methods').update({
-              display_name: method.displayName, public_instructions: method.publicInstructions || null, is_enabled: true, sort_order: method.sortOrder, updated_at: new Date().toISOString()
-            }).eq('id', old.id).eq('business_id', businessId).select('id').maybeSingle();
-            if (error || !updatedMethod) throw new Error(error?.message || 'No se pudo actualizar un método de pago del negocio.');
-            retained.add(old.id);
-          } else {
-            const { error } = await db.from('business_payment_methods').insert({
-              business_id: businessId, method_code: method.methodCode, display_name: method.displayName,
-              public_instructions: method.publicInstructions || null, is_enabled: true, sort_order: method.sortOrder
-            });
-            if (error) throw error;
-          }
-        }
-        for (const old of (existing || [])) {
-          if (!retained.has(old.id) && old.is_enabled) {
-            const { data: disabledMethod, error } = await db.from('business_payment_methods').update({ is_enabled: false, updated_at: new Date().toISOString() }).eq('id', old.id).eq('business_id', businessId).select('id').maybeSingle();
-            if (error || !disabledMethod) throw new Error(error?.message || 'No se pudo desactivar un método de pago anterior.');
-          }
+        if (methodsError || !savedMethods?.ok) {
+          throw new Error(methodsError?.message || 'No se pudo guardar la configuración de métodos de pago.');
         }
         message.textContent = 'Datos del negocio, métodos de pago y logo guardados correctamente.';
         message.className = 'message success';
