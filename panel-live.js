@@ -1144,7 +1144,7 @@
       }
       try {
         const methodCodeFor = label => {
-          const normalized = label.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase();
+          const normalized = label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
           if (normalized.includes('efectivo') || normalized.includes('contra entrega')) return 'cash';
           if (normalized.includes('transfer') || normalized.includes('nequi') || normalized.includes('bancolombia') || normalized.includes('daviplata')) return 'transfer';
           if (normalized.includes('tarjeta') || normalized.includes('card')) return 'card';
