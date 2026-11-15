@@ -56,6 +56,28 @@ BEGIN
   WHERE b.id = p_business_id
   FOR UPDATE;
 
+  IF NOT FOUND
+     OR NOT private.business_is_active(p_business_id) THEN
+    RAISE EXCEPTION 'El negocio no está activo o no existe.'
+      USING ERRCODE = '42501';
+  END IF;
+
+  -- Mantener estable la membresía y el perfil durante la operación.
+  PERFORM m.id
+  FROM public.business_memberships AS m
+  JOIN public.profiles AS p ON p.id = m.user_id
+  WHERE m.business_id = p_business_id
+    AND m.user_id = auth.uid()
+    AND m.role = 'business_admin'
+    AND m.status = 'active'
+    AND p.is_blocked = false
+  FOR UPDATE OF m, p;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Tu acceso de administrador ya no está activo.'
+      USING ERRCODE = '42501';
+  END IF;
+
   -- Validación completa antes de modificar filas.
   IF EXISTS (
     SELECT 1
