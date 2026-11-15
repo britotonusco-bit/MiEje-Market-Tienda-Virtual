@@ -1048,7 +1048,7 @@ Se corrigió `database/orders/checkout-idempotency-draft.sql`: antes de crear un
 
 Supabase live todavía no contiene las RPC idempotentes, el historial de movimientos ni las funciones nuevas de cancelación y reembolso. Solo existe la función base `create_public_order`, con permiso de ejecución restringido a `service_role`. Los conteos live siguen en cero para pedidos, líneas, productos, solicitudes de cancelación y transacciones; no hay datos de prueba.
 
-El guardado de varios métodos de pago en el panel se realiza mediante varias operaciones consecutivas, no una RPC transaccional. Si una operación falla a mitad, la configuración puede quedar parcialmente actualizada. Conviene convertir ese guardado en una única operación transaccional antes de producción.
+Nota histórica: el guardado de varios métodos de pago se realizaba mediante operaciones consecutivas. Esta limitación quedó corregida posteriormente con `save_business_payment_methods()` y el cambio de `panel-live.js`, documentados en la sección «Guardado transaccional de métodos de pago».
 
 Pruebas integrales obligatorias en staging:
 
@@ -1081,3 +1081,35 @@ Se añadió `database/security/business-payment-methods-atomic-draft.sql`, que d
 **Alcance:** los métodos de pago sí se guardan atómicamente entre sí. Los datos generales del negocio y la carga del logo siguen siendo operaciones separadas; por tanto, un fallo de métodos puede dejar guardados los datos generales, pero no una lista de pagos a medias. La interfaz informa esa situación.
 
 **Estado:** SQL y panel guardados y verificados en `correcciones-funcionales`. La migración no se ejecutó. Antes de producción hay que probar permisos de administrador/empleado/owner, actualización de métodos existentes, renombrado, desactivación, rollback forzado, y que el panel público siga mostrando solo métodos habilitados.
+
+
+## Revisión de operaciones de panel administrador y empleado
+
+Se revisaron las escrituras del cliente en `panel-live.js`, el panel de empleados y las operaciones privilegiadas de `technical-business-management`. El panel técnico usa la Edge Function para crear negocios, invitar usuarios, modificar membresías, suspender/reactivar accesos y moderar contenido; no se encontraron escrituras de membresías desde el navegador del administrador o empleado.
+
+### Operaciones directas del administrador
+
+- `products`: el administrador crea productos y modifica los campos comerciales; la creación incluye inventario inicial. Los cambios posteriores de inventario pasan por `adjust_business_inventory()` con existencias esperadas y motivo. La migración `business-admin-boundaries.sql` retira UPDATE directo de inventario y limita las columnas editables.
+- `product_costs`: el administrador guarda el costo actual con upsert. La política limita la fila a su negocio activo y el borrador de límites impide cambiar `product_id` o `business_id`; los costos históricos de pedidos se mantienen separados.
+- `businesses`: el administrador actualiza la ficha comercial de su negocio. El borrador restringe las columnas editables y elimina el bypass directo del propietario técnico.
+- `business_content_pages`: el administrador crea promociones, anuncios y formularios de empleo. RLS exige membresía administrativa activa del mismo negocio; la moderación técnica se ejecuta por Edge Function.
+- `job_applications`: solo el administrador consulta y actualiza el estado/notas de postulaciones. El borrador añade comprobación de negocio activo a la lectura. Los empleados no cargan esta bandeja.
+- `orders`: administrador y empleado actualizan estado/seguimiento mediante la interfaz, siempre filtrando por negocio. RLS y el trigger del borrador restringen la transición, exigen membresía activa y negocio activo, y eliminan el bypass del propietario técnico. El borrador de normalización cambia los estados antiguos a `received` y `on_the_way`.
+- `business_expenses`: la interfaz utiliza RPC para registrar, pagar y anular gastos; no realiza UPDATE directo desde el navegador. Las funciones verifican rol administrativo y negocio activo. La migración de límites retira la lectura global del propietario técnico.
+- `business_payment_methods`: la interfaz utiliza la RPC transaccional `save_business_payment_methods()`; el borrador revoca INSERT/UPDATE directos, incluidos los grants por columna.
+- `business_ai_settings`: el código del panel consulta y guarda esta tabla, pero la tabla no existe en Supabase live. El borrador `database/ai/ai-settings-draft.sql` crea la tabla, RLS y auditoría. Hasta instalarlo y probarlo en staging, la configuración IA por negocio no está operativa.
+- `access_block_requests`: el administrador envía solicitudes de bloqueo y el técnico las lista/resuelve mediante Edge Function. La tabla no existe en Supabase live. El borrador `database/security/access-block-requests-draft.sql` crea la tabla, política de envío y RPC de resolución. Esta función no está operativa en live hasta instalarlo y probarlo.
+
+### Operaciones del empleado
+
+El panel del empleado carga pedidos y permite avanzar su estado y registrar información de seguimiento. No expone formularios para modificar productos, costos, datos comerciales, métodos de pago, gastos, promociones, postulaciones, membresías o roles. La autorización final del cambio de pedido corresponde a RLS y al trigger de transición; ocultar controles en la interfaz no se considera una medida de seguridad suficiente.
+
+### Hallazgos y estado
+
+1. No se detectó una escritura de membresías/roles desde los paneles de negocio; esas operaciones permanecen centralizadas en la Edge Function técnica.
+2. Las tablas `business_ai_settings` y `access_block_requests` faltan en la base live aunque sus borradores y llamadas de interfaz ya existen. Son dependencias pendientes, no fallos que puedan corregirse solo desde JavaScript.
+3. En live, `products` todavía concede UPDATE sobre inventario y varias políticas conservan el acceso global del propietario técnico. El borrador `business-admin-boundaries.sql` corrige ambos puntos; hasta aplicarlo, no se debe considerar cerrado el aislamiento de datos.
+4. El panel del empleado depende de la migración de estados y del trigger de transición para que los nombres y secuencia canónicos coincidan con la interfaz.
+5. No hay negocios, productos ni pedidos de prueba en live, así que no se pudieron realizar pruebas E2E con dos negocios ni con cuentas separadas de administrador y empleado.
+
+**Estado:** revisión estática y consultas de solo lectura completadas. Esta actualización documenta las dependencias y límites encontrados. No se ejecutó SQL, no se desplegó ninguna Edge Function y no se modificaron `main` ni GitHub Pages.
