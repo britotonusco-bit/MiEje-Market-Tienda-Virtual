@@ -1015,3 +1015,51 @@ Las correcciones están guardadas en `correcciones-funcionales`. No se ejecutó 
 7. Error simulado al restituir uno de varios productos debe revertir solicitud, pedido e inventario.
 8. Reembolso solo con pago conciliado exacto, cancelación aprobada y referencia; un segundo reembolso debe fallar.
 9. Verificar que un pedido cancelado y pagado quede en `payment_status = 'paid'` hasta que se registre el reembolso; después debe quedar `refunded`.
+## Integración transversal: checkout, inventario, cancelación y reembolso
+
+Se revisaron conjuntamente los seis borradores de pedidos/inventario y la Edge Function `create-public-order`. La revisión fue estática, complementada con consultas de solo lectura al esquema live.
+
+### Orden y compatibilidad de dependencias
+
+- `customer-account-migration.sql` debe preceder al wrapper de checkout que asigna `customer_user_id` y crea favoritos.
+- `inventory-movements-draft.sql` debe instalar primero la tabla y el trigger de movimientos; también cambia `order_items.product_id` a `ON DELETE RESTRICT`.
+- `checkout-inventory-lock-order-draft.sql` reemplaza `create_public_order`, normaliza estados y actualiza el trigger de transiciones dentro de una transacción.
+- `checkout-idempotency-draft.sql` debe ejecutarse después porque sus wrappers invocan la nueva función base y añaden snapshot del método de pago, idempotencia y reserva de límite.
+- `order-financial-access-draft.sql` depende de `customer_user_id` y `payment_method_name`.
+- `cancellation-flow-draft.sql` depende del trigger normalizado, movimientos de inventario y estructura de pedidos; `refund-flow-draft.sql` depende además de la conciliación financiera.
+
+### Corrección adicional del límite de checkout
+
+Se detectó que `create_public_order_idempotent()` confiaba en que la Edge Function llamara previamente a `reserve_checkout_rate_limit()`, pero la RPC de creación no comprobaba que existiera una reserva coincidente. Aunque ambas RPC son exclusivas de `service_role`, esa omisión permitía que otro caller privilegiado invocara creación sin demostrar la reserva previa.
+
+Se corrigió `database/orders/checkout-idempotency-draft.sql`: antes de crear un pedido nuevo, la función ahora bloquea y verifica la reserva por clave, hash de IP y hash del contenido. Si no existe o no coincide, rechaza la creación. El reintento de un pedido ya creado sigue devolviendo la respuesta almacenada sin consumir otro límite.
+
+### Comprobaciones de integración
+
+- La Edge Function envía los mismos campos que esperan las RPC de consulta previa, reserva y creación idempotente.
+- La consulta previa de idempotencia se realiza antes de reservar un nuevo intento; la reserva se crea antes de la RPC de creación.
+- El wrapper de pago obtiene el nombre snapshot desde `business_payment_methods` y no confía en el nombre enviado por el navegador.
+- El checkout adquiere locks de producto en orden UUID ascendente antes de descontar inventario.
+- La cancelación bloquea primero pedido y solicitud, y después productos en orden UUID ascendente; restaura inventario y registra movimientos dentro de la transacción.
+- El reembolso bloquea el pedido, exige cancelación aprobada y un ingreso completado por el total exacto, y registra el reembolso sin transferir dinero.
+- La configuración de métodos de pago del panel desactiva los métodos retirados en vez de borrarlos; así los reintentos idempotentes pueden recuperar pedidos previos aunque el método esté deshabilitado.
+
+### Límites y pruebas pendientes
+
+Supabase live todavía no contiene las RPC idempotentes, el historial de movimientos ni las funciones nuevas de cancelación y reembolso. Solo existe la función base `create_public_order`, con permiso de ejecución restringido a `service_role`. Los conteos live siguen en cero para pedidos, líneas, productos, solicitudes de cancelación y transacciones; no hay datos de prueba.
+
+El guardado de varios métodos de pago en el panel se realiza mediante varias operaciones consecutivas, no una RPC transaccional. Si una operación falla a mitad, la configuración puede quedar parcialmente actualizada. Conviene convertir ese guardado en una única operación transaccional antes de producción.
+
+Pruebas integrales obligatorias en staging:
+
+1. Checkout válido y fallo por inventario insuficiente; verificar que no queden pedido, líneas ni descuento parcial.
+2. Dos checkouts concurrentes con productos en orden inverso; verificar que no haya sobreventa y que el bloqueo sea consistente.
+3. Reintento con misma clave/contenido; mismo pedido y mismo snapshot, sin segundo descuento.
+4. Misma clave con contenido distinto, IP distinta, reserva ausente o hash alterado; rechazo sin crear pedido.
+5. Método deshabilitado con pedido ya creado; recuperación idempotente del pedido anterior.
+6. Cancelación aprobada y dos aprobaciones simultáneas; una sola restitución y un solo movimiento por producto.
+7. Fallo en restitución de uno de varios productos; rollback de solicitud, estado, stock y movimientos.
+8. Pago conciliado y reembolso; rechazar importe diferente, pago duplicado, cancelación no aprobada y segundo reembolso.
+9. Revisión de grants/RLS y pruebas con cuentas separadas de administrador, empleado y cliente.
+
+**Estado:** corrección de verificación de reserva guardada y verificada en `correcciones-funcionales`. Ninguna migración fue ejecutada ni se desplegó una Edge Function; `main` y GitHub Pages no fueron modificados.
