@@ -1133,3 +1133,46 @@ Pruebas obligatorias añadidas:
 4. Simular inventario insuficiente en uno de varios productos; pedido, líneas, movimientos y descuentos deben revertirse juntos.
 
 **Estado:** corrección estática guardada en la rama. No se ejecutó SQL ni se desplegó la Edge Function. Supabase live continúa sin productos ni pedidos de prueba, por lo que la validación dinámica queda pendiente de staging.
+
+
+## Auditoría del checkout público y comunicación con los paneles
+
+Se revisaron `app.js`, las Edge Functions `create-public-order`, `track-public-order` y `get-public-storefront`, los borradores SQL de inventario/idempotencia y las políticas live.
+
+### Flujo revisado
+
+1. La tienda pública obtiene negocios activos y productos activos; las formas de pago se consultan mediante `get-public-storefront`, que devuelve solo métodos habilitados de negocios activos.
+2. El navegador envía negocio, datos de entrega, método de pago, productos/cantidades y una clave de idempotencia.
+3. `create-public-order` valida el formato y límites de los campos, comprueba el método de pago contra el negocio, valida el JWT si existe una sesión de cliente y rechaza perfiles bloqueados.
+4. El servidor recalcula precios e inventario; no confía en precios ni existencias enviados por el navegador.
+5. El borrador SQL crea pedido, líneas, snapshots de costo, movimientos de inventario y auditoría en una transacción.
+6. `track-public-order` busca el pedido por un token aleatorio y devuelve estado, fecha, negocio, total y seguimiento, sin exponer nombre, teléfono, dirección ni correo del cliente. La respuesta usa `Cache-Control: no-store, private`.
+
+### Corrección encontrada en esta revisión
+
+La detección de productos duplicados comparaba el UUID como texto. Dos representaciones del mismo UUID (mayúsculas/minúsculas distintas) podían contarse como productos diferentes, aunque PostgreSQL las convierte al mismo UUID. Como el checkout valida todas las líneas antes de descontar existencias, ese caso podía permitir que el mismo producto se descontara dos veces contra el inventario validado inicialmente.
+
+Se corrigió en la rama:
+
+- La Edge Function convierte los UUID de producto a minúsculas y rechaza IDs repetidos antes de llamar a las RPC.
+- La función SQL valida primero el formato y la cantidad, limita la cantidad a 99 y compara duplicados como tipo `uuid`.
+- La protección existe tanto en la capa HTTP como en PostgreSQL; no depende de que el navegador sea confiable.
+
+### Estado de Supabase live
+
+La consulta de solo lectura confirmó:
+
+- `create_public_order` existe como `SECURITY DEFINER` y su ejecución está concedida solo a `service_role`; no se concede a `anon` ni `authenticated`.
+- Live aún no contiene `get_public_order_idempotent`, `reserve_checkout_rate_limit`, `create_public_order_idempotent` ni las tablas privadas de idempotencia y reservas.
+- Live todavía no tiene las columnas de snapshot de método de pago ni vínculo `customer_user_id` descritas en los borradores.
+- Las políticas live de pedidos aún incluyen acceso del propietario técnico a lectura y actualización, y los grants actuales de `authenticated` permiten leer importes de `orders` y `order_items`. El borrador `order-financial-access-draft.sql` retira esos importes de las consultas directas y deja la información financiera detrás de RPCs con autorización de administrador.
+- Los conteos live consultados fueron cero para negocios, métodos de pago, productos, pedidos y líneas de pedido. No fue posible probar una compra real ni su llegada a los paneles.
+
+### Límites y pruebas pendientes
+
+- La tienda solo construye actualmente la opción de entrega `delivery` (domicilio); el servidor aplica el costo de domicilio configurado. Si se habilita recogida u otra modalidad en el futuro, habrá que modelar y validar esa modalidad en servidor, no solo escribirla en `delivery_notes`.
+- La clave idempotente se conserva en `sessionStorage`; debe probarse la recuperación tras recarga, cierre/reapertura de pestaña y fallos de red. Si el almacenamiento del navegador no está disponible, el comportamiento de reintento debe probarse explícitamente.
+- Antes de producción deben probarse: UUID duplicados con distinta capitalización, reintentos simultáneos, misma clave con payload distinto, método deshabilitado, token de seguimiento inválido, inventario insuficiente, dos carritos concurrentes con orden de productos inverso, rollback de pedido/líneas/stock/movimientos y permisos de empleado/administrador/cliente.
+- Supabase anunció que las tablas nuevas de esquemas expuestos dejaron de exponerse automáticamente a Data API a partir del 30 de octubre de 2026. Las migraciones nuevas deben incluir los GRANT mínimos necesarios y comprobar la configuración de exposición; conceder GRANT no sustituye RLS. Referencia: https://supabase.com/changelog/automatic-exposure-of-new-tables.
+
+**Estado:** corrección de UUID duplicados guardada y verificada en `correcciones-funcionales`. El resto de observaciones live se documenta como pendiente de migraciones y pruebas. No se ejecutó SQL ni se desplegaron Edge Functions; `main` y GitHub Pages no fueron modificados.
