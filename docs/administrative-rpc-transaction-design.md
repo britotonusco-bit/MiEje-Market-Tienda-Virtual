@@ -322,3 +322,39 @@ Supabase también ofrece `auth.admin.generateLink({ type: 'invite' })` para gene
 ### Recuperación de una asignación interrumpida
 
 La acción devuelve ahora `requires_email_confirmation` según el estado Auth del usuario. Si el primer intento consiguió crear la cuenta y enviar la invitación, pero falló la RPC de asignación, el siguiente intento detecta esa cuenta existente y puede completar la membresía sin crear otra cuenta ni enviar un correo duplicado. Si la cuenta sigue sin confirmar, el acceso queda pendiente de la verificación de correo. Si el mensaje original no llegó, aún se necesita un proceso explícito de reenvío mediante el proveedor de correo; la Edge Function no finge que el correo fue reenviado.
+
+
+## Creación de negocios, movimientos financieros y nómina — cambios en rama
+
+### Creación de negocios
+
+Se añadió `create_technical_business_transactional` a `database/security/administrative-membership-rpcs-draft.sql` y la acción `create_business` de la Edge Function ahora la invoca. La RPC valida nombre, categoría y slug; vuelve a comprobar que el actor sea `platform_owner` y no esté bloqueado; crea únicamente el registro base del negocio y escribe `business.created` en `audit_logs` dentro de la misma transacción. Si falla la auditoría, también se revierte la creación. Se conserva la separación: los datos comerciales de la tienda los configura su administrador, no el técnico.
+
+La tabla `businesses` ya existe en el proyecto independiente. La consulta de solo lectura confirmó los estados permitidos `active`, `suspended` y `closed`, la unicidad del slug y permisos de `service_role` para insertar negocios y auditoría. No se modificó el esquema activo.
+
+### Movimientos financieros y nómina
+
+La tabla `platform_financial_records` y la tabla `payroll_records` todavía no existen en Supabase. El proyecto sí tiene `financial_transactions`, que corresponde a transacciones asociadas a pedidos de negocios; no se debe reutilizar como libro financiero interno de la plataforma.
+
+Se amplió `database/platform/platform-finance-payroll-draft.sql` con:
+
+- `create_platform_financial_record_transactional`: crea el movimiento interno y su auditoría en la misma transacción.
+- `create_platform_payroll_record_transactional`: crea una obligación de nómina pendiente y su auditoría en la misma transacción.
+- `resolve_platform_payroll_record`: se cambió de `SECURITY DEFINER` a `SECURITY INVOKER`, se añadió validación del perfil técnico y se mantiene la actualización de nómina, creación del gasto asociado y auditoría en una sola transacción.
+
+Las tres funciones comprueban el rol `platform_owner` y que el perfil no esté bloqueado. Se mantiene `search_path` vacío y `EXECUTE` solo para `service_role`. Se añadieron validaciones de importes positivos, límite compatible con `numeric(14,2)` y máximo de dos decimales, moneda de tres letras y tipos de movimiento permitidos.
+
+La Edge Function ya llama a estas RPC para `create_platform_financial_record` y `create_payroll_record`; dejó de insertar las filas y auditorías por separado. La acción `resolve_payroll_record` ya llamaba a su RPC transaccional, que ahora usa `SECURITY INVOKER` y vuelve a validar el actor.
+
+### Exposición y orden de integración
+
+Supabase cambió el comportamiento de exposición automática de tablas nuevas en el Data API: desde el 30 de octubre de 2026, las nuevas tablas `public` no se exponen automáticamente. Esto es apropiado para las tablas financieras y de nómina: deben permanecer fuera del acceso de clientes y concederse solo al servidor. La Edge Function usará las RPC públicas con ejecución restringida a `service_role`; las tablas no deben recibir grants para `anon` ni `authenticated`.
+
+Orden pendiente para un entorno de ensayo:
+
+1. Aplicar y verificar `platform-finance-payroll-draft.sql` junto con las dependencias de negocio y auditoría.
+2. Aplicar y verificar `administrative-membership-rpcs-draft.sql`.
+3. Ejecutar pruebas de creación de negocio, colisión de slug, movimientos financieros, creación de nómina, pago y cancelación, incluyendo fallo de auditoría.
+4. Revisar los permisos efectivos, RLS y Advisors antes de integrar o desplegar.
+
+No se ejecutó SQL en el proyecto activo, no se desplegó la Edge Function y no se hicieron transferencias ni pagos reales. Estos registros son un control contable interno; no representan movimiento de dinero.
