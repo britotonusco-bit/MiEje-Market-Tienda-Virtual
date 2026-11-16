@@ -186,3 +186,53 @@ Esto impide que el flujo de interfaz y el modelo de base de datos compartan un v
 **Corrección necesaria antes de habilitar la operación:** preparar una RPC transaccional de cambio de estado que compruebe `auth.uid()`, membresía activa y negocio activo, acepte solo los campos operativos (`status` y `delivery_tracking`), aplique la máquina de estados acordada (`received → confirmed → preparing → ready → on_the_way → delivered`) y registre auditoría. Revocar la escritura directa amplia y conceder EXECUTE solo a `authenticated` con comprobación explícita de rol dentro de la función. Alinear la restricción CHECK y el trigger con el vocabulario definitivo, conservando compatibilidad o migración controlada para pedidos históricos `pending/out_for_delivery`. No conceder UPDATE de tabla como solución rápida.
 
 **Estado de este paso:** hallazgo documentado; no se modificó el panel ni la base activa. La corrección requiere una migración y una RPC coordinadas, pruebas de estados y permisos con cuentas de administrador/empleado de dos negocios en staging. No desplegar sobre el proyecto activo.
+
+
+### Segunda pasada: RPC ausentes y separación del rol técnico — 16 nov 2026
+
+#### RPC que el panel invoca pero no existen en la base activa
+
+Se extrajeron las llamadas `.rpc(...)` de `panel-live.js` y se compararon por nombre y firma con `pg_proc` en todos los esquemas consultados. De las 12 RPC invocadas por el panel, solo existen estas tres:
+
+- `pay_business_expense`
+- `register_business_expense`
+- `void_business_expense`
+
+No aparecen en la base activa:
+
+- `get_business_admin_order_financials`
+- `get_business_admin_profit_report`
+- `attach_business_expense_receipt`
+- `adjust_business_inventory`
+- `save_business_payment_methods`
+- `mark_order_payment_received`
+- `complete_order_refund`
+- `request_order_cancellation`
+- `decide_order_cancellation`
+
+Esto afecta rutas centrales del panel: `loadBusinessAdmin()` llama `get_business_admin_order_financials` al iniciar y lanza el error si falla; el reporte de ganancias, inventario, configuración de pagos, confirmación de pagos, solicitudes/decisiones de cancelación y registro de reembolsos también dependen de RPC ausentes. Por tanto, varias funciones que aparecen en la interfaz no están conectadas a operaciones existentes en la base activa. No se ejecutaron llamadas mutadoras para probarlas.
+
+Además, el código invoca la Edge Function `get-platform-public-settings`, pero la lista actual de funciones desplegadas contiene únicamente `technical-business-management`, `create-public-order`, `track-public-order`, `resolve-my-access`, `get-public-storefront` y `create-job-application`. La función invocada no figura como desplegada en este proyecto.
+
+#### Exceso de permisos del propietario técnico
+
+Las políticas activas también conceden al propietario de plataforma acceso transversal que no coincide con la separación de funciones acordada:
+
+- `businesses_admin_update` permite que `platform_owner` actualice cualquier fila de `businesses`, sin limitar las columnas; esto puede incluir configuración comercial, no solo estado/suspensión.
+- `business_payment_methods` permite al propietario de plataforma leer, insertar y actualizar métodos de pago de los negocios.
+- `product_costs` permite al propietario de plataforma leer, insertar y actualizar costos internos.
+- Las políticas de `orders`, `order_items` y `order_item_costs` permiten al propietario de plataforma leer pedidos, datos de clientes y costos históricos de todos los negocios; la política de pedidos también lo incluye para UPDATE.
+
+Aunque la interfaz técnica no exponga necesariamente todos esos botones, RLS es la autorización real. Debe reducirse el acceso transversal: el técnico gestiona cuentas, membresías y estado operativo del negocio mediante acciones específicas, pero no debe consultar ni modificar pagos, costos, pedidos ni configuración comercial de cada tienda. Las acciones de suspensión/reactivación deben ser RPC/Edge Function estrechas, con campos permitidos explícitos y auditoría.
+
+#### Estado y siguientes correcciones
+
+1. Definir el contrato y las firmas de las RPC faltantes; validar rol, negocio activo, campos permitidos, transacciones e idempotencia.
+2. Corregir primero la RPC de consulta de pedidos/finanzas para que el panel administrativo pueda iniciar sin depender de una función inexistente.
+3. Crear la RPC de transición de pedidos y alinear estados históricos/UI/trigger/check.
+4. Añadir las RPC de inventario, pagos, cancelaciones y reembolsos con autorización específica por rol.
+5. Eliminar el acceso del propietario técnico a datos comerciales/financieros transversales y sustituir la actualización genérica de negocios por acciones limitadas.
+6. Resolver la referencia a `get-platform-public-settings` (implementar y desplegar en staging o retirar la llamada si ya no corresponde).
+7. Probar en staging con dos negocios y cuentas separadas de propietario técnico, administrador y empleado; verificar accesos permitidos y denegados.
+
+No se hicieron cambios en Supabase ni despliegues. La comparación fue de solo lectura. La rama sigue siendo el único destino de documentación; no se modificó `main` ni GitHub Pages.
