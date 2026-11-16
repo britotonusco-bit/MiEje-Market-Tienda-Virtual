@@ -122,6 +122,26 @@ Durante la normalización de estados, el trigger `orders_audit_status` permanece
 4. La consulta de respuesta idempotente se hace antes de reservar un nuevo intento. Esto evita contar dos veces los reintentos legítimos, pero debe probarse que una clave no permita recuperar datos de pedido a alguien que no conoce el contenido original. No exponer la RPC de búsqueda directamente al navegador.
 5. La tabla `private.checkout_idempotency` no tiene todavía una política de limpieza ni un plazo de conservación. No se debe inventar un plazo: hay que definirlo junto con la política de retención de pedidos, teniendo en cuenta que borrar la clave demasiado pronto puede permitir que un reintento tardío cree un segundo pedido.
 
+## Consulta pública de seguimiento del pedido
+
+La auditoría extendió la revisión al endpoint `track-public-order`:
+
+- La función activa tiene `verify_jwt=false` y usa `service_role` internamente. Es una puerta pública deliberada: solo consulta el pedido mediante el token privado, no expone acceso directo a la tabla.
+- `public_tracking_token` es UUID, tiene valor predeterminado `gen_random_uuid()` y un índice único.
+- Las políticas RLS activas de `orders` y `order_items` no conceden lectura pública a `anon`; la consulta pública se realiza exclusivamente desde la Edge Function.
+- La respuesta activa incluye número, estado, fechas, referencia de entrega, nombre del negocio y también `total`. La versión de la rama elimina `total` porque no es necesario para consultar el estado, y añade `Cache-Control: no-store, private` para impedir que la respuesta se almacene en cachés.
+- La referencia `delivery_tracking` se muestra al portador del código privado. El panel permite escribir un enlace o texto libre de hasta 500 caracteres. Se actualizó el mensaje del panel para advertir que no se incluyan teléfonos personales, direcciones privadas ni datos sensibles.
+- El HTML público escapa los valores antes de mostrarlos, evitando que una referencia se interprete como HTML.
+
+Pendientes antes de publicar:
+
+1. El endpoint público no tiene un límite propio de consultas por IP. El token UUID aleatorio y único dificulta la enumeración, pero conviene evaluar un límite razonable para reducir abuso automatizado.
+2. Probar códigos inválidos, códigos inexistentes, códigos válidos, pedidos cancelados y pedidos entregados.
+3. Confirmar en pruebas que la respuesta nunca incluye nombre, teléfono, correo, dirección de entrega, notas privadas ni datos financieros.
+4. Confirmar que el navegador no almacena la respuesta de seguimiento y que los enlaces de referencia se muestran como texto seguro.
+
+No se hicieron consultas con pedidos reales porque la tabla sigue vacía.
+
 ## Estado de la base de datos al revisar
 
 - Negocios: 0.
