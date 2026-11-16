@@ -1877,7 +1877,7 @@
     // con su código privado de seguimiento.
     if (next === 'on_the_way') {
       const tracking = window.prompt(
-        'Ingresa el enlace o referencia de seguimiento. Si no usas transportadora, escribe por ejemplo: Domiciliario del negocio.',
+        'Ingresa una referencia que el cliente podrá ver usando su código privado. No incluyas teléfonos personales, direcciones privadas ni datos sensibles. Ejemplo: Domiciliario del negocio.',
         'Domiciliario del negocio'
       );
       if (tracking === null) {
