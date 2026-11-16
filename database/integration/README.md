@@ -351,3 +351,8 @@ En `correcciones-funcionales` se añadió la validación de consentimiento antes
 ### Panel de postulaciones: revisión de lectura y descarga — 16 nov 2026
 
 La ruta operativa revisada es `panel-negocio.html` + `panel-live.js`; `panel-admin.html` sigue siendo un prototipo visual. El panel consulta postulaciones con filtro `business_id`, RLS exige membresía activa con rol `business_admin`, y la política del bucket privado restringe la descarga al administrador del negocio activo correspondiente. Los enlaces firmados duran 300 segundos. No se encontró lectura pública para el bucket ni SELECT público de postulaciones. Pendiente: pruebas dinámicas A/B, paginación y generar enlaces solo al pulsar Descargar, además de retención y consentimiento versionado. No se cambió código ni base de datos en esta revisión.
+
+
+### Descargas de CV bajo demanda — 16 nov 2026
+
+`panel-live.js` ahora genera el enlace firmado de 300 segundos solo cuando el administrador pulsa Descargar, en vez de crear enlaces para todos los CV al cargar la lista. Verificación estática del archivo guardado confirmada; falta prueba real en navegador con cuentas de negocio y archivos de prueba.
