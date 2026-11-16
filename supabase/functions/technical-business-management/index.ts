@@ -783,7 +783,14 @@ Deno.serve(async (req: Request) => {
       if (resolveError) {
         console.error("Access block request resolution failed:", resolveError);
         const message = resolveError.message || "No se pudo resolver la solicitud.";
-        const status = /no se encontró|ya fue resuelta|último administrador|membresía activa|cambió durante/i.test(message) ? 409 : 400;
+        const status = resolveError.code === "42501"
+          ? 403
+          : resolveError.code === "22023"
+            ? 400
+            : ["P0002", "40001", "23505"].includes(resolveError.code ?? "")
+              || /no se encontró|ya fue resuelta|último administrador|membresía activa|cambió durante|negocio de la solicitud ya no existe/i.test(message)
+                ? 409
+                : 400;
         return reply(status, { error: message });
       }
 
