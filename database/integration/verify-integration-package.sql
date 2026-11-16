@@ -823,6 +823,9 @@ BEGIN
   IF to_regprocedure('public.save_business_payment_methods(uuid,jsonb)') IS NULL
      OR has_table_privilege('authenticated','public.business_payment_methods','INSERT')
      OR has_table_privilege('authenticated','public.business_payment_methods','UPDATE')
+     OR has_column_privilege('authenticated','public.business_payment_methods','business_id','INSERT')
+     OR has_column_privilege('authenticated','public.business_payment_methods','method_code','INSERT')
+     OR has_column_privilege('authenticated','public.business_payment_methods','display_name','UPDATE')
      OR NOT has_function_privilege('authenticated','public.save_business_payment_methods(uuid,jsonb)','EXECUTE')
      OR has_function_privilege('anon','public.save_business_payment_methods(uuid,jsonb)','EXECUTE') THEN
     RAISE EXCEPTION 'FALLO: los métodos de pago permiten escritura directa o falta la RPC atómica.';
