@@ -309,10 +309,11 @@ GRANT EXECUTE ON FUNCTION public.get_public_order_idempotent(
 -- Así, los intentos fallidos también cuentan, pero reintentar la misma clave
 -- con el mismo contenido no consume una segunda reserva.
 CREATE TABLE IF NOT EXISTS private.checkout_rate_limit_reservations (
-  idempotency_key uuid PRIMARY KEY,
+  idempotency_key uuid NOT NULL,
   ip_hash text NOT NULL,
   request_hash text NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now()
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (idempotency_key, ip_hash)
 );
 
 ALTER TABLE private.checkout_rate_limit_reservations ENABLE ROW LEVEL SECURITY;
@@ -348,7 +349,6 @@ AS $function$
 DECLARE
   v_ip_hash text;
   v_request_hash text;
-  v_existing_ip_hash text;
   v_existing_request_hash text;
   v_count integer;
 BEGIN
@@ -384,15 +384,27 @@ BEGIN
   WHERE idempotency_key = p_idempotency_key
     AND created_at < pg_catalog.now() - interval '24 hours';
 
-  SELECT ip_hash, request_hash
-    INTO v_existing_ip_hash, v_existing_request_hash
+  -- Una misma clave solo puede representar un contenido. Si el cliente cambia
+  -- de red, se crea una reserva adicional para la IP nueva, sin borrar la
+  -- reserva anterior ni consumir dos veces el intento en la misma IP.
+  SELECT request_hash
+    INTO v_existing_request_hash
   FROM private.checkout_rate_limit_reservations
-  WHERE idempotency_key = p_idempotency_key;
+  WHERE idempotency_key = p_idempotency_key
+  ORDER BY created_at DESC
+  LIMIT 1;
 
-  IF FOUND THEN
-    IF v_existing_ip_hash <> v_ip_hash OR v_existing_request_hash <> v_request_hash THEN
-      RAISE EXCEPTION 'La clave de este intento ya fue reservada con datos diferentes.';
-    END IF;
+  IF FOUND AND v_existing_request_hash <> v_request_hash THEN
+    RAISE EXCEPTION 'La clave de este intento ya fue reservada con datos diferentes.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM private.checkout_rate_limit_reservations
+    WHERE idempotency_key = p_idempotency_key
+      AND ip_hash = v_ip_hash
+      AND request_hash = v_request_hash
+  ) THEN
     RETURN true;
   END IF;
 
@@ -505,6 +517,7 @@ BEGIN
   INTO v_reserved_ip_hash, v_reserved_request_hash
   FROM private.checkout_rate_limit_reservations
   WHERE idempotency_key = p_idempotency_key
+    AND ip_hash = v_ip_hash
   FOR UPDATE;
 
   IF NOT FOUND
