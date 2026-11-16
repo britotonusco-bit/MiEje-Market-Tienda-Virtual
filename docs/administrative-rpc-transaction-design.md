@@ -290,7 +290,7 @@ La acción `invite_member` en `supabase/functions/technical-business-management/
 
 1. Valida el identificador del negocio, correo, rol, nombre y cargo.
 2. Busca la cuenta existente con paginación limitada. Si llega al límite sin completar la búsqueda, se detiene y no asume que el correo está libre.
-3. Para una cuenta nueva, usa `inviteUserByEmail`. Para una cuenta existente sin correo confirmado, usa el flujo `auth.resend` de tipo `signup`; para una cuenta confirmada no envía un correo innecesario.
+3. Para una cuenta nueva, usa `inviteUserByEmail`. Una cuenta existente confirmada puede asignarse sin correo nuevo. Una cuenta existente sin confirmar se detiene con respuesta `409`: no se usa `auth.resend(type: signup)` porque la documentación de ese endpoint describe la confirmación de signup, no el reenvío de una invitación pendiente.
 4. Llama a la RPC para crear la asignación y su auditoría de forma atómica.
 5. Devuelve un error recuperable si Auth envió el correo pero la asignación no pudo terminar. La cuenta no debe volver a crearse; el administrador puede reintentar la misma asignación.
 
@@ -304,9 +304,16 @@ También hay que comprobar que la URL de `aceptar-invitacion.html` esté incluid
 
 ### Límites y pruebas pendientes
 
-- La llamada de correo de Auth y la transacción PostgreSQL no pueden ser una sola transacción distribuida. Si Auth crea el usuario y luego falla la asignación, el flujo deja un usuario pendiente en Auth; el reintento detecta la cuenta y puede volver a enviar la confirmación antes de finalizar la asignación. Una tabla outbox de invitaciones con estado y reintentos sería una mejora posterior si se necesita recuperación automática sin intervención.
+- La llamada de correo de Auth y la transacción PostgreSQL no pueden ser una sola transacción distribuida. Si Auth crea el usuario y luego falla la asignación, el flujo deja un usuario pendiente en Auth; el reintento detecta la cuenta, pero si continúa sin confirmar se detiene con `409` hasta resolver la verificación. No se intenta un reenvío que no esté documentado para invitaciones. Una tabla outbox de invitaciones con estado y reintentos sería una mejora posterior si se necesita recuperación automática sin intervención.
 - Aún no se ha compilado ni desplegado la Edge Function y las RPC no están instaladas en Supabase.
 - Probar en staging: usuario nuevo, usuario existente confirmado, usuario existente sin confirmar, perfil globalmente bloqueado, negocio suspendido, membresía duplicada, SMTP rechazado, fallo de auditoría y dos solicitudes simultáneas.
 - Confirmar la URL de redirección permitida y la configuración SMTP antes de cualquier envío externo.
 
 Estado: borrador SQL y Edge Function modificados solo en `correcciones-funcionales`; Supabase activo sin cambios.
+
+
+### Precisión adicional sobre invitaciones pendientes
+
+Se retiró del código el intento de llamar `auth.resend({ type: 'signup' })` para cuentas existentes sin confirmar. Supabase documenta `resend` para confirmaciones de registro, no como reenvío de una invitación pendiente. En ese caso el flujo devuelve `409` y no crea la membresía hasta que se complete la verificación o se defina un mecanismo explícito de reenvío.
+
+Supabase también ofrece `auth.admin.generateLink({ type: 'invite' })` para generar el enlace sin enviarlo; la documentación indica que estos enlaces deben enviarse mediante un proveedor de correo personalizado. MiEje Market todavía no tiene ese mecanismo integrado, por lo que no se generarán ni expondrán enlaces de invitación manualmente desde esta función.
