@@ -204,7 +204,10 @@ Deno.serve(async (req: Request) => {
       const message = error.message.toLowerCase();
       if (message.includes("demasiadas solicitudes") || message.includes("validar el origen")) return reply(429, { error: error.message });
       if (message.includes("clave de este intento ya fue usada")) return reply(409, { error: error.message });
-      if (message.includes("inventario") || message.includes("producto no está disponible") || message.includes("negocio no está disponible")) {
+      if (message.includes("inventario")
+          || message.includes("producto no está disponible")
+          || message.includes("productos no está disponible")
+          || message.includes("negocio no está disponible")) {
         return reply(409, { error: error.message });
       }
       if (message.includes("valor mínimo")) return reply(409, { error: error.message });
