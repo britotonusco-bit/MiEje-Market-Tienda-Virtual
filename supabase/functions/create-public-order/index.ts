@@ -55,9 +55,10 @@ Deno.serve(async (req: Request) => {
     return reply(400, { error: "Completa los datos del domicilio y revisa los productos del pedido." });
   }
 
-  const ip = (req.headers.get("cf-connecting-ip")
-    ?? req.headers.get("x-forwarded-for")?.split(",")[0]
-    ?? "").trim();
+  // Solo aceptar la dirección que el proxy de confianza inyecta.
+  // No usar x-forwarded-for: puede contener valores controlados por el cliente
+  // si la solicitud no pasa por un proxy que lo normalice.
+  const ip = (req.headers.get("cf-connecting-ip") ?? "").trim();
   const admin = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
