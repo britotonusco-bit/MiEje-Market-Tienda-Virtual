@@ -246,3 +246,14 @@ Las funciones vuelven a validar que el actor sea platform_owner y no esté bloqu
 - SQL aplicado: no.
 - Edge Function adaptada/desplegada: no.
 - Pruebas: pendientes de entorno aislado.
+
+
+## Adaptación de la Edge Function para membresías — solo rama
+
+Se actualizó `supabase/functions/technical-business-management/index.ts` en `correcciones-funcionales` para que las acciones `update_member_assignment`, `block_member` y `unblock_member` llamen respectivamente a `update_business_membership_assignment`, `suspend_business_membership` y `reactivate_business_membership`.
+
+La función ahora interpreta los resultados idempotentes de las RPC y traduce los códigos SQL esperados (`P0002`, `42501`, `23514`, `40001`, `22023`) a respuestas HTTP. Se retiraron de esas tres rutas las escrituras separadas de membresía y auditoría: ambas quedan dentro de la transacción PostgreSQL definida por las RPC.
+
+Verificación realizada: lectura de retorno del archivo en GitHub; se confirmaron los tres nombres de RPC y que las ramas `set_business_status` y `moderate_business_content` permanecen separadas, sin cambios en este paso. No se ejecutó `deno check`, no se desplegó la Edge Function y no se probaron llamadas HTTP porque las RPC aún no están instaladas en Supabase.
+
+**Orden de integración obligatorio:** revisar y aplicar en un entorno de ensayo el esquema y el trigger de `business-admin-boundaries.sql`; revisar y aplicar allí `administrative-membership-rpcs-draft.sql`; solo después probar la Edge Function adaptada. No desplegarla en el proyecto activo mientras esas dependencias no estén instaladas y verificadas.
