@@ -228,3 +228,19 @@ Esta revisión utilizó únicamente lecturas de GitHub y consultas SQL de metada
 - No se desplegaron Edge Functions.
 - No se modificó `main`, GitHub Pages ni el proyecto Supabase antiguo.
 - Los hallazgos no constituyen autorización para aplicar cambios en producción.
+
+
+## 8. Revisión adicional del borrador de límites y migración de estados
+
+Al revisar el propio borrador `database/security/business-admin-boundaries.sql` contra los triggers existentes en el proyecto activo, se encontró un detalle de integridad histórica:
+
+- La normalización de estados desactivaba `orders_enforce_status_transition`, pero dejaba activos `orders_audit_status` y `orders_set_updated_at`.
+- En consecuencia, la conversión histórica de `pending` a `received` y de `out_for_delivery` a `on_the_way` podía generar eventos de auditoría que parecieran cambios realizados por un usuario y reescribir `updated_at` con la fecha de la migración.
+
+**Corrección preparada en la rama:** el bloque de normalización desactiva temporalmente los tres triggers identificados en el esquema activo, realiza el cambio de valores y los vuelve a activar dentro de la misma transacción. Esto evita registrar el backfill como actividad operativa y conserva las marcas históricas de actualización.
+
+También se cambió `private.prevent_business_scope_change()` de `SECURITY DEFINER` a `SECURITY INVOKER`. La función es un trigger de defensa de integridad, no necesita privilegios elevados: los administradores ya pueden consultar productos de su propio negocio y el rol de servicio conserva sus permisos. Reducir privilegios evita introducir un bypass RLS innecesario.
+
+**Verificación realizada:** se volvió a consultar el catálogo de triggers del proyecto independiente y se confirmó que existen exactamente los nombres usados por el bloque de migración: `orders_enforce_status_transition`, `orders_audit_status` y `orders_set_updated_at`. Se verificó además en GitHub que el borrador contiene las tres desactivaciones/reactivaciones y que el trigger de pertenencia está declarado como `SECURITY INVOKER`.
+
+**Límite de la verificación:** esto es comprobación estática y de metadatos. No se ejecutó la migración ni se probó una conversión sobre filas reales; esas pruebas siguen pendientes en staging.
