@@ -323,3 +323,21 @@ El seguimiento público también requiere una acción explícita de actualizaci�
 No hay notificaciones automáticas de pedidos en el proyecto activo: los cambios se guardan directamente desde el panel y solo generan una fila de auditoría `order.status_changed`. No hay outbox, tabla de notificaciones, proveedor de correo/WhatsApp/SMS/push ni suscripción Realtime para pedidos. El enlace `wa.me` es contacto manual, no envío automático. La arquitectura y pruebas recomendadas están en `docs/order-panel-callsite-integration-audit.md`, apartado “Auditoría de notificaciones y comunicación de pedidos”. También se documentó una inconsistencia entre el checkout conectado y textos legales que aún lo describen como demostración local; revisar `docs/customer-data-rights-audit.md`. No implementar ni desplegar proveedores hasta contar con staging y autorización.
 
 El checkout muestra una casilla obligatoria de privacidad, pero el valor no se transmite a la Edge Function ni a la RPC, y no se almacena evidencia en `orders`. La validación del navegador no es evidencia persistente. Revisar el apartado “Evidencia de autorización en el checkout” de `docs/order-panel-callsite-integration-audit.md` antes de habilitar pedidos al público.
+
+
+## Auditoría de postulaciones y hojas de vida — 16 nov 2026
+
+Informe detallado: `docs/customer-data-rights-audit.md`, apartado “Auditoría de postulaciones laborales, consentimiento y conservación”.
+
+Verificación de solo lectura en Supabase activo:
+- RLS está habilitado en postulaciones, sesiones temporales y limitadores.
+- La lectura de postulaciones está limitada al administrador activo del negocio asociado; el helper comprueba membresía activa y perfil no bloqueado.
+- El bucket `job-applications-private` es privado, con límite de 5 MB y MIME PDF/DOC/DOCX.
+- El servidor exige `privacy_consent = true` tanto en Edge Function como en la RPC, y guarda el booleano en la postulación.
+- No se encontró evidencia de consentimiento versionada (versión del aviso, fecha/hora específica y finalidades).
+- La Edge Function activa está en versión 2 y no coincide completamente con el limitador por acción de la rama `correcciones-funcionales`.
+- La limpieza candidata solo cubre sesiones vencidas, archivos huérfanos y filas antiguas del limitador. No elimina CV asociados a postulaciones completadas ni define retención de postulaciones.
+- La RPC de limpieza no está instalada, la Edge Function de limpieza no está desplegada y no hay `pg_cron` instalado en el proyecto activo.
+- No se ejecutaron pruebas dinámicas A/B ni análisis de archivos reales; no se consultaron datos personales de postulantes.
+
+Antes de habilitar vacantes públicamente, alinear la Edge Function en staging, añadir evidencia versionada de autorización, limitar tamaño/estructura de respuestas, validar el contenido real de CV, probar el aislamiento de negocio y definir retención/eliminación de postulaciones y archivos. No desplegar ni ejecutar migraciones en el proyecto activo.
