@@ -108,6 +108,8 @@ No se encontró discrepancia de argumentos. Siguen pendientes los hallazgos de p
 
 La interfaz usa `business_ai_settings.upsert`; el borrador concede SELECT/INSERT/UPDATE a `authenticated` con RLS que valida el administrador activo y `updated_by = auth.uid()`. El formulario debe seguir enviando el usuario autenticado como `updated_by`.
 
+Se detectó que el guardado de `product_costs` usaba `upsert` con `product_id` y `business_id` dentro del payload. La migración revoca UPDATE sobre esas columnas y solo permite actualizar `cost_price` y `updated_at`; por tanto, el upsert podía fallar al encontrar una fila existente. Se corrigió `panel-live.js` para consultar si existe el costo y luego insertar o actualizar solo las columnas permitidas. Se agregó una recuperación ante conflicto único concurrente.
+
 **Data API:** las tablas nuevas de `public` no se exponen automáticamente. Antes de probar estas consultas hay que habilitar la exposición necesaria y revisar grants + RLS. No se debe abrir acceso general para resolver errores de tabla no expuesta.
 
 ## 7. Catálogo activo de Supabase
