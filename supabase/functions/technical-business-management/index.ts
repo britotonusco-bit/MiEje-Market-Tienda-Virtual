@@ -633,25 +633,30 @@ Deno.serve(async (req: Request) => {
       }
       if (status === "suspended" && !reason) return reply(400, { error: "Indica el motivo de la suspensión." });
 
-      const { data: business, error: updateError } = await admin.from("businesses").update({
-        status,
-        suspension_reason: status === "suspended" ? reason : null,
-        public_suspension_message: status === "suspended" ? (publicMessage || "Este negocio está temporalmente suspendido.") : null,
-      }).eq("id", businessId).select("id, name, slug, status, suspension_reason, public_suspension_message").maybeSingle();
-
-      if (updateError) throw updateError;
-      if (!business) return reply(404, { error: "El negocio no existe." });
-
-      const { error: auditError } = await admin.from("audit_logs").insert({
-        business_id: businessId,
-        actor_id: user.id,
-        action: "business.status_changed",
-        entity_type: "business",
-        entity_id: businessId,
-        details: { new_status: status, reason: status === "suspended" ? reason : null },
+      const { data, error } = await admin.rpc("set_technical_business_status", {
+        p_business_id: businessId,
+        p_status: status,
+        p_reason: reason,
+        p_public_message: publicMessage,
+        p_actor_id: user.id,
       });
-      if (auditError) throw auditError;
-      return reply(200, { ok: true, business });
+      if (error) {
+        if (error.code === "P0002") return reply(404, { error: "No se encontró el negocio." });
+        if (error.code === "42501") return reply(403, { error: "La operación no está autorizada para esta cuenta." });
+        if (error.code === "22023") return reply(400, { error: "Los datos del estado o del motivo no son válidos." });
+        console.error("Business status RPC failed:", error);
+        throw error;
+      }
+
+      const result = data as Record<string, any> | null;
+      if (!result?.business) throw new Error("La RPC de estado no devolvió el negocio actualizado.");
+      return reply(200, {
+        ok: true,
+        business: result.business,
+        message: result.unchanged
+          ? "El negocio ya tenía ese estado y esos datos."
+          : "Estado del negocio actualizado y registrado en auditoría.",
+      });
     }
 
     if (action === "block_member") {
@@ -720,46 +725,35 @@ Deno.serve(async (req: Request) => {
       const contentId = textValue(body.content_id, 80);
       const decision = textValue(body.decision, 20);
       const moderationNote = textValue(body.moderation_note, 2000);
-      if (!contentId || !["approved", "rejected"].includes(decision)) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(contentId)
+          || !["approved", "rejected"].includes(decision)) {
         return reply(400, { error: "Publicación y decisión válida son obligatorias." });
       }
-      const { data: current, error: readError } = await admin
-        .from("business_content_pages")
-        .select("id,business_id,title,content_type,moderation_status")
-        .eq("id", contentId)
-        .maybeSingle();
-      if (readError) throw readError;
-      if (!current) return reply(404, { error: "No se encontró la publicación." });
 
-      const moderationUpdate: Record<string, unknown> = {
-        moderation_status: decision,
-        moderation_note: moderationNote || null,
-        moderated_by: user.id,
-        moderated_at: new Date().toISOString()
-      };
-      if (decision === "rejected") moderationUpdate.is_published = false;
-
-      const { data: updated, error: updateError } = await admin
-        .from("business_content_pages")
-        .update(moderationUpdate)
-        .eq("id", contentId)
-        .select("id,business_id,title,content_type,is_published,moderation_status,moderation_note,moderated_at")
-        .single();
-      if (updateError) throw updateError;
-
-      const { error: auditError } = await admin.from("audit_logs").insert({
-        business_id: current.business_id,
-        actor_id: user.id,
-        action: decision === "approved" ? "business.content_approved" : "business.content_rejected",
-        entity_type: "business_content_page",
-        entity_id: current.id,
-        details: { title: current.title, content_type: current.content_type, decision, moderation_note: moderationNote || null }
+      const { data, error } = await admin.rpc("moderate_business_content_transactionally", {
+        p_content_id: contentId,
+        p_decision: decision,
+        p_moderation_note: moderationNote,
+        p_actor_id: user.id,
       });
-      if (auditError) throw auditError;
+      if (error) {
+        if (error.code === "P0002") return reply(404, { error: "No se encontró la publicación." });
+        if (error.code === "42501") return reply(403, { error: "La operación no está autorizada para esta cuenta." });
+        if (error.code === "22023") return reply(400, { error: "Los datos de moderación no son válidos." });
+        console.error("Business content moderation RPC failed:", error);
+        throw error;
+      }
+
+      const result = data as Record<string, any> | null;
+      if (!result?.content) throw new Error("La RPC de moderación no devolvió el contenido actualizado.");
       return reply(200, {
         ok: true,
-        content: updated,
-        message: decision === "approved" ? "Publicación aprobada." : "Publicación rechazada y retirada de la vista pública."
+        content: result.content,
+        message: result.unchanged
+          ? "La publicación ya tenía esa decisión de moderación."
+          : decision === "approved"
+            ? "Publicación aprobada y registrada en auditoría."
+            : "Publicación rechazada, retirada de la vista pública y registrada en auditoría.",
       });
     }
 
