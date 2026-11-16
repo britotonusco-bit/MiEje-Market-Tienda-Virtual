@@ -176,3 +176,18 @@ Hallazgos principales:
 - El comentario de `supabase/config.toml` ahora documenta el secreto independiente `JOB_APPLICATION_CLEANUP_SECRET`.
 
 Los cambios de código están solo en `correcciones-funcionales`. No se modificó Auth, no se enviaron correos, no se ejecutó SQL y no se desplegó nada.
+
+
+## Auditoría de administración de membresías y usuarios (16 nov 2026)
+
+Informe: [docs/membership-administration-audit.md](../../docs/membership-administration-audit.md).
+
+Hallazgos principales:
+- La tabla activa tiene RLS, unicidad por negocio/usuario y no concede INSERT/UPDATE/DELETE directos a `authenticated`; sin embargo, su política SELECT todavía permite al propietario técnico leer todas las membresías.
+- No hay protección activa del último administrador ni RPC activas para las operaciones transaccionales candidatas.
+- La rama prepara creación, cambio de rol/cargo, suspensión y reactivación con auditoría transaccional y protección del último administrador.
+- Se añadió `FOR SHARE` a la lectura del perfil de destino en la RPC candidata de reactivación, para serializarla con un bloqueo global concurrente.
+- No existe acción de eliminación de membresía ni de usuario Auth en el panel/Edge Function revisados. Debe definirse por separado la suspensión reversible, la retirada histórica de una membresía y la eliminación global de cuenta.
+- La tabla activa carece de `job_title`; el paquete candidato depende primero de `business-admin-boundaries.sql`.
+
+El informe detalla pruebas de concurrencia, aislamiento y auditoría. No se ejecutó SQL ni se modificó Supabase; todo sigue en la rama.
