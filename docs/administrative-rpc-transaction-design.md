@@ -257,3 +257,17 @@ La función ahora interpreta los resultados idempotentes de las RPC y traduce lo
 Verificación realizada: lectura de retorno del archivo en GitHub; se confirmaron los tres nombres de RPC y que las ramas `set_business_status` y `moderate_business_content` permanecen separadas, sin cambios en este paso. No se ejecutó `deno check`, no se desplegó la Edge Function y no se probaron llamadas HTTP porque las RPC aún no están instaladas en Supabase.
 
 **Orden de integración obligatorio:** revisar y aplicar en un entorno de ensayo el esquema y el trigger de `business-admin-boundaries.sql`; revisar y aplicar allí `administrative-membership-rpcs-draft.sql`; solo después probar la Edge Function adaptada. No desplegarla en el proyecto activo mientras esas dependencias no estén instaladas y verificadas.
+
+
+## Operaciones de negocio y moderación — borrador y adaptación de rama
+
+Se añadieron al mismo archivo SQL dos RPC adicionales:
+
+- `set_technical_business_status`: bloquea la fila del negocio, valida el actor técnico, normaliza motivo y mensaje público, actualiza estado y datos de suspensión, y escribe auditoría en la misma transacción. Mantiene los estados existentes `active`, `suspended` y `closed`; no se ha cambiado la regla funcional sobre si `closed` puede reabrirse.
+- `moderate_business_content_transactionally`: bloquea la fila de contenido, valida la decisión `approved`/`rejected`, actualiza nota y datos de moderación, retira de publicación el contenido rechazado y registra el cambio en auditoría dentro de la misma transacción. Aprobar no publica automáticamente el contenido, igual que el comportamiento anterior.
+
+La Edge Function de la rama ya invoca ambas RPC en `set_business_status` y `moderate_business_content`. Se añadió validación de UUID para el identificador de negocio y de contenido. Las cinco RPC del borrador usan `SECURITY INVOKER`, `search_path` vacío, revocan ejecución a `PUBLIC`, `anon` y `authenticated`, y conceden ejecución a `service_role`.
+
+Verificación de lectura de retorno: los nombres de las cinco RPC nuevas coinciden con los llamados correspondientes de la Edge Function. Esta comprobación no equivale a compilación TypeScript ni a ejecución SQL. La función también contiene otras RPC preexistentes para nómina y solicitudes de bloqueo, que no forman parte de este borrador.
+
+Pendiente: pruebas de errores, auditoría y concurrencia en staging; revisión final del contrato de respuesta; integración y despliegue solo después de instalar y verificar las migraciones en un entorno aislado. El proyecto Supabase activo sigue sin cambios.
