@@ -311,7 +311,7 @@ REVOKE SELECT (
 GRANT SELECT (
   id, business_id, order_number, customer_name, customer_phone,
   delivery_address, delivery_notes, status, delivery_tracking,
-  payment_method_name, created_at, updated_at
+  created_at, updated_at
 ) ON TABLE public.orders TO authenticated;
 
 -- Los importes y el método de pago no se exponen mediante consultas directas.
