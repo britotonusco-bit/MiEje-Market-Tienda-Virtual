@@ -290,7 +290,9 @@ $function$;
 CREATE OR REPLACE FUNCTION private.guard_last_active_business_admin()
 RETURNS trigger
 LANGUAGE plpgsql
-SECURITY DEFINER
+-- SECURITY INVOKER (default): the trigger runs with the privileges of the
+-- statement caller. Membership writes are server-only; service_role already
+-- has the required SELECT access. Avoid an unnecessary SECURITY DEFINER bypass.
 SET search_path = ''
 AS $function$
 DECLARE
