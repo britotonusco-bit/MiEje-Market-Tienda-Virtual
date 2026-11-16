@@ -297,3 +297,15 @@ El informe de escrituras directas ahora incluye una revisión de inventario, cos
 - Guardar producto y costo sigue siendo un proceso de dos solicitudes; puede dejar un guardado parcial si falla la segunda.
 
 No se ejecutó SQL ni se desplegó nada. La comprobación dinámica sigue pendiente de un entorno de staging aislado.
+
+
+### Revisión complementaria de cancelaciones y devoluciones (16 nov 2026)
+
+El informe también documenta los bloqueos detectados en cancelaciones, reembolsos y restitución de inventario:
+- Las RPC `request_order_cancellation`, `decide_order_cancellation` y `complete_order_refund` no existen en la base activa.
+- Las tablas de solicitudes, transacciones y detalles de reembolso solo conceden lectura a `authenticated`; no hay escritura directa habilitada.
+- Las políticas activas permiten al propietario técnico lectura global de solicitudes y datos de reembolso; el borrador de límites ya restringe estas lecturas al administrador del negocio.
+- `order_items.product_id` usa actualmente `ON DELETE SET NULL`, lo que puede romper la referencia necesaria para devolver inventario. El borrador de inventario propone `ON DELETE RESTRICT`.
+- El tipo de movimiento `cancellation_return` existe solo en el borrador; no hay una operación activa que restituya stock de forma atómica y única.
+
+No se hicieron cancelaciones, reembolsos, cambios de inventario ni migraciones. La corrección y las pruebas siguen pendientes de staging aislado.
