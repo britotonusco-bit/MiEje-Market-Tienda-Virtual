@@ -621,3 +621,20 @@ Quedan bloqueos antes de producción:
 La auditoría del trigger `private.handle_new_auth_user()` confirma `SECURITY DEFINER`, `search_path` vacío, inserción de solo `id/display_name` y ausencia de EXECUTE para roles API. No se identificó escalamiento de privilegios desde `raw_user_meta_data.display_name`.
 
 No se realizaron cambios en Auth ni SQL, no se enviaron correos, no se eliminaron usuarios, no se desplegaron Edge Functions y no se publicó el sitio. Los hallazgos detallados están en `docs/customer-auth-session-audit.md`.
+
+
+## Continuación de auditoría: postulaciones y hojas de vida (16 nov 2026)
+
+La auditoría del proyecto activo confirmó un defecto funcional: el panel de negocio actualiza estado y notas de postulaciones, pero la tabla `job_applications` solo concede SELECT a `authenticated`; no tiene permiso UPDATE, aunque existe una política RLS UPDATE. La rama `correcciones-funcionales` ahora agrega permiso por columnas (estado/notas/actor/fecha), política RLS para administradores del negocio activo y un trigger que fija actor y hora desde `auth.uid()`.
+
+También se corrigió en la rama el rate limit de postulaciones: carga de CV y envío ahora usan contadores separados para que una candidatura con archivo no consuma dos veces el mismo límite.
+
+Pendientes críticos antes de producción:
+- Aviso de privacidad y consentimiento de candidatos con versión y fecha de servidor.
+- Análisis del contenido y antimalware de los CV antes de habilitar descarga.
+- Aplicar la política Storage que verifica ruta completa y postulación vinculada.
+- Definir retención, archivado y eliminación coordinada: la FK actual borra postulaciones en cascada al borrar una vacante y Storage no elimina automáticamente el archivo, lo que puede dejar CV huérfanos.
+- Limpiar periódicamente sesiones de carga vencidas y filas antiguas del limitador.
+- Añadir auditoría de cambios de estado/notas más allá de actor y fecha en la fila.
+
+Los detalles y consultas están en `docs/customer-auth-session-audit.md`. No se generaron postulaciones ni archivos, no se ejecutó SQL de escritura y no se desplegó ninguna función.
