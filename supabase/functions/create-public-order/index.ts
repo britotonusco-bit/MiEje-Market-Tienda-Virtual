@@ -166,8 +166,10 @@ Deno.serve(async (req: Request) => {
     }
     if (previousOrder) return reply(200, { ok: true, order: previousOrder });
 
-    // La función SQL idempotente aplica el límite dentro de la misma
-    // transacción y solo para una clave nueva. No consumirlo también aquí.
+    // La reserva del límite se guarda en una RPC independiente antes del checkout.
+    // El reintento con la misma clave y contenido reutiliza esa reserva sin consumir
+    // otro intento; la RPC de creación exige la reserva y guarda pedido + idempotencia
+    // en una sola transacción.
     if (enabledMethod.is_enabled !== true) {
       return reply(409, { error: "Esta forma de pago ya no está habilitada. Selecciona otra forma de pago." });
     }
