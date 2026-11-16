@@ -419,7 +419,7 @@
   }
 
   function renderChips() {
-    const categories = ["Todas", ...Object.keys(categoryInfo)];
+    const categories = ["Todas", "Hogar", "Salud", "Muebles", "Tecnología", "Belleza", "Mascotas", "Juguetes", "Moda"];
 
     $("#categoryChips").innerHTML = categories.map(category => `
       <button type="button"
