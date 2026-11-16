@@ -166,3 +166,49 @@ La conexión disponible permite consultar estado del proyecto y asesores de segu
 - La función desplegada versión 6 todavía no tiene esas protecciones.
 - No se modificó ni desplegó código en esta revisión. No se revocaron sesiones ni se alteraron membresías.
 - Quedan pendientes: RPC transaccionales de suspensión/reactivación/roles con auditoría atómica; límite de invitaciones; política explícita de bloqueo global y revocación; limpieza programada de registros antiguos de limitación; pruebas controladas de tokens AAL1/AAL2 y de acceso después de suspensión.
+
+
+## Continuación de auditoría: alta de clientes, recuperación y perfiles — 16 nov 2026
+
+### Alta de clientes y consentimiento
+- `cuenta.html` permite registro de clientes con nombre, correo y contraseña. El formulario no contiene una casilla de aceptación ni un enlace a un aviso de privacidad.
+- No se encontró una página legal de privacidad/tratamiento de datos entre los archivos raíz de la rama. No se debe añadir una casilla que afirme que el usuario leyó un documento inexistente ni inventar datos del responsable del tratamiento.
+- Antes de abrir el registro a clientes reales, preparar y publicar el aviso/política de privacidad con la información real del responsable, finalidades, derechos, canales de atención, terceros/proveedores y tiempos de conservación. Luego implementar consentimiento versionado y guardar evidencia del consentimiento desde servidor.
+- El nombre enviado en `raw_user_meta_data.display_name` es editable por el usuario. El trigger lo copia solo como nombre visible a `profiles.display_name`; no usa esa metadata para asignar roles, membresías, bloqueo ni autorización. Es seguro mantenerlo como dato de presentación, no como permiso.
+
+### Trigger de creación de perfil
+Consulta read-only de `private.handle_new_auth_user()` confirmó que:
+- inserta solo `id` y `display_name` en `public.profiles`;
+- usa `raw_user_meta_data` exclusivamente para nombre visible;
+- no asigna `platform_role`, membresías ni privilegios;
+- es `SECURITY DEFINER` con `search_path` vacío;
+- no tiene permiso EXECUTE para `anon`, `authenticated` ni `service_role` (se invoca únicamente como trigger).
+
+No se identificó escalamiento de privilegios a través del campo de metadata usado en el registro de clientes.
+
+### Recuperación de contraseña
+- `recuperar-clave.js` usa `resetPasswordForEmail`, devuelve un mensaje genérico y dirige a `actualizar-clave.html`.
+- `actualizar-clave.js` exige el evento Auth `PASSWORD_RECOVERY`; una sesión normal guardada no habilita el cambio. Tras el cambio intenta cerrar la sesión local.
+- El formulario de actualización valida 10 caracteres en cliente. Esta validación no reemplaza la política mínima del servidor, que debe revisarse en Auth > Providers > Email.
+- No se envió ningún correo ni se probaron enlaces reales. El destino relativo, Site URL, Redirect URLs, plantillas y SMTP siguen pendientes de comprobación en el Dashboard.
+
+### Invitaciones internas
+- `aceptar-invitacion.js` exige que el enlace tenga tipo `invite`, verifica `token_hash` cuando está presente, requiere sesión, limpia la URL y permite establecer la contraseña.
+- Tras guardar la contraseña cierra la sesión local. El acceso a panel se decide después mediante `resolve-my-access`, no por metadata enviada desde el enlace.
+- La invitación sigue dependiendo de la URL permitida y la entrega SMTP. No se enviaron invitaciones en esta auditoría.
+
+### Perfil y ciclo de vida
+- El esquema activo de `profiles` contiene nombre, teléfono, avatar, rol de plataforma y campos de bloqueo. No contiene campos de consentimiento ni preferencias de privacidad.
+- El borrador de límites administrativos permite al usuario modificar únicamente nombre visible, avatar y teléfono; no rol ni bloqueo.
+- No se encontró una función o pantalla pública de autoservicio para solicitar eliminación/corrección de cuenta. La eliminación directa de Auth por el cliente no debe habilitarse: debe diseñarse un proceso controlado que preserve pedidos y registros financieros exigibles, desvincule la cuenta con `ON DELETE SET NULL` cuando proceda, elimine favoritos y trate por separado los datos que deban conservarse.
+- El proyecto tiene una cuenta Auth y un perfil en la consulta de esta auditoría. No se consultaron ni copiaron correos ni datos identificables de esa cuenta.
+
+### Riesgo y acciones previas a producción
+1. No abrir el registro público hasta que exista aviso de privacidad real, enlace visible y consentimiento registrado con versión y fecha de servidor.
+2. Configurar y probar en Auth la confirmación de correo, URL base, redirect allowlist, plantillas y SMTP de producción.
+3. Configurar la longitud mínima de contraseña en servidor (al menos 10 caracteres para alinear con los formularios) y revisar la opción de protección contra contraseñas filtradas según plan. El asesor del proyecto sigue mostrando esa protección deshabilitada; la documentación de Supabase indica que está disponible en Pro y superiores.
+4. Implementar solicitud de corrección/eliminación y calendario de conservación antes de recopilar datos a escala.
+5. Probar recuperación e invitaciones con cuentas de ensayo y enlaces válidos/vencidos antes del despliegue.
+
+### Estado de esta continuación
+Solo lectura del proyecto activo y revisión de archivos de la rama. No se alteró Auth, no se crearon ni eliminaron usuarios, no se enviaron correos, no se ejecutó SQL de escritura, no se desplegaron funciones y no se cambió GitHub Pages.
