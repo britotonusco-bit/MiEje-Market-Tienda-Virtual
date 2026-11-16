@@ -24,10 +24,12 @@ async function findUserByEmail(admin: any, email: string) {
     if (result.error) throw result.error;
     const users = result.data?.users ?? [];
     const found = users.find((item: any) => (item.email ?? "").toLowerCase() === email.toLowerCase());
-    if (found) return found;
-    if (users.length < 1000) break;
+    if (found) return { user: found, complete: true };
+    if (users.length < 1000) return { user: null, complete: true };
   }
-  return null;
+
+  // No asumir que el correo no existe si se alcanzó el límite de páginas.
+  return { user: null, complete: false };
 }
 
 Deno.serve(async (req: Request) => {
@@ -491,101 +493,121 @@ Deno.serve(async (req: Request) => {
       const role = textValue(body.role, 40);
       const displayName = textValue(body.display_name, 160);
       const jobTitle = textValue(body.job_title, 100) || (role === "business_admin" ? "Administrador del negocio" : "");
-      if (!businessId || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !["business_admin", "employee"].includes(role) || displayName.length < 3 || jobTitle.length < 2) {
+      const redirectTo = "https://britotonusco-bit.github.io/MiEje-Market-Tienda-Virtual/aceptar-invitacion.html";
+
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(businessId)
+          || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+          || !["business_admin", "employee"].includes(role)
+          || displayName.length < 3
+          || jobTitle.length < 2) {
         return reply(400, { error: "Negocio, nombre completo, correo, rol y cargo válido son obligatorios." });
       }
 
       const { data: business, error: businessError } = await admin
         .from("businesses").select("id, name, status").eq("id", businessId).maybeSingle();
-      if (businessError || !business) return reply(404, { error: "El negocio no existe." });
-      if (business.status !== "active") return reply(409, { error: "No se pueden asignar usuarios a un negocio suspendido o cerrado." });
-
-      let targetUser = await findUserByEmail(admin, email);
-
-      // Si el usuario ya existe, comprobar la membresía antes de enviar
-      // cualquier correo o modificar su perfil. Así evitamos invitaciones
-      // duplicadas cuando ya tiene acceso al mismo negocio.
-      if (targetUser?.id) {
-        const { data: existingMembership, error: existingMembershipError } = await admin.from("business_memberships")
-          .select("id, role, status")
-          .eq("business_id", businessId)
-          .eq("user_id", targetUser.id)
-          .maybeSingle();
-        if (existingMembershipError) throw existingMembershipError;
-        if (existingMembership) {
-          return reply(409, {
-            error: existingMembership.status === "active"
-              ? "Ese usuario ya tiene acceso activo a este negocio."
-              : "Ese usuario ya tiene una asignación suspendida. Reactiva su acceso desde la gestión de usuarios.",
-          });
-        }
+      if (businessError) throw businessError;
+      if (!business) return reply(404, { error: "El negocio no existe." });
+      if (business.status !== "active") {
+        return reply(409, { error: "No se pueden asignar usuarios a un negocio suspendido o cerrado." });
       }
 
+      const lookup = await findUserByEmail(admin, email);
+      if (!lookup.complete && !lookup.user) {
+        return reply(503, {
+          error: "No se pudo completar la búsqueda de la cuenta. No se envió ningún correo ni se asignó acceso. Inténtalo más tarde o revisa el usuario desde Auth.",
+        });
+      }
+
+      let targetUser = lookup.user;
       let invitationSent = false;
+
       if (!targetUser) {
         const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
-          data: displayName ? { display_name: displayName } : {},
-          redirectTo: "https://britotonusco-bit.github.io/MiEje-Market-Tienda-Virtual/aceptar-invitacion.html",
+          data: { display_name: displayName },
+          redirectTo,
         });
         if (inviteError) {
           console.error("inviteUserByEmail failed:", inviteError);
           return reply(502, {
-            error: "Supabase no confirmó el envío de la invitación. No se asignó el acceso. Revisa la configuración de correo y el estado del usuario antes de volver a intentarlo."
+            error: "Supabase no confirmó el envío. No se creó la asignación. Si Auth alcanzó a crear la cuenta, vuelve a intentar: se detectará como existente y se podrá reenviar la confirmación.",
+            invitation_sent: false,
           });
         }
-        targetUser = inviteData.user;
+        targetUser = inviteData?.user ?? null;
+        invitationSent = true;
+      } else if (!targetUser.email_confirmed_at) {
+        // Recupera invitaciones anteriores que crearon el usuario pero no
+        // completaron la confirmación del correo.
+        const { error: resendError } = await admin.auth.resend({
+          type: "signup",
+          email,
+          options: { emailRedirectTo: redirectTo },
+        });
+        if (resendError) {
+          console.error("Signup confirmation resend failed:", resendError);
+          return reply(502, {
+            error: "La cuenta existe, pero Supabase no confirmó el reenvío del correo de verificación. No se asignó el acceso.",
+            invitation_sent: false,
+          });
+        }
         invitationSent = true;
       }
 
-      if (!targetUser?.id) return reply(500, { error: "Supabase no devolvió el usuario de destino." });
-
-      const { data: existingProfile, error: profileReadError } = await admin.from("profiles")
-        .select("id,display_name").eq("id", targetUser.id).maybeSingle();
-      if (profileReadError) throw profileReadError;
-      if (!existingProfile) {
-        const { error: profileInsertError } = await admin.from("profiles").insert({
-          id: targetUser.id, display_name: displayName
+      if (!targetUser?.id) {
+        return reply(502, {
+          error: "Auth no devolvió el identificador de la cuenta. No se creó la asignación.",
+          invitation_sent: invitationSent,
         });
-        if (profileInsertError && profileInsertError.code !== "23505") throw profileInsertError;
-      } else if (!existingProfile.display_name) {
-        const { error: profileUpdateError } = await admin.from("profiles")
-          .update({ display_name: displayName }).eq("id", targetUser.id);
-        if (profileUpdateError) throw profileUpdateError;
       }
 
-      const { data: membership, error: membershipError } = await admin.from("business_memberships").insert({
-        business_id: businessId,
-        user_id: targetUser.id,
-        role,
-        job_title: jobTitle,
-        status: "active",
-        created_by: user.id,
-      }).select("id, business_id, user_id, role, status, job_title").single();
-      if (membershipError) {
-        if (membershipError.code === "23505") {
-          return reply(409, { error: "Ese usuario ya recibió acceso a este negocio. Actualiza la lista de cuentas." });
-        }
-        throw membershipError;
-      }
-
-      const { error: auditError } = await admin.from("audit_logs").insert({
-        business_id: businessId,
-        actor_id: user.id,
-        action: "business.member_invited",
-        entity_type: "business_membership",
-        entity_id: membership.id,
-        details: { target_user_id: targetUser.id, role, invitation_sent: invitationSent },
+      // La RPC comprueba el bloqueo global, el negocio activo, la membresía
+      // duplicada y registra la membresía junto con su auditoría atómicamente.
+      // El trigger on_auth_user_created ya crea profiles para usuarios nuevos.
+      const { data, error } = await admin.rpc("create_business_membership_assignment", {
+        p_business_id: businessId,
+        p_user_id: targetUser.id,
+        p_role: role,
+        p_job_title: jobTitle,
+        p_display_name: displayName,
+        p_actor_id: user.id,
+        p_invitation_sent: invitationSent,
       });
-      if (auditError) console.error("Membership created but audit insert failed:", auditError);
+
+      if (error) {
+        if (error.code === "P0002") return reply(404, { error: "No se encontró el negocio.", invitation_sent: invitationSent });
+        if (error.code === "42501") return reply(403, { error: "La cuenta técnica no está autorizada o el usuario de destino tiene un bloqueo global.", invitation_sent: invitationSent });
+        if (error.code === "23503") return reply(409, { error: "La cuenta de Auth existe, pero no tiene un perfil asociado. No se asignó acceso; requiere revisión técnica.", invitation_sent: invitationSent });
+        if (error.code === "23514") return reply(409, { error: error.message, invitation_sent: invitationSent });
+        if (error.code === "22023") return reply(400, { error: "Los datos de la asignación no son válidos.", invitation_sent: invitationSent });
+        console.error("Business membership assignment RPC failed:", error);
+        return reply(503, {
+          error: invitationSent
+            ? "El correo fue enviado, pero la asignación no pudo finalizarse. No vuelvas a crear otra cuenta: reintenta la misma asignación para completar el acceso."
+            : "No se pudo completar la asignación. No se modificó la membresía ni su auditoría.",
+          invitation_sent: invitationSent,
+          retryable: true,
+        });
+      }
+
+      const result = data as Record<string, any> | null;
+      if (!result?.membership) throw new Error("La RPC de asignación no devolvió la membresía.");
+      if (result.already_assigned) {
+        return reply(409, {
+          error: result.membership.status === "active"
+            ? "Ese usuario ya tiene acceso a este negocio."
+            : "Ese usuario ya tiene una asignación suspendida. Reactiva su acceso desde la gestión de usuarios.",
+          membership: result.membership,
+          invitation_sent: invitationSent,
+        });
+      }
 
       return reply(201, {
         ok: true,
-        membership,
+        membership: result.membership,
         invitation_sent: invitationSent,
-        audit_warning: auditError ? "La asignación se creó, pero no se pudo guardar su evento de auditoría. No repitas la invitación; revisa los registros técnicos." : null,
-        message: auditError
-          ? (invitationSent ? "La invitación se envió y la asignación se creó." : "El usuario existente quedó asignado al negocio.")
-          : (invitationSent ? "Invitación enviada al correo." : "Usuario existente asignado al negocio."),
+        message: invitationSent
+          ? "Correo de invitación o verificación enviado y acceso asignado."
+          : "Cuenta existente asignada al negocio.",
       });
     }
 
