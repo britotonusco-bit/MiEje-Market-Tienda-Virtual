@@ -368,3 +368,12 @@ La ruta del panel llama UPDATE directo sobre `orders`, pero el rol `authenticate
 La comparación de llamadas del panel con las funciones SQL activas encontró que solo existen 3 de las 12 RPC invocadas. Faltan nueve, incluidas las de consulta financiera de pedidos, reporte de ganancias, inventario, métodos de pago, confirmación de pagos, cancelaciones y reembolsos. La RPC financiera ausente se llama al iniciar `loadBusinessAdmin()`, por lo que el panel administrativo puede fallar desde el arranque. También se invoca `get-platform-public-settings`, que no aparece entre las seis Edge Functions desplegadas.
 
 Se detectó además exceso de permisos del propietario técnico: RLS le permite modificar filas completas de negocios, administrar métodos de pago, acceder a costos internos y consultar pedidos/datos de clientes de todos los negocios. Esto contradice la separación acordada. Deben sustituirse por acciones técnicas limitadas a cuentas, membresías y estado del negocio, sin acceso comercial transversal. Sin cambios en base ni despliegues. Detalle en `docs/order-panel-callsite-integration-audit.md`.
+
+
+### Rectificación y nuevos resultados — 16 nov 2026
+
+Se rectifica la conclusión anterior sobre UPDATE de pedidos: aunque el privilegio general de tabla es falso, existen permisos de UPDATE por columna para `status` y `delivery_tracking`; RLS también autoriza miembros activos. El bloqueo confirmado era el desajuste de estados (`received/on_the_way` en la interfaz frente a `pending/out_for_delivery` en DB). Se corrigieron `panel-live.js` y `app.js` en esta rama; verificación estática correcta, sin prueba de navegador ni pedido real.
+
+Las nueve RPC ausentes en Supabase activo ya tienen borradores SQL en el repositorio, repartidos entre pedidos, cancelaciones, reembolsos, inventario, pagos y gastos. No están desplegadas/activas; se debe revisar y probar su orden de aplicación antes de ejecutar. `get-platform-public-settings` también existe como fuente y borrador, pero no está desplegada.
+
+Asesores: protección de contraseñas filtradas deshabilitada; tres tablas RLS sin políticas, pero sin grants a anon/authenticated (internas); 16 FKs sin índices de cobertura y una tabla con múltiples políticas SELECT permisivas. No se modificó Supabase ni Auth. Ver detalle en `docs/order-panel-callsite-integration-audit.md`.
