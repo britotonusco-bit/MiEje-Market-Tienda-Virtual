@@ -387,7 +387,8 @@
   }
 
   function renderFeatured() {
-    $("#featuredGrid").innerHTML = businesses.slice(0, 3).map(businessCard).join("");
+    const availableBusinesses = businesses.filter(business => business.isActive !== false);
+    $("#featuredGrid").innerHTML = availableBusinesses.slice(0, 3).map(businessCard).join("");
   }
 
   function renderChips() {
@@ -546,7 +547,9 @@
         <section>
           <h2 class="store-section-title">Productos de esta tienda</h2>
           <div class="product-grid">
-            ${business.products.map(product => productCard(business, product)).join("")}
+            ${business.products.length
+              ? business.products.map(product => productCard(business, product)).join("")
+              : '<p class="empty-products" role="status">Esta tienda todavía no tiene productos publicados.</p>'}
           </div>
         </section>
 
