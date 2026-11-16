@@ -578,6 +578,46 @@
     }
   }
 
+  function closeProductDetails() {
+    const modal = $("#productDetailModal");
+    if (!modal) return;
+    modal.classList.add("hidden");
+    modal.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("modal-open");
+  }
+
+  function openProductDetails(businessId, productId) {
+    const business = getBusiness(businessId);
+    const product = business && getProduct(business, productId);
+    if (!business || !product) {
+      showToast("No encontramos la información de este producto.");
+      return;
+    }
+    const canOrder = business.isRegistered === true && business.isActive !== false && Number(product.inventory || 0) > 0;
+    const saved = favoriteProductIds.has(product.id);
+    $("#productDetailContent").innerHTML = `
+      <div class="product-detail-layout">
+        <div class="product-detail-image"><img src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}"></div>
+        <div class="product-detail-copy">
+          <p class="eyebrow">${escapeHtml(business.category || "Negocio local")}</p>
+          <h2 id="productDetailTitle">${escapeHtml(product.name)}</h2>
+          <p class="product-detail-store">Vendido por <strong>${escapeHtml(business.name)}</strong></p>
+          <p class="product-detail-description">${escapeHtml(product.description || "Consulta con la tienda para conocer más detalles.")}</p>
+          <p class="product-detail-price">${money(product.price)}</p>
+          <p class="product-detail-stock">${canOrder ? (Number(product.inventory) > 5 ? "Disponible" : "Últimas unidades disponibles") : business.isActive === false ? "Tienda temporalmente no disponible" : "Agotado o no disponible para compra en línea"}</p>
+          <div class="product-detail-actions">
+            <button type="button" class="btn lime" data-action="detail-add" data-business="${escapeHtml(business.id)}" data-product="${escapeHtml(product.id)}" ${canOrder ? "" : "disabled"}>Agregar al carrito</button>
+            ${business.isRegistered === true ? `<button type="button" class="btn secondary" data-action="favorite" data-product="${escapeHtml(product.id)}">${saved ? "♥ Guardado" : "♡ Guardar en favoritos"}</button>` : ""}
+          </div>
+        </div>
+      </div>`;
+    const modal = $("#productDetailModal");
+    modal.classList.remove("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("modal-open");
+    modal.querySelector(".product-detail-close")?.focus();
+  }
+
   function productCard(business, product) {
     const canOrder = business.isRegistered === true && business.isActive !== false && Number(product.inventory || 0) > 0;
     const buttonText = !business.isRegistered ? "Demostración" : Number(product.inventory || 0) > 0 ? "+ Agregar" : "Agotado";
@@ -585,7 +625,7 @@
       <article class="product-card">
         <img src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}" loading="lazy">
         <div class="product-info">
-          <h4>${escapeHtml(product.name)}</h4>
+          <button type="button" class="product-detail-link" data-action="product-details" data-business="${escapeHtml(business.id)}" data-product="${escapeHtml(product.id)}"><h4>${escapeHtml(product.name)}</h4></button>
           <p>${escapeHtml(product.description)}</p>
           <div class="product-bottom">
             <span class="product-price">${money(product.price)}</span>
@@ -1012,6 +1052,20 @@
         addToCart(actionButton.dataset.business, actionButton.dataset.product);
       }
 
+      if (action === "product-details") {
+        openProductDetails(actionButton.dataset.business, actionButton.dataset.product);
+      }
+
+      if (action === "close-product-detail") {
+        closeProductDetails();
+      }
+
+      if (action === "detail-add") {
+        addToCart(actionButton.dataset.business, actionButton.dataset.product);
+        closeProductDetails();
+        openCart();
+      }
+
       if (action === "favorite") {
         void toggleFavorite(actionButton.dataset.product, actionButton);
       }
@@ -1281,7 +1335,10 @@
   });
 
   document.addEventListener("keydown", event => {
-    if (event.key === "Escape") closeCart();
+    if (event.key === "Escape") {
+      closeProductDetails();
+      closeCart();
+    }
   });
 
 
