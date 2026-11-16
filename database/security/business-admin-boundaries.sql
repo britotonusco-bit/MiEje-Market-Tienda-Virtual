@@ -229,7 +229,13 @@ USING (
 BEGIN;
 ALTER TABLE public.orders
   DROP CONSTRAINT IF EXISTS orders_status_check;
+-- La normalización es una migración de datos, no un cambio operativo
+-- realizado por un usuario. Desactivar temporalmente los triggers que
+-- generarían auditoría falsa o reescribirían updated_at con la hora del despliegue.
 ALTER TABLE public.orders DISABLE TRIGGER orders_enforce_status_transition;
+ALTER TABLE public.orders DISABLE TRIGGER orders_audit_status;
+ALTER TABLE public.orders DISABLE TRIGGER orders_set_updated_at;
+
 UPDATE public.orders
 SET status = CASE status
   WHEN 'pending' THEN 'received'
@@ -237,6 +243,9 @@ SET status = CASE status
   ELSE status
 END
 WHERE status IN ('pending', 'out_for_delivery');
+
+ALTER TABLE public.orders ENABLE TRIGGER orders_set_updated_at;
+ALTER TABLE public.orders ENABLE TRIGGER orders_audit_status;
 ALTER TABLE public.orders ENABLE TRIGGER orders_enforce_status_transition;
 ALTER TABLE public.orders
   ADD CONSTRAINT orders_status_check
@@ -562,7 +571,7 @@ EXECUTE FUNCTION private.stamp_job_application_review();
 CREATE OR REPLACE FUNCTION private.prevent_business_scope_change()
 RETURNS trigger
 LANGUAGE plpgsql
-SECURITY DEFINER
+SECURITY INVOKER
 SET search_path = ''
 AS $function$
 DECLARE
