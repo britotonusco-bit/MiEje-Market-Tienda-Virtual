@@ -265,3 +265,12 @@ La revisión de solo lectura encontró:
 - Los privilegios de UPDATE de `orders` están limitados a `status` y `delivery_tracking`, y las postulaciones quedan limitadas al administrador según RLS.
 
 No se ejecutaron migraciones, RPC de negocio, cambios de datos ni despliegues. Las correcciones propuestas deben probarse primero en un entorno de ensayo independiente.
+
+
+### Revisión del borrador de límites y migración histórica (16 nov 2026)
+
+En la revisión adicional de `database/security/business-admin-boundaries.sql` se corrigieron dos detalles en la rama:
+- La conversión de estados desactiva temporalmente los triggers de transición, auditoría y actualización de fecha; así no se crean eventos operativos falsos ni se sobrescribe `updated_at` durante el backfill.
+- `private.prevent_business_scope_change()` ahora es `SECURITY INVOKER`; el trigger no necesita privilegios elevados ni un bypass RLS.
+
+Los nombres de los tres triggers de pedidos se cotejaron con el catálogo del proyecto activo. La verificación fue estática y de metadatos; no se ejecutó el SQL ni se modificó la base.
