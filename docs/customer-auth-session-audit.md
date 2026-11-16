@@ -94,3 +94,43 @@ La conexión disponible permite consultar estado del proyecto y asesores de segu
 - Pruebas reales de correo: pendientes. No se enviaron mensajes ni se modificó SMTP, plantillas o URL Configuration.
 - Asesor de seguridad actual: un aviso WARN de protección de contraseñas filtradas deshabilitada y tres avisos INFO de RLS sin políticas (tablas de uso interno previamente revisadas).
 - No se cambió Auth, no se ejecutó SQL, no se desplegó Edge Function ni se publicó GitHub Pages.
+
+
+## Auditoría de límites, sesiones y bloqueo de cuentas (16 Nov 2026)
+
+### Límites de solicitudes observados en el proyecto Supabase activo
+
+- **Checkout público:** la Edge Function desplegada `create-public-order` versión 3 llama a `consume_checkout_rate_limit`. La función limita cada IP a 10 solicitudes por ventana de 10 minutos, guarda un hash SHA-256 de la IP y elimina registros con más de 24 horas. La función SQL es `SECURITY DEFINER`, tiene `search_path` vacío y su ejecución está concedida únicamente a `service_role`.
+- **Postulaciones laborales:** la Edge Function desplegada `create-job-application` versión 2 llama a `consume_job_application_rate_limit`. El límite es de 5 solicitudes por hash de IP en una ventana de 15 minutos. El contador se consume tanto al solicitar la carga del archivo como al enviar la postulación.
+- **Mantenimiento pendiente:** `job_application_rate_limits` conserva una fila por hash de IP y la función de consumo no elimina filas antiguas. La ventana se reinicia, pero los registros históricos pueden acumularse. Antes de ampliar el uso público se debe añadir limpieza programada y verificar su coste.
+- **Invitaciones internas:** la función técnica desplegada versión 6 y la versión actual de la rama no tienen un límite de solicitudes específico para `invite_member`. Aunque la acción exige un propietario autenticado, se recomienda añadir un límite atómico en servidor por propietario y destino, con protección adicional por negocio, antes de habilitar invitaciones a gran escala.
+- **Registro, inicio de sesión y recuperación:** los formularios no incorporan límites propios en JavaScript. No se debe presentar un contador del navegador como protección real porque se puede omitir. La protección efectiva debe depender de los límites de Supabase Auth, CAPTCHA y configuración del servidor. Los valores actuales de Auth no pudieron leerse desde las herramientas disponibles y quedan pendientes de comprobación manual en Dashboard.
+
+### RLS y permisos de los limitadores
+
+- Las tablas `private.checkout_rate_limits`, `public.job_application_rate_limits` y `public.job_application_upload_sessions` tienen RLS habilitado y cero políticas.
+- Los dos RPC de límite consultados no permiten ejecución a `anon` ni a `authenticated`; solo a `service_role`. Las tablas no deben recibir políticas genéricas para silenciar el asesor: son estructuras internas gestionadas por funciones de servidor.
+- El asesor de seguridad sigue mostrando tres avisos INFO `rls_enabled_no_policy` para esas tablas y un WARN `auth_leaked_password_protection`. La protección de contraseñas filtradas continúa pendiente de activación en el Dashboard.
+
+### Sesiones y suspensión de acceso
+
+- En `panel-live.js`, la rama vuelve a validar la sesión y la autorización cada 30 segundos y cuando el usuario regresa a la pestaña. Si la cuenta queda bloqueada, la membresía deja de estar activa, el negocio se suspende o el propietario pierde AAL2, la interfaz cierra la sesión local y redirige al inicio de sesión.
+- La revalidación del panel no equivale a revocar inmediatamente todos los refresh tokens. La autorización debe seguir comprobándose en cada Edge Function y en RLS. Un JWT ya emitido puede seguir siendo válido criptográficamente hasta su expiración.
+- La suspensión de una membresía afecta ese negocio; no es un bloqueo global de la persona. Si el usuario conserva otra membresía activa, debe poder seguir entrando al otro negocio. El cierre local de la sesión del panel suspendido no debe revocar todas sus sesiones.
+- `resolve-my-access` desplegada versión 2 rechaza perfiles con `is_blocked` y solo devuelve membresías activas de negocios activos.
+- La tabla `auth.sessions` tenía 0 sesiones en la consulta del 16-Nov-2026 y el proyecto tenía 1 usuario Auth. No había sesiones de prueba para comprobar expiración, revocación o suspensión en vivo.
+
+### Diferencia crítica entre rama y función técnica desplegada
+
+- La función `technical-business-management` desplegada versión 6 valida el JWT, el perfil y el rol de propietario, pero no consulta el nivel de autenticación AAL. Por tanto, un JWT válido de nivel AAL1 no queda bloqueado en el servidor por esa función, aunque la interfaz de inicio de sesión muestre el paso MFA.
+- La versión de `technical-business-management/index.ts` en `correcciones-funcionales` sí llama `getAuthenticatorAssuranceLevel(token)` y exige `aal2` antes de cualquier acción técnica. La referencia oficial de Supabase confirma que el método acepta un JWT explícito para uso en Edge Functions.
+- **No desplegar la función técnica actual hasta revisar y probar esta diferencia.** La corrección está en la rama, no en el servicio activo. Se requiere prueba con un token AAL1 rechazado y otro AAL2 autorizado en un entorno de pruebas antes de desplegar.
+- La función técnica desplegada tampoco ofrece un bloqueo global de perfil; las acciones `block_member` y `unblock_member` suspenden o reactivan una membresía concreta. El bloqueo global de perfil debe mantenerse como operación separada, con revocación de sesiones y comprobación del estado en servidor.
+
+### Estado y límites de esta revisión
+
+- Se inspeccionaron las versiones desplegadas de `technical-business-management`, `create-public-order`, `create-job-application` y `resolve-my-access`, además de sus versiones de rama pertinentes.
+- Se consultaron definiciones SQL y permisos de los dos RPC de límite, estado RLS de las tablas y conteos agregados de usuarios/sesiones.
+- No se hicieron intentos de inicio de sesión, no se enviaron invitaciones ni correos, no se crearon usuarios, no se cambiaron ajustes Auth, no se ejecutó SQL de escritura y no se desplegaron funciones.
+- La expiración de JWT, rotación de refresh tokens, CAPTCHA, límites de Auth y política de contraseñas del servidor siguen pendientes de revisión manual en Dashboard.
+- No se pudo probar el rechazo AAL1/AAL2 en vivo porque eso requeriría generar sesiones de prueba y llamar a la función administrativa. La discrepancia se confirmó mediante lectura del código desplegado y de la rama.
