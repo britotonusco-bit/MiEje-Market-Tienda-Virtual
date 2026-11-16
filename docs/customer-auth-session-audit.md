@@ -134,3 +134,35 @@ La conexión disponible permite consultar estado del proyecto y asesores de segu
 - No se hicieron intentos de inicio de sesión, no se enviaron invitaciones ni correos, no se crearon usuarios, no se cambiaron ajustes Auth, no se ejecutó SQL de escritura y no se desplegaron funciones.
 - La expiración de JWT, rotación de refresh tokens, CAPTCHA, límites de Auth y política de contraseñas del servidor siguen pendientes de revisión manual en Dashboard.
 - No se pudo probar el rechazo AAL1/AAL2 en vivo porque eso requeriría generar sesiones de prueba y llamar a la función administrativa. La discrepancia se confirmó mediante lectura del código desplegado y de la rama.
+
+
+## Revisión complementaria: suspensión de membresías, roles y revocación de sesiones (16 Nov 2026)
+
+### Suspensión y reactivación de miembros
+
+- La acción `block_member` de la función técnica desplegada versión 6 actualiza una membresía a `suspended` y registra auditoría, pero no comprueba que el usuario suspendido sea el último administrador activo del negocio.
+- La versión de la rama `correcciones-funcionales` sí protege ese caso: cuenta administradores activos y rechaza suspender al último. También usa una actualización condicional por estado anterior para reducir carreras concurrentes.
+- La rama también hace que `update_member_assignment` impida retirar el rol de administrador al último administrador activo. La versión desplegada debe revisarse y actualizarse antes de considerarla equivalente.
+- `unblock_member` comprueba que el negocio esté activo antes de reactivar la membresía. La versión de rama además usa una condición sobre el estado anterior para evitar sobrescribir un cambio concurrente.
+- El panel técnico permite suspender o reactivar membresías de un negocio; no existe en esta función una acción separada para bloquear globalmente un perfil Auth.
+
+### Auditoría y consistencia transaccional
+
+- En la rama, las operaciones de suspensión, reactivación y cambio de rol actualizan primero la membresía y escriben el registro de auditoría después.
+- Si la inserción de auditoría falla, la operación principal puede quedar aplicada sin registro; la función devuelve `audit_warning`. Es mejor que ocultar el fallo, pero no ofrece atomicidad.
+- Antes de producción, estas operaciones deberían moverse a RPCs transaccionales que validen el último administrador, actualicen la membresía y escriban el evento de auditoría en una sola transacción. Si la auditoría falla, toda la operación debe revertirse.
+- La acción de invitación de la rama evita crear la membresía cuando el envío de invitación falla y detecta membresías duplicadas. Sin embargo, no hay rate limit de servidor específico para invitaciones. El control no debe implementarse en el navegador ni basarse solo en IP; conviene combinar límites por actor, destino y negocio, con respuesta genérica y registro de intentos.
+
+### Revocación de sesiones: alcance correcto
+
+- Suspender una membresía no debería revocar globalmente las sesiones Auth del usuario: podría tener acceso válido a otros negocios. El mecanismo correcto es denegar de inmediato esa membresía en cada operación protegida y cerrar localmente el panel afectado.
+- Bloquear globalmente un perfil es distinto: debe impedir nuevas autorizaciones para todos los negocios y revocar sus refresh tokens/sesiones. No se encontró una acción global implementada en la función técnica desplegada ni en la rama revisada.
+- Supabase documenta que `signOut({ scope: 'global' })` termina todas las sesiones y destruye refresh tokens, pero los access tokens JWT ya emitidos pueden seguir siendo válidos hasta su `exp`. Para operaciones especialmente sensibles se puede comprobar el `session_id` del JWT contra `auth.sessions`; esta comprobación debe diseñarse con cuidado y no aplicarse indiscriminadamente a todas las consultas.
+- La revalidación del panel cada 30 segundos mejora la experiencia, pero no es un control inmediato de revocación. Cada Edge Function y cada política RLS deben validar el perfil y la membresía activa en el servidor.
+
+### Estado de la corrección
+
+- La rama contiene protecciones para no suspender al último administrador y no retirar su rol, además de actualizaciones condicionales para evitar carreras.
+- La función desplegada versión 6 todavía no tiene esas protecciones.
+- No se modificó ni desplegó código en esta revisión. No se revocaron sesiones ni se alteraron membresías.
+- Quedan pendientes: RPC transaccionales de suspensión/reactivación/roles con auditoría atómica; límite de invitaciones; política explícita de bloqueo global y revocación; limpieza programada de registros antiguos de limitación; pruebas controladas de tokens AAL1/AAL2 y de acceso después de suspensión.
