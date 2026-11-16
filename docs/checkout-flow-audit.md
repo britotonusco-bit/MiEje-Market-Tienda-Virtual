@@ -81,7 +81,17 @@ Antes de implementar se debe añadir una recuperación clara: informar el motivo
 
 El navegador guarda temporalmente la clave de idempotencia en `sessionStorage` y la reutiliza cuando el mismo contenido se vuelve a enviar en la misma sesión. Esto ayuda si el servidor creó el pedido, pero la respuesta no llegó al navegador.
 
-El carrito como tal permanece solo en memoria; `sessionStorage` conserva la huella de la solicitud y la clave, no las líneas del carrito. Si se recarga la página, el cliente debe reconstruir el mismo carrito y volver a escribir los mismos datos para que coincida la huella y se recupere la clave anterior. Debe probarse este escenario y decidir si se guarda temporalmente el carrito (solo identificadores de producto y cantidades) para facilitar la recuperación. No guardar datos de pago sensibles.
+La revisión adicional encontró dos riesgos: si el cliente cambiaba algún dato después de perder la respuesta, la página podía generar una clave nueva; y si `sessionStorage` no estaba disponible, continuaba con una clave que no podría recuperar tras una recarga.
+
+Se corrigió `app.js` en la rama:
+
+- Lee la clave pendiente sin borrarla cuando cambia el contenido del pedido.
+- Bloquea un segundo checkout con datos distintos mientras el intento anterior siga sin resolverse.
+- Exige guardar la clave en `sessionStorage` antes de enviar el pedido; si no puede guardarla, no envía la solicitud.
+- Conserva la clave ante errores del servidor cuya respuesta sea incierta.
+- Limpia la clave ante rechazos HTTP 400, 409 o 429 que confirman que la operación no se creó, excepto si el mensaje indica conflicto de reutilización de la clave.
+
+El carrito sigue sin persistirse: después de recargar, el cliente debe reconstruir exactamente los mismos datos y productos para recuperar el intento. Esta corrección reduce el riesgo de duplicados, pero debe validarse con pruebas de navegador y respuestas reales.
 
 ### 7. Reglas del carrito y del método de pago
 
@@ -101,6 +111,13 @@ La cancelación aprobada actualiza el pedido y restituye las existencias dentro 
 Los reembolsos se mantienen separados: el borrador financiero solo registra un reembolso total cuando el pedido ya está cancelado y existe exactamente un pago completado que coincide con el total. No ejecuta transferencias ni llama a una pasarela de pagos.
 
 Durante la normalización de estados, el trigger `orders_audit_status` permanece activo y registrará los cambios de estados antiguos a los canónicos como eventos de auditoría. Debe revisarse ese efecto al preparar la migración definitiva, especialmente si ya existen pedidos reales al momento de aplicarla.
+
+## Riesgos y límites pendientes de la idempotencia
+
+1. La Edge Function consulta el registro del método de pago antes de buscar la respuesta idempotente. Si el método se desactiva, la fila aún existe y el pedido anterior se puede recuperar; si el método se elimina físicamente, la búsqueda previa devuelve 409 y no recupera el pedido, aunque exista una copia histórica del nombre del método en el pedido. Debe definirse que los métodos usados en pedidos se desactiven o archiven, y no se eliminen físicamente.
+2. Las RPC de idempotencia solo deben ser ejecutables por `service_role`. La Edge Function debe mantenerse como la única puerta pública; no conceder ejecución de esas RPC a `anon` ni `authenticated`.
+3. El límite por IP usa `cf-connecting-ip` y, como respaldo, `x-forwarded-for`. Antes de publicar, confirmar que el encabezado de respaldo lo establece un proxy confiable y no puede ser enviado libremente por el cliente; de lo contrario, debe eliminarse el respaldo y rechazarse solicitudes sin IP confiable.
+4. La consulta de respuesta idempotente se hace antes de reservar un nuevo intento. Esto evita contar dos veces los reintentos legítimos, pero debe probarse que una clave no permita recuperar datos de pedido a alguien que no conoce el contenido original. No exponer la RPC de búsqueda directamente al navegador.
 
 ## Estado de la base de datos al revisar
 
