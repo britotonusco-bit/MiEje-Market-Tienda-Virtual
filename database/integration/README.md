@@ -274,3 +274,13 @@ En la revisión adicional de `database/security/business-admin-boundaries.sql` s
 - `private.prevent_business_scope_change()` ahora es `SECURITY INVOKER`; el trigger no necesita privilegios elevados ni un bypass RLS.
 
 Los nombres de los tres triggers de pedidos se cotejaron con el catálogo del proyecto activo. La verificación fue estática y de metadatos; no se ejecutó el SQL ni se modificó la base.
+
+
+### Compatibilidad de la RPC de gastos (16 nov 2026)
+
+Se añadió al informe de límites entre paneles un hallazgo de firma:
+- El panel llama `pay_business_expense` con `p_expense_id`, `p_payment_method` y `p_transaction_reference`.
+- En el proyecto activo solo existe la versión de dos parámetros.
+- El paso 17 (`business-expense-audit-draft.sql`) reemplaza la firma por la versión de tres parámetros con referencia opcional.
+
+La confirmación de pagos de gastos no debe marcarse como funcional hasta aplicar y verificar el paso 17 en staging, incluyendo efectivo, transferencia/tarjeta y los casos negativos.
