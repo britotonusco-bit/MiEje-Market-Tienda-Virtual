@@ -35,6 +35,65 @@ Revisión estática de los archivos de la rama `correcciones-funcionales` y cons
 
 La estructura de registro, inicio de sesión, recuperación y aceptación de invitaciones existe en la rama de trabajo. La revisión de código no demuestra todavía que los correos lleguen ni que las URL de Auth estén configuradas correctamente. Favoritos e historial dependen de migraciones pendientes. El control RLS sí consulta el estado de bloqueo del perfil, pero falta cerrar y probar la revocación de sesiones Auth.
 
+## Auditoría del historial de compras y favoritos (16 Nov 2026)
+
+### Estado actual observado en Supabase
+
+- La base de datos activa contiene 1 usuario Auth y 1 perfil. El trigger `on_auth_user_created` existe y ejecuta `private.handle_new_auth_user()`, que crea el perfil con `display_name` y no asigna roles desde metadata editable.
+- La tabla `orders` existe, pero no contiene todavía la columna `customer_user_id`.
+- `public.customer_favorites` no existe todavía.
+- `public.get_customer_order_history()` no existe todavía.
+- La tabla `orders` contiene 0 pedidos. Por tanto, no se hicieron pruebas con datos de clientes ni se pudo verificar el resultado de una compra real.
+
+### Vinculación de pedidos con la identidad autenticada
+
+- La Edge Function de la rama valida el bearer token con `admin.auth.getUser(bearer)`; no confía en un `customer_user_id` enviado por el navegador.
+- Después comprueba que exista un perfil y que `profiles.is_blocked` sea false. Solo entonces deriva el ID de cliente desde `authData.user.id` y lo envía al RPC privado de creación.
+- Los pedidos de invitados mantienen `customer_user_id = NULL`; no se vinculan automáticamente después de crear una cuenta.
+- La huella de idempotencia incluye el ID de usuario validado por el servidor. Así, reutilizar una clave desde otra cuenta no debe recuperar el pedido de la cuenta anterior.
+- La migración de clientes usa `ON DELETE SET NULL` para que borrar una cuenta no elimine pedidos ni su historial comercial.
+
+### Historial y privacidad
+
+- `get_customer_order_history()` es una función `SECURITY DEFINER`, con `search_path` vacío, ejecución revocada a `PUBLIC` y `anon`, y concedida a `authenticated`.
+- La función identifica al solicitante mediante `auth.uid()` y limita la consulta a `orders.customer_user_id = auth.uid()`.
+- Devuelve como máximo 50 pedidos, con número, estado, método de pago, importes, fecha, negocio y líneas de productos. No incluye teléfono, correo, dirección de entrega, notas ni token privado de seguimiento.
+- La función se corrigió para fallar de forma cerrada: exige que exista el perfil y que `is_blocked = false`. Antes solo rechazaba el perfil cuando encontraba explícitamente `is_blocked = true`, lo que permitía continuar si faltaba la fila de perfil.
+- La interfaz `cuenta.js` consume el historial mediante el RPC y escapa los textos antes de insertarlos en el HTML. También comprueba que la respuesta corresponda al usuario que sigue activo para evitar renderizar datos de una consulta anterior tras un cambio de sesión.
+- Los favoritos se protegen por RLS con `user_id = auth.uid()`; la inserción requiere producto activo y negocio activo, y el usuario solo puede borrar sus propios favoritos. La restricción única impide guardar dos veces el mismo producto para la misma cuenta.
+
+### Requisito adicional de Data API
+
+La migración concede privilegios SQL mínimos y activa RLS en `customer_favorites`, pero eso no garantiza por sí solo que la tabla sea accesible desde `client.from()`. Desde el 30-Oct-2026 las tablas nuevas no se exponen automáticamente por defecto en todos los proyectos. Antes de habilitar favoritos, el propietario debe confirmar en Dashboard > Integrations > Data API que el esquema `public` esté expuesto y que la tabla esté incluida. No se cambió esa configuración durante esta auditoría. <https://supabase.com/changelog/45329-breaking-change-tables-not-exposed-to-data-and-graphql-api-automatically>
+
+### Hallazgos y mejoras pendientes
+
+1. **Perfil ausente en historial:** corregido en el borrador SQL de `database/orders/order-financial-access-draft.sql`; ahora requiere perfil existente y no bloqueado.
+2. **Paginación:** el historial devuelve hasta 50 pedidos y no ofrece paginación. Es suficiente para una primera vista, pero se debe diseñar paginación antes de que una cuenta acumule más de 50 pedidos.
+3. **Pedidos de invitado:** no se vinculan retroactivamente al crear una cuenta. Debe mantenerse así salvo que se diseñe un proceso independiente de verificación de titularidad; no asociar pedidos solo por coincidencia de correo o teléfono.
+4. **Borrado de cuenta:** el FK preserva pedidos y limpia la relación con el usuario. Antes de ofrecer eliminación de cuenta, se debe comprobar la revocación de sesiones y explicar que los pedidos pueden conservarse como registros comerciales sin identificar al usuario.
+5. **Data API:** falta confirmar manualmente la exposición de `customer_favorites` en Dashboard; los GRANT SQL y RLS no sustituyen esa configuración.
+6. **Pruebas de aislamiento:** faltan pruebas con dos cuentas distintas, invitado, cuenta bloqueada, perfil ausente, negocio suspendido y pedido histórico con producto desactivado.
+7. **Paginación y carga:** la consulta agrega hasta 50 pedidos y todas sus líneas en un JSON. Medir la respuesta y paginar si el volumen lo requiere.
+
+### Matriz de pruebas pendiente en staging
+
+- Cliente A consulta solo sus pedidos; Cliente B no puede consultar los pedidos de A.
+- Cliente A no puede cambiar la identidad usada para consultar historial.
+- Cliente invitado no obtiene historial asociado a una cuenta.
+- Un intento autenticado se vincula al ID derivado del JWT verificado por la Edge Function.
+- Cambiar de cuenta no permite recuperar un intento idempotente de otra cuenta.
+- Perfil bloqueado o inexistente no puede consultar el historial ni crear nuevos pedidos.
+- Eliminar una cuenta deja el pedido comercial conservado con `customer_user_id = NULL`.
+- Producto desactivado no se puede añadir a favoritos; favorito ya existente puede retirarse aunque el producto deje de estar disponible.
+- Dos cuentas no pueden leer ni borrar los favoritos de la otra.
+- La tabla de favoritos está incluida en los esquemas expuestos de Data API y responde con los grants y RLS previstos.
+
+### Límites de verificación
+
+Esta revisión fue estática y de solo lectura contra Supabase. La corrección de perfil ausente se guardó solo en `correcciones-funcionales`. No se ejecutó SQL, no se desplegó la Edge Function, no se cambió Data API, no se modificó Auth, no se fusionó el PR y no se publicó GitHub Pages. No se redacta todavía un informe de pruebas porque no se ejecutaron pruebas reales de extremo a extremo.
+
+
 ## Límites de cambios
 
 Este informe se guarda únicamente en `correcciones-funcionales`. No se aplicó SQL, no se modificó configuración Auth, no se desplegó Edge Function, no se fusionó el PR, no se tocó `main` ni se publicó GitHub Pages.
