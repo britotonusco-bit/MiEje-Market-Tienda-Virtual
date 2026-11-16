@@ -44,15 +44,24 @@ El borrador `database/orders/checkout-idempotency-draft.sql` propone una clave �
 
 La función SQL activa lee el negocio con estado `active`, pero no bloquea su fila durante la transacción. Si un administrador suspende el negocio justo después de esa lectura, el pedido podría continuar mientras la suspensión se procesa.
 
-La función propuesta en `database/inventory/checkout-inventory-lock-order-draft.sql` debe obtener el registro del negocio activo con `FOR SHARE` antes de procesar productos. Así, la suspensión y el checkout quedan serializados: o el pedido termina primero, o la función detecta que el negocio ya no está activo.
+La versión corregida del borrador `database/inventory/checkout-inventory-lock-order-draft.sql` obtiene el registro del negocio activo con `FOR SHARE` antes de procesar productos. Así, la suspensión y el checkout quedan serializados: o el pedido termina primero, o la función detecta que el negocio ya no está activo. Este cambio está guardado solo en la rama de trabajo.
 
-### 3. El borrador de bloqueo de inventario está dañado y no se puede ejecutar
+### 3. El borrador de bloqueo de inventario fue reconstruido
 
-La revisión estática encontró un bloque incompleto de validación de UUID/cantidades, una expresión regular sin cerrar y fragmentos duplicados después del primer `COMMIT`. El archivo también repite partes de la función de checkout y del trigger de estados.
+La versión inicial del archivo tenía un bloque incompleto, una expresión regular sin cerrar y fragmentos repetidos después del primer `COMMIT`. Se reconstruyó el archivo en la rama, conservando una sola función de checkout, un solo trigger de estados y una sola transacción.
 
-**Bloqueo:** no ejecutar `database/inventory/checkout-inventory-lock-order-draft.sql` en Supabase hasta reconstruirlo, revisar el SQL completo y validar su sintaxis en un entorno de ensayo.
+La versión actual incorpora:
 
-La corrección debe validar todos los UUID y cantidades antes de convertirlos, rechazar IDs de producto duplicados incluso si cambian las mayúsculas, bloquear el negocio activo con `FOR SHARE` y bloquear los productos en orden UUID ascendente.
+- Validación de UUID antes de convertirlos.
+- Cantidades entre 1 y 99, validadas antes de convertir a entero.
+- Rechazo de productos duplicados aunque sus UUID solo cambien en mayúsculas/minúsculas.
+- Bloqueo del negocio activo con `FOR SHARE` durante el pedido.
+- Bloqueo de productos en orden UUID ascendente con `FOR UPDATE`.
+- Actualización de inventario acotada por `product_id` y `business_id`.
+- Lectura del costo histórico con `FOR SHARE`, para que un cambio simultáneo de costo no altere la instantánea de ese pedido.
+- Registro del movimiento de inventario como venta.
+
+Los controles estáticos confirmaron que el archivo ya no contiene el fragmento incompleto ni duplicaciones y que conserva un único cierre `COMMIT`. **Esto no sustituye una validación de sintaxis en PostgreSQL.** El archivo sigue siendo un borrador y no se ha ejecutado en Supabase.
 
 ### 4. Carrito con datos desactualizados
 
@@ -71,7 +80,7 @@ El carrito como tal permanece solo en memoria. Debe probarse el caso de recarga/
 - El carrito admite productos de un solo negocio a la vez; al elegir otro negocio, pide confirmación para vaciarlo.
 - Los productos de demostración y los negocios suspendidos no pueden iniciar una compra.
 - El checkout toma el identificador del método de pago del negocio.
-- La Edge Function valida que el método pertenezca al negocio. La función SQL propuesta vuelve a comprobar que siga habilitado y guarda el nombre como histórico.
+- La Edge Function comprueba que el método pertenezca al negocio. El borrador idempotente vuelve a bloquear la fila del método con `FOR SHARE`, comprueba que siga habilitado y guarda el nombre como histórico.
 - El navegador no envía el precio como autoridad; la función SQL calcula el precio real.
 - El método de entrega se registra actualmente en las notas del pedido. Debe verificarse que las opciones que se muestran correspondan a las opciones reales configuradas por cada negocio.
 
@@ -107,4 +116,4 @@ No existen registros reales con los que ejecutar pruebas de compra o concurrenci
 
 Esta auditoría no ejecutó SQL, no modificó datos de Supabase, no desplegó Edge Functions, no fusionó ramas, no modificó `main` ni publicó GitHub Pages. Las verificaciones fueron de lectura y análisis estático; no equivalen a pruebas de navegador o compras reales.
 
-La migración de inventario mencionada está bloqueada por errores de sintaxis y duplicación. La idempotencia sigue siendo un borrador. El checkout de producción no debe considerarse listo para pruebas completas hasta disponer de un entorno de ensayo y corregir esos puntos.
+El archivo de bloqueo de inventario ya fue reconstruido en la rama, pero sigue pendiente de validación de sintaxis en PostgreSQL y de pruebas en un entorno de ensayo. La idempotencia también sigue siendo un borrador: las RPC que necesita no existen todavía en el proyecto activo. El checkout de producción no debe considerarse listo para pruebas completas hasta disponer de un entorno de ensayo, revisar todas las migraciones en conjunto y probar los escenarios de concurrencia.
