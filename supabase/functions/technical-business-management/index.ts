@@ -135,7 +135,7 @@ Deno.serve(async (req: Request) => {
         action: "panel.login",
         entity_type: "panel_session",
         entity_id: user.id,
-        details: { panel, email: user.email ?? null, source: "server_verified_session" },
+        details: { panel, source: "server_verified_session" },
       });
       if (auditError) throw auditError;
       return reply(200, { ok: true, message: "Acceso registrado." });
