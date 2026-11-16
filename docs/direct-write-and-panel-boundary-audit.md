@@ -350,3 +350,91 @@ La tabla `product_costs` activa permite actualmente UPDATE de `product_id` y `bu
 - No se hicieron compras, ajustes de inventario, cambios de costos, pagos, reembolsos ni cancelaciones.
 - No se ejecutaron migraciones, no se desplegaron Edge Functions y no se modificó `main` ni GitHub Pages.
 - Las pruebas de concurrencia, autorización por rol y regresión siguen pendientes de staging aislado.
+
+
+## 11. Auditoría de cancelaciones, devoluciones y restitución de inventario (16 nov 2026)
+
+### H-14 — Las solicitudes de cancelación no tienen RPC de escritura en la base activa
+
+**Severidad: crítica para el flujo de cancelaciones.**
+
+El panel invoca `request_order_cancellation(p_business_id, p_order_id, p_customer_reason)` y `decide_order_cancellation(p_request_id, p_decision, p_admin_response)`. Ninguna de estas funciones aparece en el catálogo de funciones públicas o privadas del proyecto activo.
+
+La tabla `order_cancellation_requests` existe y contiene estados `pending/approved/rejected`, motivo, respuesta, actor y marcas de tiempo. Sin embargo, los privilegios de tabla de `authenticated` solo incluyen `SELECT`; no hay `INSERT` ni `UPDATE`. El panel no puede crear ni resolver solicitudes mediante la Data API, y sus RPC tampoco están disponibles.
+
+**Impacto:** solicitar, aprobar o rechazar una cancelación no puede considerarse operativo contra la base activa. El mensaje de éxito de la interfaz solo se mostraría si la RPC se ejecuta correctamente; hoy la llamada debe fallar por función inexistente.
+
+**Corrección prevista:** crear RPC transaccionales con control de rol y negocio activo. La solicitud debe bloquear el pedido, comprobar que no esté entregado/cancelado y que no exista otra solicitud pendiente. La decisión debe bloquear solicitud y pedido, exigir estado `pending`, registrar actor/fecha/respuesta y cambiar el pedido solo una vez. El rechazo no debe modificar el pedido ni las existencias.
+
+### H-15 — El registro de reembolsos tampoco está operativo
+
+**Severidad: crítica para el control financiero.**
+
+El panel invoca `complete_order_refund(p_order_id, p_refund_method, p_provider, p_reference, p_notes)`, pero esa RPC no existe en el proyecto activo. Las tablas `financial_transactions` y `refund_details` solo conceden `SELECT` a `authenticated`; no hay privilegios de escritura directa para ese rol.
+
+La estructura de datos sí contiene relaciones y restricciones útiles:
+- `financial_transactions` exige importe positivo y limita los tipos a `payment_received`, `refund` y `adjustment`.
+- `refund_details` referencia una transacción financiera y el pedido del mismo negocio.
+- La referencia a la transacción es única en `refund_details`.
+
+Estas restricciones no sustituyen la lógica de negocio que debe impedir reembolsos duplicados. La estructura actual no tiene una restricción única por pedido que garantice por sí sola un único reembolso completo.
+
+**Impacto:** el panel no puede registrar el reembolso por medio de la RPC ausente ni insertar directamente en las tablas. No se debe presentar el pedido como reembolsado hasta que la transacción y el detalle del reembolso se guarden atómicamente.
+
+**Corrección prevista:** la RPC debe bloquear el pedido, comprobar que el pago esté confirmado y que no exista ya un reembolso completado para ese pedido, validar referencia y medio, insertar la transacción y el detalle, y actualizar `orders.payment_status` a `refunded` dentro de la misma transacción. Repetir la llamada debe devolver el resultado anterior o rechazarla sin crear otra transacción.
+
+### H-16 — El propietario técnico conserva lectura global de cancelaciones y devoluciones
+
+**Severidad: alta; incumple la separación entre paneles.**
+
+Las políticas activas `cancellation_members_select`, `financial_admin_select` y `refund_admin_select` incluyen `private.is_platform_owner()` como vía de lectura global. Esto permite que el propietario técnico consulte solicitudes de cancelación, transacciones financieras y detalles de reembolso mediante Data API.
+
+El borrador `database/security/business-admin-boundaries.sql` sustituye esas políticas para limitar la lectura al administrador del negocio activo. Esa corrección aún no está aplicada al proyecto activo.
+
+**Corrección prevista:** retirar el bypass de propietario técnico de estas tablas. Si la plataforma necesita una revisión técnica excepcional, debe realizarse mediante una operación de servidor específica, con alcance mínimo y registro de auditoría, no mediante lectura general desde Data API.
+
+### H-17 — La relación de productos vendidos permite perder la referencia al producto
+
+**Severidad: alta para la trazabilidad de inventario y devoluciones.**
+
+En la base activa, `order_items.product_id` tiene una FK con `ON DELETE SET NULL`. Si un producto se elimina físicamente, la línea histórica del pedido permanece, pero pierde el identificador del producto. Esto complica la restitución de existencias ante una cancelación aprobada y debilita la trazabilidad del movimiento.
+
+El borrador `database/inventory/inventory-movements-draft.sql` cambia esa FK a `ON DELETE RESTRICT`. Además, propone que los productos se desactiven en lugar de eliminarse físicamente, y que los movimientos históricos conserven una FK compuesta a producto y negocio.
+
+**Corrección prevista:** aplicar el cambio solo después de revisar datos existentes y dependencias en staging. La desactivación debe ser el camino normal; la eliminación física debe rechazarse cuando existan líneas de pedido o movimientos históricos.
+
+### H-18 — La restitución automática de inventario aún no está implementada en el proyecto activo
+
+**Severidad: crítica para evitar pérdidas o duplicaciones de stock.**
+
+No se encontraron RPC de cancelación ni reembolso en los esquemas `public` o `private`, y no hay triggers activos en `order_cancellation_requests`, `financial_transactions` o `refund_details` que restituyan existencias. El panel muestra un mensaje que afirma que el inventario fue restituido después de aprobar una cancelación, pero la llamada a `decide_order_cancellation` no puede ejecutarse porque la función no existe.
+
+El borrador de movimientos de inventario define el tipo `cancellation_return`, pero el trigger solo registra el contexto que le entregue la operación que actualiza `products.inventory`. No implementa por sí solo la restitución ni impide que una misma solicitud se procese dos veces.
+
+**Corrección prevista:** en una única RPC transaccional de aprobación:
+1. Bloquear solicitud, pedido y líneas relacionadas.
+2. Exigir que la solicitud siga pendiente y el pedido sea cancelable.
+3. Marcar la solicitud aprobada y el pedido cancelado.
+4. Restituir una sola vez la cantidad de cada línea a su producto original.
+5. Establecer el contexto de movimiento `cancellation_return` con motivo y referencia al pedido/solicitud.
+6. Registrar auditoría y finalizar la transacción.
+
+La RPC debe abortar por completo si falta un producto, una línea no coincide con el negocio o el stock no puede actualizarse. El reembolso de dinero debe ser un proceso separado, ya que una cancelación no demuestra que el dinero haya sido devuelto.
+
+### Pruebas de regresión obligatorias en staging
+
+- Solicitud desde empleado y administrador del negocio A; rechazo de cliente, técnico y administrador B.
+- Una sola solicitud pendiente por pedido; reintento de la misma operación.
+- Aprobar una solicitud pendiente; verificar un único cambio a `cancelled` y una sola restitución por línea.
+- Repetir la aprobación y comprobar que no aumente de nuevo el inventario.
+- Rechazar una solicitud y comprobar que pedido e inventario permanezcan intactos.
+- Intentar cancelar un pedido entregado, ya cancelado o con solicitud resuelta.
+- Pedido con varias líneas, varias unidades y dos productos del mismo negocio.
+- Producto desactivado después de la venta: la restitución debe seguir siendo posible.
+- Reembolso de pedido pagado, reintento duplicado y dos solicitudes concurrentes.
+- Confirmar que el reembolso no cambie inventario por segunda vez.
+- Confirmar que el técnico no pueda leer detalles financieros de todos los negocios mediante Data API.
+
+### Alcance y límites
+
+La revisión se hizo sobre catálogos, constraints, privilegios, políticas, triggers y callsites de la rama. No se insertaron solicitudes, no se aprobaron cancelaciones, no se registraron reembolsos ni se modificó inventario. Las RPC y pruebas descritas son trabajo pendiente; no se ha declarado ninguna operación funcional hasta probarla en staging aislado.
