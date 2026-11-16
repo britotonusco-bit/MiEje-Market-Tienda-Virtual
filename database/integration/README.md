@@ -25,7 +25,7 @@ Cada archivo es una unidad independiente. Ejecutar uno a uno, revisar el resulta
 |---:|---|---|
 | 1 | `database/platform/platform-public-settings-draft.sql` | Crea la configuración global que consume `get-platform-public-settings`, que lee únicamente los campos públicos permitidos con credenciales de servidor. |
 | 2 | `database/security/business-admin-boundaries.sql` | Establece primero los límites RLS, grants, columnas, membresías y estados de pedido usados por los demás módulos. |
-| 3 | `database/security/administrative-membership-rpcs-draft.sql` | Requiere el paso 2; añade `job_title` y las RPC transaccionales que invoca la Edge Function técnica. |
+| 3 | `database/security/administrative-membership-rpcs-draft.sql` | Requiere `business_memberships.job_title` creada en el paso 2; crea las RPC transaccionales que invoca la Edge Function técnica. |
 | 4 | `database/platform/platform-finance-payroll-draft.sql` | Crea tablas y RPC de finanzas/nómina de plataforma; depende de perfiles, negocios y auditoría base. |
 | 5 | `database/ai/ai-settings-draft.sql` | Crea configuración IA por negocio y global; requiere helpers de membresía, perfiles y auditoría. |
 | 6 | `database/security/access-block-requests-draft.sql` | Requiere helpers, membresías y la protección de último administrador del paso 2. |
@@ -59,14 +59,15 @@ Aplicarla antes de cumplir estas condiciones puede bloquear el acceso del propie
 
 ## 3. Funciones Edge y configuración
 
-Después de aplicar las migraciones necesarias en staging, desplegar desde esta misma revisión de código, no desde `main`:
+Después de aplicar las migraciones necesarias en staging, desplegar desde esta misma revisión de código, no desde `main`. En la consulta actual, el proyecto independiente tiene seis funciones activas; `get-platform-public-settings` y `cleanup-job-application-data` existen en la rama pero todavía no aparecen desplegadas. Las seis activas también deben actualizarse a la revisión probada:
 - `technical-business-management` (MFA/AAL2);
 - `resolve-my-access`;
 - `create-public-order` (idempotencia y clave publishable);
 - `get-public-storefront`;
 - `track-public-order`;
 - `create-job-application`;
-- `get-platform-public-settings`.
+- `get-platform-public-settings` (no está desplegada en el proyecto activo).
+- `cleanup-job-application-data` solo después de aplicar y probar la migración 18; configurar su ejecución controlada por separado.
 
 Usar `supabase/config.toml` de esta rama para los valores `verify_jwt`. Antes de desplegar, comprobar secrets del proyecto de ensayo. Nunca copiar ni mostrar service-role keys. No enviar invitaciones ni correos a usuarios reales.
 
