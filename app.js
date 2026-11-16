@@ -1113,7 +1113,7 @@
       const order = data.order;
       const labels = { received: "Recibido", confirmed: "Confirmado", preparing: "En preparación", ready: "Listo", on_the_way: "En camino", delivered: "Entregado", cancelled: "Cancelado" };
       const created = order.created_at ? new Intl.DateTimeFormat("es-CO", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Bogota" }).format(new Date(order.created_at)) : "—";
-      result.innerHTML = `<div class="info-panel"><strong>Pedido #${escapeHtml(order.order_number)}</strong><p>Negocio: ${escapeHtml(order.business_name || "—")}</p><p>Estado: <strong>${escapeHtml(labels[order.status] || order.status)}</strong></p><p>Fecha: ${escapeHtml(created)}</p><p>Total: ${money(order.total)}</p>${order.delivery_tracking ? `<p>Seguimiento: ${escapeHtml(order.delivery_tracking)}</p>` : ""}</div>`;
+      result.innerHTML = `<div class="info-panel"><strong>Pedido #${escapeHtml(order.order_number)}</strong><p>Negocio: ${escapeHtml(order.business_name || "—")}</p><p>Estado: <strong>${escapeHtml(labels[order.status] || order.status)}</strong></p><p>Fecha: ${escapeHtml(created)}</p>${order.delivery_tracking ? `<p>Seguimiento: ${escapeHtml(order.delivery_tracking)}</p>` : ""}</div>`;
     } catch (error) {
       result.textContent = error.message || "No se pudo consultar el pedido.";
     } finally {
