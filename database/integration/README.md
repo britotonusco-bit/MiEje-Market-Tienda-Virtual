@@ -17,21 +17,35 @@ Este paquete ordena los borradores existentes y define cómo probarlos. No aplic
 
 ## 2. Orden de aplicación en staging
 
+**Importante:** el listado de abajo reemplaza el orden preliminar anterior. Incluye los módulos de inventario, métodos de pago, gastos, membresías y limpieza que no estaban en aquella secuencia.
+
 Cada archivo es una unidad independiente. Ejecutar uno a uno, revisar el resultado y detenerse si hay un error.
 
 | Orden | Archivo | Motivo/dependencia |
 |---:|---|---|
-| 1 | `database/platform/platform-public-settings-draft.sql` | Crea la tabla de configuración pública global que necesita la función de ajustes de plataforma. |
-| 2 | `database/security/business-admin-boundaries.sql` | Endurece RLS, grants, límites por negocio, perfiles, membresías y trigger de último administrador. Debe quedar antes de las pruebas de roles y de los flujos posteriores. |
-| 3 | `database/platform/platform-finance-payroll-draft.sql` | Crea el libro interno de movimientos de la plataforma y obligaciones de nómina; acceso exclusivo del servidor técnico con MFA. No ejecuta transferencias. |
-| 4 | `database/ai/ai-settings-draft.sql` | Crea la configuración de IA separada por negocio y la configuración global privada; requiere helpers de autorización y usa Edge Function con AAL2 para la IA global. |
-| 5 | `database/security/access-block-requests-draft.sql` | Crea solicitudes de bloqueo por negocio y una RPC transaccional que solo puede ejecutar la Edge Function técnica; requiere helpers, membresías y auditoría base. |
-| 6 | `database/security/storage-policy-fix.sql` | Repara políticas de Storage; requiere buckets ya creados y helpers de autorización disponibles. |
-| 7 | `database/customers/customer-account-migration.sql` | Crea `orders.customer_user_id` y favoritos; es dependencia de checkout e historial. |
-| 8 | `database/orders/checkout-idempotency-draft.sql` | Depende de la columna anterior, de `create_public_order`, de los helpers/rate-limit existentes y de `extensions.digest`. Este archivo repite parte de la estructura de clientes con `IF NOT EXISTS`; la migración de clientes es la fuente de verdad y debe ejecutarse primero. |
-| 9 | `database/orders/order-financial-access-draft.sql` | Depende de `orders.customer_user_id`, del esquema de checkout y de las tablas financieras existentes. Restringe columnas y crea RPCs de finanzas/historial. |
-| 10 | `database/orders/cancellation-flow-draft.sql` | Depende del esquema de pedidos, las membresías/helpers y del trigger de transición instalado por la migración de límites de negocio. |
-| 11 | `database/orders/refund-flow-draft.sql` | Depende de cancelaciones aprobadas y de las tablas `financial_transactions`, `refund_details` y auditoría. |
+| 1 | `database/platform/platform-public-settings-draft.sql` | Crea la configuración global que consume `get-platform-public-settings`, que lee únicamente los campos públicos permitidos con credenciales de servidor. |
+| 2 | `database/security/business-admin-boundaries.sql` | Establece primero los límites RLS, grants, columnas, membresías y estados de pedido usados por los demás módulos. |
+| 3 | `database/security/administrative-membership-rpcs-draft.sql` | Requiere el paso 2; añade `job_title` y las RPC transaccionales que invoca la Edge Function técnica. |
+| 4 | `database/platform/platform-finance-payroll-draft.sql` | Crea tablas y RPC de finanzas/nómina de plataforma; depende de perfiles, negocios y auditoría base. |
+| 5 | `database/ai/ai-settings-draft.sql` | Crea configuración IA por negocio y global; requiere helpers de membresía, perfiles y auditoría. |
+| 6 | `database/security/access-block-requests-draft.sql` | Requiere helpers, membresías y la protección de último administrador del paso 2. |
+| 7 | `database/security/storage-policy-fix.sql` | Corrige políticas de Storage usando los helpers y el modelo de permisos del paso 2. |
+| 8 | `database/customers/customer-account-migration.sql` | Crea `orders.customer_user_id` y favoritos; debe preceder al checkout idempotente y al historial. |
+| 9 | `database/inventory/inventory-movements-draft.sql` | Crea el registro de movimientos y el RPC de ajuste; cambia la FK de productos en líneas de pedido a `ON DELETE RESTRICT`. |
+| 10 | `database/security/business-payment-methods-atomic-draft.sql` | Después del paso 2; revoca escrituras directas de métodos de pago y exige usar su RPC desde el panel. |
+| 11 | `database/inventory/checkout-inventory-lock-order-draft.sql` | Después de inventario y límites de negocio; sustituye el checkout base y etiqueta movimientos de venta. |
+| 12 | `database/orders/checkout-idempotency-draft.sql` | Depende de clientes, métodos de pago, `create_public_order` del paso 11 y `extensions.digest`. Repite parte de la estructura de clientes, por lo que el paso 8 debe ser la fuente de verdad. |
+| 13 | `database/orders/order-financial-access-draft.sql` | Después del checkout; usa `customer_user_id` y `payment_method_name`, y restringe columnas financieras para roles autenticados. |
+| 14 | `database/orders/cancellation-flow-draft.sql` | Depende de estados canónicos, helpers, tabla de solicitudes y trigger; requiere inventario para registrar devoluciones. |
+| 15 | `database/orders/refund-flow-draft.sql` | Después de cancelaciones y finanzas; registra el reembolso externo ya realizado, no transfiere dinero. |
+| 16 | `database/finance/expense-receipts-storage-draft.sql` | Crea el bucket privado requerido por la RPC de comprobantes. |
+| 17 | `database/finance/business-expense-audit-draft.sql` | Después del paso 16 y de los límites de negocio; sustituye escrituras directas por RPC auditadas. |
+| 18 | `database/maintenance/job-application-cleanup-draft.sql` | Depende de las tablas activas de postulaciones y sesiones de carga; coordinar con la Edge Function de limpieza. |
+
+El orden 2/11 contiene actualmente una duplicación: ambos archivos normalizan estados y reemplazan `private.enforce_order_status_transition()`. Antes de ejecutar, consolidar esa parte en una sola migración sin dejar una ventana con el trigger deshabilitado. El paso 11 debe conservar la sustitución del checkout y ejecutarse después de instalar el trigger de movimientos.
+
+Los pasos 1, 3, 4, 5, 6, 7 y 18 son módulos independientes en cuanto a tablas, pero se ordenan aquí para que los helpers y contratos de permisos estén disponibles antes de conectar sus Edge Functions/paneles. El paso 10 debe preceder a la habilitación del flujo de checkout definitivo.
+
 
 ### Endurecimiento MFA del propietario: etapa separada y condicionada
 
@@ -99,10 +113,10 @@ Solo entonces preparar el PR de integración. La fusión/publicación y cualquie
 
 ## 7. Archivos del paquete
 
-- `00-preflight.sql`: inventario de dependencias y estado previo, solo lectura.
+- `00-preflight.sql`: inventario de dependencias preexistentes y estado previo, solo lectura; no debe exigir que existan tablas que las migraciones crearán.
 - `verify-integration-package.sql`: comprobaciones posteriores, solo lectura.
 - `verify-order-financial-access.sql`: verificador financiero de pedidos existente.
-- `verify-integration-package.sql`: comprueba también tablas, RLS y grants del libro financiero y nómina.
+- `verify-order-financial-access.sql`: verifica grants de pedidos y líneas después del paso 13.
 - `docs/security-role-test-matrix.md`: matriz detallada de permisos y pruebas.
 
 ## Bloqueos confirmados en la auditoría de pedidos — 14/11/2026
