@@ -397,3 +397,32 @@ En un entorno de ensayo, probar:
 6. Llamadas directas como `anon` y `authenticated` sin permiso de ejecución.
 
 No se ejecutó ninguna migración en el proyecto activo, no se desplegó la Edge Function y no se conectó un proveedor de IA.
+
+
+## Solicitudes de bloqueo de acceso — revisión de permisos y concurrencia
+
+Se revisó `database/security/access-block-requests-draft.sql` junto con las acciones existentes `list_block_requests` y `resolve_block_request` de `technical-business-management`. Corrección respecto a la primera inspección: ambas acciones ya estaban implementadas en la Edge Function; no fue necesario añadir rutas nuevas. La acción de resolución ya invocaba `resolve_access_block_request` y el listado usa el cliente servidor.
+
+### Hallazgos y correcciones en rama
+
+- La RPC `resolve_access_block_request` estaba declarada `SECURITY DEFINER`. Se cambió a `SECURITY INVOKER`, manteniendo `search_path` vacío y `EXECUTE` solo para `service_role`.
+- La migración revocaba todos los permisos de `access_block_requests` y luego concedía solo `SELECT` a `service_role`. Eso impedía que una RPC `SECURITY INVOKER` actualizara la solicitud. Ahora concede `SELECT, UPDATE` a `service_role`; no se concede lectura ni actualización a los clientes.
+- Se añadió un índice único parcial para impedir más de una solicitud pendiente para el mismo integrante y negocio.
+- La RPC ahora valida explícitamente IDs y decisión no nulos y bloquea el perfil técnico con `FOR SHARE` mientras valida rol y bloqueo global.
+- Al aprobar, bloquea primero la fila del negocio y después la membresía. Este orden coincide con las demás RPC administrativas y serializa el conteo del último administrador con cambios concurrentes de rol o estado.
+- La suspensión aprobada afecta únicamente a la membresía del negocio solicitado; no bloquea la cuenta global ni elimina sus accesos a otros negocios.
+- Rechazar la solicitud no modifica la membresía. Tanto la resolución como la auditoría se guardan en la misma transacción.
+
+### Permisos comprobados en el proyecto independiente
+
+Consulta de solo lectura, 16 nov 2026:
+
+- `service_role` tiene `SELECT` sobre `profiles`, `business_memberships` y `audit_logs`.
+- `service_role` tiene `UPDATE` sobre `business_memberships` y `INSERT` sobre `audit_logs`.
+- `access_block_requests` todavía no existe en la base activa; por tanto, sus permisos se verificaron contra el contenido del borrador, no mediante una tabla desplegada.
+- La política RLS activa de `business_memberships` permite a un administrador ver las membresías de su propio negocio. Esto permite que la política de inserción de la solicitud compruebe el integrante objetivo sin exponer solicitudes a otros negocios.
+- Los helpers `private.has_business_role` y `private.business_is_active` ya existen como `SECURITY DEFINER` y se usan en políticas RLS existentes. La nueva RPC de resolución no depende de ellos.
+
+### Estado y pruebas pendientes
+
+El cambio es solo de rama. No se aplicó el SQL ni se desplegó la Edge Function. En staging deben probarse: creación por administrador del negocio correcto; rechazo de empleado y de administrador de otro negocio; prevención de duplicados pendientes; aprobación y rechazo; último administrador; doble resolución concurrente; perfil técnico bloqueado; rollback completo si falla la auditoría; y denegación de ejecución directa para `anon` y `authenticated`.
