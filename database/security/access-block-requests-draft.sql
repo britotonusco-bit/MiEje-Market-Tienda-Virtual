@@ -32,9 +32,14 @@ CREATE INDEX IF NOT EXISTS access_block_requests_pending_created_idx
   ON public.access_block_requests (created_at DESC)
   WHERE status = 'pending';
 
+-- Evita solicitudes pendientes duplicadas para el mismo integrante y negocio.
+CREATE UNIQUE INDEX IF NOT EXISTS access_block_requests_one_pending_per_member_idx
+  ON public.access_block_requests (business_id, target_user_id)
+  WHERE status = 'pending' AND business_id IS NOT NULL;
+
 ALTER TABLE public.access_block_requests ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.access_block_requests FROM PUBLIC, anon, authenticated, service_role;
-GRANT SELECT ON TABLE public.access_block_requests TO service_role;
+GRANT SELECT, UPDATE ON TABLE public.access_block_requests TO service_role;
 GRANT INSERT (business_id, requested_by, target_user_id, reason)
   ON TABLE public.access_block_requests TO authenticated;
 
@@ -70,7 +75,7 @@ CREATE OR REPLACE FUNCTION public.resolve_access_block_request(
 )
 RETURNS jsonb
 LANGUAGE plpgsql
-SECURITY DEFINER
+SECURITY INVOKER
 SET search_path = ''
 AS $function$
 DECLARE
@@ -79,20 +84,25 @@ DECLARE
   v_admin_count integer;
   v_now timestamptz := pg_catalog.now();
 BEGIN
-  IF p_decision NOT IN ('approved','rejected') THEN
-    RAISE EXCEPTION 'La decisión debe ser approved o rejected.';
+  IF p_request_id IS NULL OR p_technician_id IS NULL
+     OR p_decision IS NULL OR p_decision NOT IN ('approved','rejected') THEN
+    RAISE EXCEPTION 'Solicitud, técnico y decisión válida son obligatorios.'
+      USING ERRCODE = '22023';
   END IF;
   IF pg_catalog.length(pg_catalog.btrim(coalesce(p_technician_note,''))) > 2000 THEN
     RAISE EXCEPTION 'La nota técnica supera el máximo de 2000 caracteres.';
   END IF;
 
-  IF NOT EXISTS (
-    SELECT 1 FROM public.profiles p
-    WHERE p.id = p_technician_id
-      AND p.platform_role = 'platform_owner'
-      AND coalesce(p.is_blocked,false) = false
-  ) THEN
-    RAISE EXCEPTION 'Solo el propietario técnico puede resolver solicitudes.';
+  PERFORM 1
+  FROM public.profiles p
+  WHERE p.id = p_technician_id
+    AND p.platform_role = 'platform_owner'
+    AND coalesce(p.is_blocked,false) = false
+  FOR SHARE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Solo el propietario técnico puede resolver solicitudes.'
+      USING ERRCODE = '42501';
   END IF;
 
   SELECT * INTO v_request
@@ -110,6 +120,18 @@ BEGIN
   IF p_decision = 'approved' THEN
     IF v_request.business_id IS NULL THEN
       RAISE EXCEPTION 'El negocio de la solicitud ya no existe; no se puede bloquear la membresía.';
+    END IF;
+
+    -- Mantener el mismo orden de bloqueo que las demás operaciones administrativas:
+    -- negocio primero y membresía después. Así se serializan cambios de rol/bloqueos.
+    PERFORM 1
+    FROM public.businesses
+    WHERE id = v_request.business_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'El negocio de la solicitud ya no existe.'
+        USING ERRCODE = 'P0002';
     END IF;
 
     SELECT * INTO v_membership
