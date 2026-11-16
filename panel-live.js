@@ -2015,10 +2015,11 @@
         esc(statusLabels[order?.status] || order?.status || '—'),
         esc(r.status === 'pending' ? 'Pendiente' : r.status === 'approved' ? 'Aprobada' : 'Rechazada'),
         dateTime(r.forwarded_at),
+        esc(r.admin_response || '—'),
         decision
       ];
     });
-    target.innerHTML = tableHtml(['Pedido','Motivo','Estado del pedido','Solicitud','Fecha','Decisión'], rows);
+    target.innerHTML = tableHtml(['Pedido','Motivo','Estado del pedido','Solicitud','Fecha','Respuesta del administrador','Decisión'], rows);
     target.querySelectorAll('[data-cancellation-decision][data-request]').forEach(button => {
       button.addEventListener('click', () => decideCancellation(button.dataset.request, button.dataset.cancellationDecision, button));
     });
