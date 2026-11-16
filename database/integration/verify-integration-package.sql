@@ -796,6 +796,69 @@ BEGIN
     RAISE EXCEPTION 'FALLO: falta la política de solicitud de bloqueo limitada al administrador del negocio.';
   END IF;
 
+  -- Inventario: tabla, RLS, trigger de altas/cambios y RPC de ajuste.
+  IF to_regclass('public.inventory_movements') IS NULL
+     OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid='public.inventory_movements'::regclass)
+     OR to_regprocedure('public.adjust_business_inventory(uuid,uuid,integer,integer,text)') IS NULL THEN
+    RAISE EXCEPTION 'FALLO: falta el registro de movimientos de inventario, RLS o RPC de ajuste.';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgrelid='public.products'::regclass
+      AND tgname='products_inventory_movement_insert' AND NOT tgisinternal
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgrelid='public.products'::regclass
+      AND tgname='products_inventory_movement_update' AND NOT tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'FALLO: faltan los triggers que registran movimientos de inventario.';
+  END IF;
+  IF NOT has_function_privilege('authenticated','public.adjust_business_inventory(uuid,uuid,integer,integer,text)','EXECUTE')
+     OR has_function_privilege('anon','public.adjust_business_inventory(uuid,uuid,integer,integer,text)','EXECUTE')
+     OR NOT has_table_privilege('authenticated','public.inventory_movements','SELECT') THEN
+    RAISE EXCEPTION 'FALLO: permisos incorrectos para inventario.';
+  END IF;
+
+  -- Métodos de pago: la escritura directa queda cerrada y se usa la RPC atómica.
+  IF to_regprocedure('public.save_business_payment_methods(uuid,jsonb)') IS NULL
+     OR has_table_privilege('authenticated','public.business_payment_methods','INSERT')
+     OR has_table_privilege('authenticated','public.business_payment_methods','UPDATE')
+     OR NOT has_function_privilege('authenticated','public.save_business_payment_methods(uuid,jsonb)','EXECUTE')
+     OR has_function_privilege('anon','public.save_business_payment_methods(uuid,jsonb)','EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: los métodos de pago permiten escritura directa o falta la RPC atómica.';
+  END IF;
+
+  -- Membresías técnicas: todas las RPC se ejecutan únicamente desde la Edge Function.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='business_memberships'
+      AND column_name='job_title'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: falta business_memberships.job_title.';
+  END IF;
+  IF to_regprocedure('public.create_business_membership_assignment(uuid,uuid,text,text,text,uuid,boolean)') IS NULL
+     OR to_regprocedure('public.update_business_membership_assignment(uuid,text,text,uuid)') IS NULL
+     OR to_regprocedure('public.suspend_business_membership(uuid,text,uuid)') IS NULL
+     OR to_regprocedure('public.reactivate_business_membership(uuid,text,uuid)') IS NULL
+     OR to_regprocedure('public.set_technical_business_status(uuid,text,text,text,uuid)') IS NULL
+     OR to_regprocedure('public.moderate_business_content_transactionally(uuid,text,text,uuid)') IS NULL
+     OR to_regprocedure('public.create_technical_business_transactional(text,text,text,uuid)') IS NULL THEN
+    RAISE EXCEPTION 'FALLO: faltan RPC transaccionales de membresías o administración técnica.';
+  END IF;
+  IF NOT has_function_privilege('service_role','public.create_business_membership_assignment(uuid,uuid,text,text,text,uuid,boolean)','EXECUTE')
+     OR NOT has_function_privilege('service_role','public.update_business_membership_assignment(uuid,text,text,uuid)','EXECUTE')
+     OR NOT has_function_privilege('service_role','public.suspend_business_membership(uuid,text,uuid)','EXECUTE')
+     OR NOT has_function_privilege('service_role','public.reactivate_business_membership(uuid,text,uuid)','EXECUTE')
+     OR NOT has_function_privilege('service_role','public.set_technical_business_status(uuid,text,text,text,uuid)','EXECUTE')
+     OR NOT has_function_privilege('service_role','public.moderate_business_content_transactionally(uuid,text,text,uuid)','EXECUTE')
+     OR NOT has_function_privilege('service_role','public.create_technical_business_transactional(text,text,text,uuid)','EXECUTE')
+     OR has_function_privilege('anon','public.create_business_membership_assignment(uuid,uuid,text,text,text,uuid,boolean)','EXECUTE')
+     OR has_function_privilege('authenticated','public.create_business_membership_assignment(uuid,uuid,text,text,text,uuid,boolean)','EXECUTE')
+     OR has_function_privilege('anon','public.set_technical_business_status(uuid,text,text,text,uuid)','EXECUTE')
+     OR has_function_privilege('authenticated','public.set_technical_business_status(uuid,text,text,text,uuid)','EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: las RPC técnicas no están restringidas a service_role.';
+  END IF;
+
   RAISE NOTICE 'OK: estructura, RPCs, RLS, privilegios y buckets del paquete están presentes.';
 END
 $verify$;
