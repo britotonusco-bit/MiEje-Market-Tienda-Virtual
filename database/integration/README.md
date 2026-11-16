@@ -284,3 +284,16 @@ Se añadió al informe de límites entre paneles un hallazgo de firma:
 - El paso 17 (`business-expense-audit-draft.sql`) reemplaza la firma por la versión de tres parámetros con referencia opcional.
 
 La confirmación de pagos de gastos no debe marcarse como funcional hasta aplicar y verificar el paso 17 en staging, incluyendo efectivo, transferencia/tarjeta y los casos negativos.
+
+
+### Revisión complementaria de inventario, costos y checkout (16 nov 2026)
+
+El informe de escrituras directas ahora incluye una revisión de inventario, costos, checkout y gastos:
+- La RPC de ajuste de inventario y la tabla de movimientos siguen ausentes de la base activa.
+- El proyecto activo permite UPDATE directo de `products.inventory`; el borrador de límites revoca ese permiso y reserva los ajustes posteriores para la RPC.
+- La Edge Function de checkout invoca tres RPC de idempotencia que no aparecen en el catálogo activo. Solo existe la función antigua `create_public_order`, con contrato y estados distintos.
+- El trigger propuesto para movimientos necesita que checkout y devoluciones indiquen el tipo de movimiento para no registrar ventas como ajustes genéricos.
+- Se corrigió en el borrador financiero una comparación OLD/NEW que podía bloquear la confirmación de pagos de gastos.
+- Guardar producto y costo sigue siendo un proceso de dos solicitudes; puede dejar un guardado parcial si falla la segunda.
+
+No se ejecutó SQL ni se desplegó nada. La comprobación dinámica sigue pendiente de un entorno de staging aislado.
