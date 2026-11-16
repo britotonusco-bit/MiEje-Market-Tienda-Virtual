@@ -846,3 +846,84 @@ GRANT EXECUTE ON FUNCTION public.set_technical_business_status(uuid, text, text,
   TO service_role;
 GRANT EXECUTE ON FUNCTION public.moderate_business_content_transactionally(uuid, text, text, uuid)
   TO service_role;
+
+
+-- Crear un negocio base y su auditoría en una única transacción.
+-- El panel técnico no recibe ni modifica aquí la configuración comercial.
+CREATE OR REPLACE FUNCTION public.create_technical_business_transactional(
+  p_name text,
+  p_category text,
+  p_slug text,
+  p_actor_id uuid
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_actor_role text;
+  v_actor_blocked boolean;
+  v_business public.businesses%ROWTYPE;
+  v_name text := NULLIF(pg_catalog.btrim(p_name), '');
+  v_category text := NULLIF(pg_catalog.btrim(p_category), '');
+  v_slug text := NULLIF(pg_catalog.btrim(p_slug), '');
+BEGIN
+  IF p_actor_id IS NULL
+     OR v_name IS NULL OR pg_catalog.char_length(v_name) NOT BETWEEN 2 AND 160
+     OR v_category IS NULL OR pg_catalog.char_length(v_category) NOT BETWEEN 2 AND 100
+     OR v_slug IS NULL OR pg_catalog.char_length(v_slug) NOT BETWEEN 1 AND 120
+     OR v_slug !~ '^[a-z0-9]+(-[a-z0-9]+)*$' THEN
+    RAISE EXCEPTION 'Nombre, categoría o slug no válido.'
+      USING ERRCODE = '22023';
+  END IF;
+
+  SELECT p.platform_role, p.is_blocked
+    INTO v_actor_role, v_actor_blocked
+  FROM public.profiles AS p
+  WHERE p.id = p_actor_id
+  FOR SHARE;
+
+  IF NOT FOUND OR v_actor_role IS DISTINCT FROM 'platform_owner'
+     OR v_actor_blocked IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'Actor técnico no autorizado.'
+      USING ERRCODE = '42501';
+  END IF;
+
+  INSERT INTO public.businesses (name, category, slug, created_by)
+  VALUES (v_name, v_category, v_slug, p_actor_id)
+  RETURNING * INTO v_business;
+
+  INSERT INTO public.audit_logs (
+    business_id, actor_id, action, entity_type, entity_id, details
+  ) VALUES (
+    v_business.id,
+    p_actor_id,
+    'business.created',
+    'business',
+    v_business.id::text,
+    pg_catalog.jsonb_build_object(
+      'name', v_business.name,
+      'category', v_business.category,
+      'slug', v_business.slug
+    )
+  );
+
+  RETURN pg_catalog.jsonb_build_object(
+    'ok', true,
+    'business', pg_catalog.jsonb_build_object(
+      'id', v_business.id,
+      'name', v_business.name,
+      'slug', v_business.slug,
+      'category', v_business.category,
+      'status', v_business.status,
+      'created_at', v_business.created_at
+    )
+  );
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.create_technical_business_transactional(text, text, text, uuid)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.create_technical_business_transactional(text, text, text, uuid)
+  TO service_role;
