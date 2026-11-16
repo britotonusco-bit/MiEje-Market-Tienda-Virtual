@@ -162,3 +162,17 @@ Hallazgos principales:
 - La limpieza de sesiones de CV existe solo en la rama y depende de una RPC SQL todavía no instalada.
 
 No se hicieron cambios en Supabase ni despliegues. Mantener los cambios en la rama hasta disponer de staging y completar las pruebas descritas en el informe.
+
+
+## Auditoría de recuperación, invitaciones y auditoría de actividad (16 nov 2026)
+
+Informe: [docs/account-recovery-invitations-audit.md](../../docs/account-recovery-invitations-audit.md).
+
+Hallazgos principales:
+- Una cuenta existente sin correo confirmado puede recibir una membresía, pero el flujo no reenvía automáticamente la confirmación. Falta un proceso seguro de reenvío, expiración y revocación.
+- La recuperación de contraseña exige el evento `PASSWORD_RECOVERY`; la rama ahora limpia los parámetros de la URL después de validar el enlace.
+- La rama deja de duplicar el correo del usuario en los detalles del evento `panel.login`; `actor_id` ya identifica al actor.
+- `audit_logs` no permite escrituras directas desde `anon` o `authenticated`, pero `service_role` sí tiene UPDATE/DELETE y no existe trigger de inmutabilidad. Se requiere definir retención y protección append-only antes de cerrar la auditoría.
+- El comentario de `supabase/config.toml` ahora documenta el secreto independiente `JOB_APPLICATION_CLEANUP_SECRET`.
+
+Los cambios de código están solo en `correcciones-funcionales`. No se modificó Auth, no se enviaron correos, no se ejecutó SQL y no se desplegó nada.
