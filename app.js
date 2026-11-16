@@ -439,7 +439,7 @@
           <p class="eyebrow">${escapeHtml(business.name)}</p>
           <h3>${escapeHtml(page.title)}</h3>
           <p>${escapeHtml(page.body)}</p>
-          <button class="button secondary" type="button" data-action="store" data-business="${escapeHtml(business.id)}">Ver promoción en la tienda</button>
+          <button class="button secondary" type="button" data-action="open-store" data-business="${escapeHtml(business.id)}">Ver promoción en la tienda</button>
         </article>`).join("");
       $("#publicPromotionsEmpty")?.classList.toggle("hidden", promotions.length > 0);
     }
@@ -454,7 +454,7 @@
           <p class="eyebrow">${escapeHtml(business.name)}</p>
           <h3>${escapeHtml(page.title)}</h3>
           <p>${escapeHtml(page.body)}</p>
-          <button class="button secondary" type="button" data-action="store" data-business="${escapeHtml(business.id)}">Ver convocatoria y postularme</button>
+          <button class="button secondary" type="button" data-action="open-store" data-business="${escapeHtml(business.id)}">Ver convocatoria y postularme</button>
         </article>`).join("");
       $("#publicJobsEmpty")?.classList.toggle("hidden", jobs.length > 0);
     }
@@ -1328,6 +1328,7 @@
   loadPlatformBranding();
   loadRegisteredBusinesses().finally(() => {
     renderFeatured();
+    renderPublicSections();
     renderListing();
     updateCart();
   });
