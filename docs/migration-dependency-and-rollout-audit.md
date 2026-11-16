@@ -114,7 +114,7 @@ El orden de `database/integration/README.md` también estaba incompleto: omitía
 
 ### 3.9 Incompatibilidad entre UPSERT y permisos de costos corregida
 
-La interfaz usaba `upsert` sobre `product_costs` incluyendo `product_id` y `business_id`. La migración de límites de negocio revoca UPDATE sobre esas columnas y solo concede UPDATE de `cost_price` y `updated_at`; un conflicto de clave única podía fallar al intentar actualizar la fila existente. Se modificó `panel-live.js` para consultar primero la fila y realizar INSERT o UPDATE con las columnas permitidas, incluyendo una recuperación si otra sesión inserta simultáneamente el mismo costo.
+La interfaz usaba `upsert` sobre `product_costs` incluyendo `product_id` y `business_id`. La migración de límites de negocio revoca UPDATE sobre esas columnas y solo concede UPDATE de `cost_price` y `updated_at`; un conflicto de clave única podía fallar al intentar actualizar la fila existente. Se modificó `panel-live.js` para consultar primero la fila y realizar INSERT o UPDATE con las columnas permitidas, incluyendo una recuperación si otra sesión inserta simultáneamente el mismo costo. Se aplicó la misma corrección a `business_ai_settings`, cuyo UPSERT enviaba la clave `business_id` aunque el grant de UPDATE la mantiene inmutable.
 
 ### 3.10 Cobertura del verificador posterior ampliada
 
