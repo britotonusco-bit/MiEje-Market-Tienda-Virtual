@@ -1024,6 +1024,10 @@
       if (!business || !window.supabase || !window.MIEJE_SUPABASE_URL || !window.MIEJE_SUPABASE_PUBLISHABLE_KEY) { showToast("No se pudo enviar la postulación en este momento."); return; }
       const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
       const formData = new FormData(jobForm);
+      if (formData.get("privacy_consent") !== "on") {
+        showToast("Autoriza el tratamiento de datos antes de enviar tu postulación.");
+        return;
+      }
       const applicationData = Object.fromEntries([...formData.entries()].filter(([key]) => key.startsWith("custom_field_")).map(([key, value]) => [key, String(value).trim()]));
       const resumeFile = formData.get("resume");
       const submitButton = jobForm.querySelector('button[type="submit"]');
@@ -1036,6 +1040,7 @@
           const { data: uploadRequest, error: requestError } = await client.functions.invoke("create-job-application", {
             body: {
               action: "request_upload",
+              privacy_consent: formData.get("privacy_consent") === "on",
               website: String(formData.get("website") || ""),
               business_id: business.id,
               content_page_id: jobForm.dataset.jobPage,
