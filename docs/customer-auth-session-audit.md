@@ -419,3 +419,10 @@ La interfaz de cliente reconoce `received`, `confirmed`, `preparing`, `ready`, `
 ### Resultado
 
 El historial de cliente y favoritos no están operativos en la base activa por ausencia de columna, tabla, RPC y políticas de propiedad. El seguimiento público sí tiene una Edge Function desplegada y un token UUID generado por la base, pero requiere rate limit, minimización de datos, control del texto público y sincronización de la versión desplegada con la rama. No se crearon pedidos, no se consultaron datos personales de pedidos, no se modificó SQL, no se desplegó código y no se realizaron pruebas de escritura.
+
+
+### 8. Actualización del seguimiento en pantalla
+
+La consulta de `app.js` confirma que el seguimiento se solicita únicamente cuando el cliente envía el formulario. No se encontró una suscripción Realtime, consulta periódica ni mecanismo de actualización automática para ese componente. Por eso, después de consultar el pedido, un cambio posterior de estado no aparece hasta que el cliente vuelve a enviar el código.
+
+**Pendiente:** añadir una actualización manual visible (“Actualizar estado”) o una consulta periódica moderada con intervalo y cancelación al salir de la pantalla. Si se usa Realtime, no publicar filas completas de pedidos ni suscribirse sin control de acceso; el canal debe entregar solo el evento mínimo permitido. En todos los casos, la lectura final debe seguir pasando por el endpoint que valida el token privado.
