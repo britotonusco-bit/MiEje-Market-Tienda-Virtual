@@ -112,7 +112,11 @@ Se detectó además que `business-admin-boundaries.sql` ya creaba `business_memb
 
 El orden de `database/integration/README.md` también estaba incompleto: omitía módulos de inventario, métodos de pago atómicos, gastos, RPC administrativas de membresías y limpieza de postulaciones. Se actualizó para incluirlos y separar MFA como etapa condicionada.
 
-### 3.9 Cobertura del verificador posterior ampliada
+### 3.9 Incompatibilidad entre UPSERT y permisos de costos corregida
+
+La interfaz usaba `upsert` sobre `product_costs` incluyendo `product_id` y `business_id`. La migración de límites de negocio revoca UPDATE sobre esas columnas y solo concede UPDATE de `cost_price` y `updated_at`; un conflicto de clave única podía fallar al intentar actualizar la fila existente. Se modificó `panel-live.js` para consultar primero la fila y realizar INSERT o UPDATE con las columnas permitidas, incluyendo una recuperación si otra sesión inserta simultáneamente el mismo costo.
+
+### 3.10 Cobertura del verificador posterior ampliada
 
 La versión inicial de `verify-integration-package.sql` no comprobaba `inventory_movements`, sus triggers, `save_business_payment_methods` ni las siete RPC de `administrative-membership-rpcs-draft.sql`. Se añadieron aserciones de existencia, RLS, triggers y permisos, incluyendo grants por columna para métodos de pago y ejecución exclusiva de las RPC técnicas por `service_role`.
 
