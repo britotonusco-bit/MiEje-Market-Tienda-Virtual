@@ -590,3 +590,17 @@ El endpoint público `track-public-order` acepta un UUID aleatorio como código 
 10. Todas las respuestas que contienen datos privados usan `Cache-Control: no-store`.
 
 La base activa sigue con los permisos antiguos hasta aplicar el paquete de migraciones. No se ejecutaron SQL ni Edge deploys; los cambios de seguimiento se guardaron únicamente en la rama.
+
+
+### Evidencia del consentimiento y ciclo de vida de datos
+
+La tabla live `job_applications` almacena `privacy_consent boolean`, pero no se observaron columnas para registrar cuándo se otorgó la autorización ni qué versión del aviso/política se presentó. El endpoint exige que el valor sea `true`, pero ese dato por sí solo no conserva evidencia suficiente del momento y texto de la autorización.
+
+Pendiente para la siguiente corrección:
+- registrar fecha/hora del consentimiento en servidor;
+- registrar identificador o versión del aviso de privacidad mostrado al postulante;
+- conservar el texto o una referencia inmutable a esa versión;
+- evitar aceptar versiones arbitrarias enviadas por el navegador;
+- definir un plazo de conservación y proceso de eliminación/anonimización para postulaciones, sin borrar registros que deban conservarse por obligación legal o auditoría.
+
+La misma revisión de ciclo de vida debe definir cómo un cliente solicita corrección o eliminación de datos personales y cómo se conserva la trazabilidad comercial de pedidos sin mantener innecesariamente datos identificables.
