@@ -20,6 +20,159 @@ COMMENT ON COLUMN public.business_memberships.job_title IS
   'Cargo descriptivo de la persona dentro del negocio; no sustituye el rol de acceso.';
 
 
+-- Crear una asignación y su auditoría en una sola transacción.
+-- La creación de usuarios y el envío de correo siguen siendo operaciones de Auth
+-- fuera de PostgreSQL; esta RPC solo finaliza la asignación después de Auth.
+CREATE OR REPLACE FUNCTION public.create_business_membership_assignment(
+  p_business_id uuid,
+  p_user_id uuid,
+  p_role text,
+  p_job_title text,
+  p_display_name text,
+  p_actor_id uuid,
+  p_invitation_sent boolean DEFAULT false
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_actor_role text;
+  v_actor_blocked boolean;
+  v_business_status text;
+  v_profile_blocked boolean;
+  v_profile_name text;
+  v_existing public.business_memberships%ROWTYPE;
+  v_membership public.business_memberships%ROWTYPE;
+  v_job_title text := NULLIF(pg_catalog.btrim(p_job_title), '');
+  v_display_name text := NULLIF(pg_catalog.btrim(p_display_name), '');
+BEGIN
+  IF p_business_id IS NULL OR p_user_id IS NULL OR p_actor_id IS NULL
+     OR p_role IS NULL OR p_role NOT IN ('business_admin', 'employee')
+     OR v_job_title IS NULL OR pg_catalog.char_length(v_job_title) NOT BETWEEN 2 AND 100
+     OR v_display_name IS NULL OR pg_catalog.char_length(v_display_name) NOT BETWEEN 3 AND 160
+     OR p_invitation_sent IS NULL THEN
+    RAISE EXCEPTION 'Datos de asignación o invitación no válidos.'
+      USING ERRCODE = '22023';
+  END IF;
+
+  SELECT p.platform_role, p.is_blocked
+    INTO v_actor_role, v_actor_blocked
+  FROM public.profiles AS p
+  WHERE p.id = p_actor_id
+  FOR SHARE;
+
+  IF NOT FOUND OR v_actor_role IS DISTINCT FROM 'platform_owner'
+     OR v_actor_blocked IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'Actor técnico no autorizado.' USING ERRCODE = '42501';
+  END IF;
+
+  -- Todas las mutaciones de membresías empiezan bloqueando el negocio.
+  SELECT b.status INTO v_business_status
+  FROM public.businesses AS b
+  WHERE b.id = p_business_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'No se encontró el negocio.' USING ERRCODE = 'P0002';
+  END IF;
+
+  IF v_business_status <> 'active' THEN
+    RAISE EXCEPTION 'No se pueden asignar usuarios a un negocio suspendido o cerrado.'
+      USING ERRCODE = '23514';
+  END IF;
+
+  SELECT p.is_blocked, p.display_name
+    INTO v_profile_blocked, v_profile_name
+  FROM public.profiles AS p
+  WHERE p.id = p_user_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'La cuenta de Auth no tiene un perfil creado.'
+      USING ERRCODE = '23503';
+  END IF;
+
+  IF v_profile_blocked IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'No se puede asignar acceso a una cuenta bloqueada globalmente.'
+      USING ERRCODE = '42501';
+  END IF;
+
+  SELECT m.* INTO v_existing
+  FROM public.business_memberships AS m
+  WHERE m.business_id = p_business_id
+    AND m.user_id = p_user_id
+  FOR UPDATE;
+
+  IF FOUND THEN
+    RETURN pg_catalog.jsonb_build_object(
+      'ok', true,
+      'already_assigned', true,
+      'membership', pg_catalog.jsonb_build_object(
+        'id', v_existing.id,
+        'business_id', v_existing.business_id,
+        'user_id', v_existing.user_id,
+        'role', v_existing.role,
+        'status', v_existing.status,
+        'job_title', v_existing.job_title
+      )
+    );
+  END IF;
+
+  IF v_profile_name IS NULL OR pg_catalog.btrim(v_profile_name) = '' THEN
+    UPDATE public.profiles
+    SET display_name = v_display_name
+    WHERE id = p_user_id;
+  END IF;
+
+  INSERT INTO public.business_memberships (
+    business_id, user_id, role, job_title, status, created_by
+  ) VALUES (
+    p_business_id, p_user_id, p_role, v_job_title, 'active', p_actor_id
+  )
+  RETURNING * INTO v_membership;
+
+  INSERT INTO public.audit_logs (
+    business_id, actor_id, action, entity_type, entity_id, details
+  ) VALUES (
+    p_business_id,
+    p_actor_id,
+    CASE WHEN p_invitation_sent
+      THEN 'business.member_invited'
+      ELSE 'business.member_assigned'
+    END,
+    'business_membership',
+    v_membership.id::text,
+    pg_catalog.jsonb_build_object(
+      'target_user_id', p_user_id,
+      'role', p_role,
+      'job_title', v_job_title,
+      'invitation_sent', p_invitation_sent
+    )
+  );
+
+  RETURN pg_catalog.jsonb_build_object(
+    'ok', true,
+    'already_assigned', false,
+    'membership', pg_catalog.jsonb_build_object(
+      'id', v_membership.id,
+      'business_id', v_membership.business_id,
+      'user_id', v_membership.user_id,
+      'role', v_membership.role,
+      'status', v_membership.status,
+      'job_title', v_membership.job_title
+    )
+  );
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.create_business_membership_assignment(uuid, uuid, text, text, text, uuid, boolean)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.create_business_membership_assignment(uuid, uuid, text, text, text, uuid, boolean)
+  TO service_role;
+
+
 -- Cambiar rol/cargo con bloqueo del negocio, validación de último administrador
 -- y auditoría en una sola transacción.
 CREATE OR REPLACE FUNCTION public.update_business_membership_assignment(
