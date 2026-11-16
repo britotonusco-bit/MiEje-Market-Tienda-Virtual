@@ -507,3 +507,56 @@ Se corrigió `database/finance/business-expense-audit-draft.sql` para:
 - conservar la lectura RLS del administrador y las escrituras mediante RPCs auditadas.
 
 Los procedimientos de gastos son SECURITY DEFINER, validan `auth.uid()`, negocio activo y rol `business_admin`, y registran auditoría dentro de la misma transacción. El cambio es solo un borrador en la rama; verificar en staging que las cuatro RPCs sigan funcionando y que los intentos de INSERT/UPDATE/DELETE directo fallen para authenticated.
+
+
+## Auditoría de Storage y documentos privados — 16 nov 2026
+
+### Estado comprobado en Supabase activo (solo lectura)
+
+Buckets:
+- `business-assets`: público, límite 5 MiB, PNG/JPEG/WEBP. Su lectura pública es coherente con imágenes de catálogo y logos; no debe almacenar CV, comprobantes ni documentos privados.
+- `job-applications-private`: privado, límite 5 MiB, PDF/DOC/DOCX.
+- `business-expense-receipts`: todavía no existe en la base activa.
+
+Políticas observadas:
+- Las cuatro políticas activas de `business-assets` tienen un error en la subconsulta: intentan obtener el UUID del negocio desde `storage.foldername(b.name)`, usando el nombre del negocio en lugar de la ruta del objeto. Esto puede impedir operaciones legítimas de administradores. `database/security/storage-policy-fix.sql` corrige la referencia a `storage.foldername(objects.name)` y valida la carpeta `<business_uuid>/<logo|products>/<file>`.
+- La política activa de lectura de `job-applications-private` solo valida el bucket, el UUID de la carpeta del negocio y la membresía de administrador. No exige que la segunda carpeta sea el UUID de una postulación ni que el nombre del archivo coincida con el `resume_path` de esa postulación. Esto deja accesibles al administrador de un negocio objetos huérfanos o archivos que no estén asociados a una postulación.
+- El borrador `database/security/storage-policy-fix.sql` reemplaza esa política por una validación más estricta: negocio activo, rol administrador, UUID de negocio y postulación, nombre de archivo UUID con extensión permitida y coincidencia exacta con `job_applications.resume_path`. Los empleados no reciben lectura del bucket privado.
+- La tabla `job_applications` permite SELECT y UPDATE a administradores de negocio, no a empleados. La función pública de envío y la de rate limit no son ejecutables por anon ni authenticated; solo service_role, y ambas son SECURITY DEFINER con `search_path` vacío.
+
+### Flujo de hojas de vida
+
+La Edge Function `create-job-application`:
+- comprueba que el negocio esté activo y que la vacante esté publicada y aprobada;
+- limita la carga a PDF/DOC/DOCX y 5 MiB según MIME y extensión declarados;
+- crea una sesión de carga con vencimiento de 30 minutos y una ruta aleatoria;
+- genera una URL/token firmado de carga sin upsert;
+- al enviar la postulación verifica sesión, ruta, vencimiento y existencia/tamaño del objeto;
+- la RPC consume la sesión una sola vez dentro de la transacción de inserción.
+
+Pendiente de endurecimiento: la comprobación de tamaño y MIME del cliente/metadata no demuestra que el contenido real sea un documento legítimo ni que esté libre de malware. Antes de producción con CV reales, incorporar validación del contenido y análisis antimalware en un flujo aislado, sin hacer públicos los archivos ni servirlos inline.
+
+### Comprobantes de gastos
+
+El borrador `database/finance/expense-receipts-storage-draft.sql` crea el bucket `business-expense-receipts` como privado, con límite 5 MiB y PDF/JPG/PNG/WEBP. Permite:
+- lectura únicamente al administrador del negocio activo al que pertenece el gasto;
+- carga únicamente a ese administrador y para gastos activos;
+- rutas `<business_uuid>/<expense_uuid>/<random_uuid>.<extension>`;
+- conservar comprobantes de gastos anulados para auditoría;
+- no permitir UPDATE ni DELETE de objetos.
+
+La RPC `attach_business_expense_receipt` verifica que el archivo exista, que la ruta corresponda al negocio y gasto, que el gasto siga activo y sin comprobante previo, y registra auditoría. La interfaz usa enlaces firmados de 5 minutos.
+
+### Pruebas requeridas en staging
+
+1. Administrador del negocio A puede subir y leer solo logos/productos del negocio A.
+2. Administrador A no puede listar, leer, reemplazar ni borrar archivos del negocio B.
+3. Empleado y propietario técnico no pueden gestionar objetos comerciales privados de otros negocios mediante Storage.
+4. El bucket público `business-assets` solo contiene imágenes destinadas a publicación.
+5. Administrador A puede generar enlace firmado para CV de una postulación de A; no puede hacerlo para CV de B, objetos huérfanos ni rutas inventadas.
+6. Empleado, cliente anónimo y administrador de otro negocio no pueden descargar CV.
+7. Los tokens de carga de CV expiran y no pueden reutilizarse para una segunda postulación.
+8. Comprobantes de gastos solo se cargan/leen por el administrador del negocio correcto; no se reemplazan ni eliminan y permanecen disponibles para auditoría tras anular el gasto.
+9. Verificar validación de contenido real y antimalware antes de habilitar cargas de CV en producción.
+
+No se ejecutaron cambios de Storage, no se subieron ni descargaron archivos y no se desplegó ninguna Edge Function.
