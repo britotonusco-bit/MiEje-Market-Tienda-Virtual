@@ -112,3 +112,12 @@ La cuenta de cliente permite registrarse, iniciar sesión, consultar el historia
 ## Límites
 
 Este documento se guarda únicamente en `correcciones-funcionales`. No se ejecutó SQL de escritura, no se modificaron usuarios ni sesiones, no se alteró Auth o Storage, no se desplegó una Edge Function, no se fusionó ningún PR, no se modificó `main` y no se publicó GitHub Pages.
+
+
+## Inconsistencia detectada: aviso de tratamiento frente al checkout — 16 nov 2026
+
+La sección 7 del aviso de tratamiento de datos y los apartados de pedidos/pagos de los términos en `app.js` todavía describen el formulario como una demostración local que no guarda ni envía pedidos. En el mismo código, el checkout invoca `create-public-order`, que llama a la RPC `create_public_order`; el seguimiento también usa la Edge Function `track-public-order`.
+
+Por tanto, los textos publicados no describen con precisión el flujo técnico actual. La consulta de solo lectura encontró cero pedidos en la tabla activa, pero eso no elimina el hecho de que el código puede transmitir y almacenar datos personales cuando se utiliza.
+
+**Pendiente antes de activar el servicio:** actualizar política, aviso y términos para identificar qué datos de cliente/domicilio se recogen, quién decide el tratamiento, finalidades, proveedores reales, conservación, derechos, pagos, entrega, cancelaciones y canales de comunicación. Distinguir mensajes necesarios para gestionar una compra de comunicaciones promocionales. Completar los datos del responsable que siguen como marcadores `[COMPLETAR]` y validar los textos con asesoría legal colombiana. No se modificaron los textos legales en esta auditoría.
