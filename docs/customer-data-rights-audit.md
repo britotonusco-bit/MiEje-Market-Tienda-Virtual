@@ -252,3 +252,10 @@ Commits de la rama:
 - No se descargaron archivos ni se consultaron filas reales de postulantes.
 
 **Resultado:** no se detectó una vía de lectura pública en las políticas inspeccionadas ni una consulta del panel sin filtro de negocio. No se modificó código en este paso porque los controles existentes observados ya aplican la separación por negocio. Quedan pendientes pruebas dinámicas, paginación/descarga bajo demanda, conservación y evidencia de consentimiento versionada.
+
+
+### Mejora de descarga bajo demanda — 16 nov 2026
+
+Se modificó `panel-live.js` para que el panel no genere hasta 100 enlaces firmados al cargar la lista. Ahora muestra un botón por CV y solicita el enlace firmado de 300 segundos únicamente cuando el administrador pulsa Descargar. La ventana se abre durante la interacción para evitar que el navegador bloquee la descarga después de la respuesta asíncrona; si la creación del enlace falla, se cierra la ventana temporal. El servidor Storage sigue aplicando la política RLS del bucket.
+
+Verificación estática posterior al guardado: se confirmó que el archivo de la rama contiene el botón `data-download-resume`, la llamada `createSignedUrl(path, 300, ...)`, la apertura previa de ventana y que ya no usa `Promise.all(rows.map(async ...))` para generar enlaces durante la carga. No se ejecutó una prueba de navegador ni se descargó ningún CV real.
