@@ -1352,12 +1352,20 @@
     target.querySelectorAll('[data-download-resume]').forEach(button => button.addEventListener('click', async () => {
       const path = button.dataset.resumePath;
       button.disabled = true;
+      const downloadWindow = window.open('about:blank', '_blank');
+      if (!downloadWindow) {
+        alert('El navegador bloqueó la nueva ventana. Permite las ventanas emergentes para descargar la hoja de vida.');
+        button.disabled = false;
+        return;
+      }
+      downloadWindow.opener = null;
       try {
         const { data, error: signedError } = await db.storage.from('job-applications-private')
           .createSignedUrl(path, 300, { download: true });
         if (signedError || !data?.signedUrl) throw signedError || new Error('No se pudo crear el enlace temporal.');
-        window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+        downloadWindow.location.replace(data.signedUrl);
       } catch (error) {
+        downloadWindow.close();
         alert('No se pudo abrir la hoja de vida: ' + (error.message || 'Error desconocido'));
       } finally {
         button.disabled = false;
