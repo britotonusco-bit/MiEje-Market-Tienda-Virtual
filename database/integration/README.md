@@ -309,3 +309,8 @@ El informe también documenta los bloqueos detectados en cancelaciones, reembols
 - El tipo de movimiento `cancellation_return` existe solo en el borrador; no hay una operación activa que restituya stock de forma atómica y única.
 
 No se hicieron cancelaciones, reembolsos, cambios de inventario ni migraciones. La corrección y las pruebas siguen pendientes de staging aislado.
+
+
+### Seguimiento público e historial de clientes
+
+El historial y los favoritos dependen de las migraciones 8, 12 y 13; no están activos en el proyecto inspeccionado. La función `track-public-order` está desplegada como versión 1 con `verify_jwt=false`, usa un token UUID como credencial de posesión y aún necesita rate limit, minimización de datos y validación del texto de seguimiento. La versión desplegada no coincide con la fuente de la rama. Antes de habilitar esta función al público, incluir en staging las pruebas 1–10 de `docs/customer-auth-session-audit.md` (apartado “Auditoría adicional: historial y seguimiento público”), actualizar la Edge Function desde la rama probada y verificar que no devuelva importes ni texto sensible. No desplegar en el proyecto activo sin autorización expresa.
