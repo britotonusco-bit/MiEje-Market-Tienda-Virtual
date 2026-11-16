@@ -223,11 +223,13 @@ USING (
 
 -- El trigger también bloquea cambios de estado cuando el negocio está suspendido
 -- y elimina el bypass del propietario técnico.
--- Normalizar los estados históricos de pedidos al flujo que utiliza la interfaz.
--- La restricción anterior se retira temporalmente para permitir la conversión.
+-- La conversión histórica se realiza sin disparar el trigger anterior.
+-- El bloque es atómico: si falla la conversión o la nueva restricción,
+-- PostgreSQL revierte también la desactivación temporal del trigger.
+BEGIN;
 ALTER TABLE public.orders
   DROP CONSTRAINT IF EXISTS orders_status_check;
-
+ALTER TABLE public.orders DISABLE TRIGGER orders_enforce_status_transition;
 UPDATE public.orders
 SET status = CASE status
   WHEN 'pending' THEN 'received'
@@ -235,7 +237,7 @@ SET status = CASE status
   ELSE status
 END
 WHERE status IN ('pending', 'out_for_delivery');
-
+ALTER TABLE public.orders ENABLE TRIGGER orders_enforce_status_transition;
 ALTER TABLE public.orders
   ADD CONSTRAINT orders_status_check
   CHECK (status = ANY (ARRAY[
@@ -247,9 +249,9 @@ ALTER TABLE public.orders
     'delivered'::text,
     'cancelled'::text
   ]));
-
 ALTER TABLE public.orders
   ALTER COLUMN status SET DEFAULT 'received';
+COMMIT;
 
 CREATE OR REPLACE FUNCTION private.enforce_order_status_transition()
 RETURNS trigger
