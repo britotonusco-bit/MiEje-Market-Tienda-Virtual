@@ -550,3 +550,35 @@ button:focus-visible,input:focus-visible,select:focus-visible {
 .job-application-form label{display:grid;gap:6px;font-weight:600;font-size:14px}
 .job-application-form input,.job-application-form textarea{width:100%;padding:10px 12px;border:1px solid #d5dfe6;border-radius:9px;font:inherit}
 .job-application-form input[type="checkbox"]{width:auto}
+
+
+/* Estado accesible para imágenes de negocios o productos que no cargan. */
+.product-card { position:relative; }
+.business-image .image-fallback,
+.product-card .image-fallback {
+  position:absolute;
+  inset:0;
+  z-index:0;
+  display:grid;
+  place-items:center;
+  padding:12px;
+  background:#e6e9df;
+  color:#536078;
+  font-size:12px;
+  font-weight:700;
+  text-align:center;
+}
+.business-image .business-badge { z-index:1; }
+.store-hero.image-unavailable { background:linear-gradient(135deg,#172440,#334b6c); }
+.store-hero .image-fallback {
+  position:absolute;
+  inset:0;
+  z-index:0;
+  display:grid;
+  place-items:center;
+  color:#fff;
+  font-size:13px;
+  font-weight:700;
+}
+.store-hero:after { z-index:1; }
+.store-hero-copy { z-index:2; }
