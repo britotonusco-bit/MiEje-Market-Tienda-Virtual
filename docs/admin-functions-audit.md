@@ -137,3 +137,30 @@ Los borradores correspondientes están en la rama, pero las acciones que depende
 - Consultas SQL de políticas RLS, permisos de columnas, tablas y funciones: realizadas en modo lectura.
 - Pruebas E2E, MFA AAL1/AAL2, concurrencia e invitaciones: pendientes; no hay entorno de ensayo disponible.
 - SQL de escritura, cambios Auth, despliegues, cambios de membresía, fusión de PR y publicación: no realizados.
+
+
+## Continuación — límites de negocio y último administrador (16 nov 2026)
+
+### Confirmación adicional en producción
+
+- No existe actualmente un trigger sobre `business_memberships` que proteja al último administrador activo. Los únicos triggers encontrados son los de actualización de fecha.
+- `authenticated` solo tiene permiso SELECT directo en `business_memberships`; las escrituras están reservadas a `service_role`. La protección debe cubrir las mutaciones ejecutadas desde las Edge Functions y RPC privilegiadas.
+- Los helpers `private.has_business_role` y `private.business_is_active` usan `SECURITY DEFINER`, `search_path = ''`, comprueban membresía activa y perfil no bloqueado. No se encontró un helper global que permita a una cuenta bloqueada seguir autorizada por rol.
+- La política activa `businesses_admin_update` y los permisos de columnas confirmados mantienen el bypass técnico descrito en el hallazgo crítico.
+
+### Ajuste del borrador en la rama
+
+Se ajustó `private.guard_last_active_business_admin()` dentro de `database/security/business-admin-boundaries.sql` para que use el comportamiento predeterminado `SECURITY INVOKER`, en lugar de `SECURITY DEFINER`. El trigger necesita leer las filas como parte de la mutación privilegiada ejecutada por el servidor; el rol `service_role` ya dispone de SELECT sobre las tablas necesarias. Así se evita conceder al trigger un bypass de RLS que no necesita.
+
+La función sigue bloqueando la fila del negocio antes de contar administradores activos y rechaza retirar o trasladar la última membresía administrativa activa. El cambio fue guardado y verificado en la rama `correcciones-funcionales`.
+
+- Commit del ajuste: `eafb0d0fa308631bd59cb9b8323382fa5d5f4a2a`.
+- SHA del archivo verificado: `9e657196d6eda1325b7932c81d1db720dc458d55`.
+
+### Verificación pendiente
+
+No se ejecutó el trigger ni se aplicó el SQL. Antes de producción hay que probar en ensayo: dos cambios concurrentes sobre administradores distintos, eliminación de membresía, cambio de rol, suspensión, y fallo de auditoría. También hay que comprobar que los flujos de Edge Function usan `service_role` para las escrituras previstas y que no hay otro rol de aplicación con permisos de modificación.
+
+### Nota de compatibilidad Supabase
+
+El changelog de Supabase indica que, desde el 30 de octubre de 2026, las tablas nuevas en `public` ya no quedan expuestas automáticamente a la Data API; se requieren grants explícitos además de RLS. Los borradores nuevos deben seguir declarando los grants mínimos y las políticas correspondientes. <https://supabase.com/changelog/45329-breaking-change-tables-not-exposed-to-data-and-graphql-api-automatically>
