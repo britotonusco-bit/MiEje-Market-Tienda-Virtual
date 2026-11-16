@@ -24,7 +24,7 @@ El repositorio ya contiene `database/integration/README.md` con una secuencia pr
 |---:|---|---|---|
 | 1 | `database/platform/platform-public-settings-draft.sql` | `profiles` y `audit_logs` | Crea la configuración global; su lectura pública la realiza la Edge Function `get-platform-public-settings`, que devuelve solo campos permitidos. |
 | 2 | `database/security/business-admin-boundaries.sql` | Esquema base de negocios, membresías, productos, pedidos, costos, gastos, pagos, páginas y postulaciones; helpers de negocio | Establece los límites RLS, grants, columnas y estados canónicos que usan otros módulos. |
-| 3 | `database/security/administrative-membership-rpcs-draft.sql` | Paso 2, perfiles, negocios, membresías y auditoría | Añade `business_memberships.job_title` y siete RPC transaccionales invocadas por la Edge Function técnica. |
+| 3 | `database/security/administrative-membership-rpcs-draft.sql` | Paso 2, perfiles, negocios, membresías y auditoría | Depende de `business_memberships.job_title` creada en el paso 2 y crea siete RPC transaccionales invocadas por la Edge Function técnica. |
 | 4 | `database/platform/platform-finance-payroll-draft.sql` | Negocios, perfiles y `audit_logs` | Crea el libro financiero de plataforma, nómina y RPCs reservadas a `service_role`. |
 | 5 | `database/ai/ai-settings-draft.sql` | Helpers de membresía, perfiles y `audit_logs` | Crea configuración IA por negocio y configuración global privada. |
 | 6 | `database/security/access-block-requests-draft.sql` | Helpers, membresías, negocios y protección de último administrador del paso 2 | Crea solicitudes de bloqueo y RPC de resolución técnica. |
@@ -108,6 +108,8 @@ La Edge Function de limpieza debe desplegarse solo cuando esta RPC y su contrato
 
 La primera versión de `database/integration/00-preflight.sql` trataba `platform_financial_records`, `payroll_records` y `access_block_requests` como dependencias preexistentes, aunque los propios borradores las crean. También comprobaba columnas de esas tablas nuevas y una RPC que aún no existía. Eso producía falsos avisos antes de migrar. Se corrigió el archivo para comprobar solo objetos base y dejar la verificación de objetos nuevos a `verify-integration-package.sql`.
 
+Se detectó además que `business-admin-boundaries.sql` ya creaba `business_memberships.job_title`, aunque `administrative-membership-rpcs-draft.sql` volvía a declararla. Se retiró la segunda declaración y se aclaró la dependencia.
+
 El orden de `database/integration/README.md` también estaba incompleto: omitía módulos de inventario, métodos de pago atómicos, gastos, RPC administrativas de membresías y limpieza de postulaciones. Se actualizó para incluirlos y separar MFA como etapa condicionada.
 
 ### 3.9 Cobertura del verificador posterior ampliada
@@ -138,7 +140,7 @@ El verificador ampliado sigue pendiente de ejecución en staging: la revisión e
 La consulta de solo lectura confirmó:
 - Existen las tablas base: `profiles`, `businesses`, `business_memberships`, `products`, `orders`, `order_items`, `business_payment_methods`, `audit_logs`, `business_expenses`, `financial_transactions`, `order_cancellation_requests`, `refund_details`, `product_costs`, `order_item_costs`, `business_content_pages`, `job_applications` y `job_application_upload_sessions`.
 - No existen todavía: `customer_favorites`, `inventory_movements`, `private.checkout_idempotency`, `private.checkout_rate_limit_reservations`, `business_ai_settings`, `platform_ai_settings`, `platform_public_settings`, `platform_financial_records`, `payroll_records` ni `access_block_requests`.
-- La columna `business_memberships.job_title` tampoco existe en la base activa; la añade `administrative-membership-rpcs-draft.sql`.
+- La columna `business_memberships.job_title` tampoco existe en la base activa; la crea `business-admin-boundaries.sql` en el paso 2. El borrador de RPC administrativas antes repetía un `ADD COLUMN IF NOT EXISTS`; se retiró esa duplicación para mantener una sola definición.
 - No existen todavía las RPC nuevas de inventario, finanzas de pedidos, historial de clientes, cancelaciones, reembolsos, métodos de pago atómicos, configuración global y asignación/administración transaccional de membresías.
 - Sí existen los helpers `private.business_is_active(uuid)`, `private.has_business_role(uuid,text[])`, `private.is_platform_owner()` y el checkout base `public.create_public_order(...)`.
 - El trigger de pedidos está activo y apunta a `private.enforce_order_status_transition()`.
