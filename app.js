@@ -210,25 +210,40 @@
     return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
   }
 
-  function restorePendingCheckout(fingerprint) {
+  function readPendingCheckout() {
+    const raw = window.sessionStorage.getItem(checkoutSessionKey);
+    if (!raw) return null;
+
+    let saved;
     try {
-      const saved = JSON.parse(window.sessionStorage.getItem(checkoutSessionKey) || "null");
-      if (saved?.fingerprint === fingerprint
-          && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(saved.idempotencyKey || "")) {
-        return { fingerprint, idempotencyKey: saved.idempotencyKey };
-      }
-      window.sessionStorage.removeItem(checkoutSessionKey);
+      saved = JSON.parse(raw);
     } catch (error) {
-      console.warn("No se pudo recuperar la clave temporal del checkout.", error);
+      console.warn("La clave temporal del checkout estaba dañada y se descartó.", error);
+      window.sessionStorage.removeItem(checkoutSessionKey);
+      return null;
     }
-    return null;
+
+    if (typeof saved?.fingerprint !== "string"
+        || !/^[0-9a-f]{64}$/i.test(saved.fingerprint)
+        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(saved.idempotencyKey || "")) {
+      window.sessionStorage.removeItem(checkoutSessionKey);
+      return null;
+    }
+    return { fingerprint: saved.fingerprint, idempotencyKey: saved.idempotencyKey };
+  }
+
+  function restorePendingCheckout(fingerprint) {
+    const saved = readPendingCheckout();
+    return saved?.fingerprint === fingerprint ? saved : null;
   }
 
   function savePendingCheckout(request) {
     try {
       window.sessionStorage.setItem(checkoutSessionKey, JSON.stringify(request));
+      return true;
     } catch (error) {
       console.warn("No se pudo guardar la clave temporal del checkout.", error);
+      return false;
     }
   }
 
@@ -1087,12 +1102,20 @@
         items: cart.map(item => ({ product_id: item.productId, quantity: item.quantity }))
       };
       const requestFingerprint = await getCheckoutFingerprint(checkoutPayload);
-      if (!pendingCheckoutRequest || pendingCheckoutRequest.fingerprint !== requestFingerprint) {
+      const savedPendingCheckout = readPendingCheckout();
+      const unresolvedRequest = pendingCheckoutRequest || savedPendingCheckout;
+      if (unresolvedRequest && unresolvedRequest.fingerprint !== requestFingerprint) {
+        throw new Error("Hay un intento de compra anterior que aún no tiene confirmación. Vuelve a ingresar exactamente los mismos datos y productos para consultar su resultado. No cambies el pedido hasta resolver ese intento.");
+      }
+      if (!pendingCheckoutRequest) {
         pendingCheckoutRequest = restorePendingCheckout(requestFingerprint) || {
           fingerprint: requestFingerprint,
           idempotencyKey: window.crypto.randomUUID()
         };
-        savePendingCheckout(pendingCheckoutRequest);
+        if (!savePendingCheckout(pendingCheckoutRequest)) {
+          pendingCheckoutRequest = null;
+          throw new Error("No se pudo guardar de forma segura el intento de compra en este navegador. No se envió el pedido. Revisa el almacenamiento del navegador e inténtalo nuevamente.");
+        }
       }
       const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
       const { data, error } = await client.functions.invoke("create-public-order", {
@@ -1100,14 +1123,24 @@
       });
       if (error) {
         let serverMessage = "";
+        let responseStatus = 0;
         try {
           const response = error.context;
+          responseStatus = Number(response?.status || 0);
           if (response && typeof response.clone === "function") {
             const payload = await response.clone().json();
             if (typeof payload?.error === "string") serverMessage = payload.error;
           }
         } catch (parseError) {
           console.warn("No se pudo leer el detalle del error del checkout.", parseError);
+        }
+
+        // Los errores 4xx conocidos indican que el servidor rechazó la compra
+        // antes de crearla. Una colisión de clave es la excepción: se conserva
+        // el intento porque podría existir un pedido asociado a esa clave.
+        const isIdempotencyConflict = serverMessage.toLocaleLowerCase("es").includes("clave de este intento");
+        if ([400, 409, 429].includes(responseStatus) && !isIdempotencyConflict) {
+          clearPendingCheckout();
         }
         throw new Error(serverMessage || error.message || "No se pudo registrar el pedido.");
       }
