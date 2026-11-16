@@ -182,30 +182,26 @@ Deno.serve(async (req: Request) => {
         return reply(400, { error: "La fecha del movimiento no es válida." });
       }
       const occurredAt = occurredAtInput ? new Date(occurredAtInput).toISOString() : new Date().toISOString();
-      const { data, error } = await admin.from("platform_financial_records").insert({
-        business_id: businessId,
-        record_type: recordType,
-        description,
-        amount,
-        currency,
-        occurred_at: occurredAt,
-        reference,
-        created_by: user.id,
-      }).select("id,business_id,record_type,description,amount,currency,occurred_at,reference,created_at").single();
-      if (error) throw error;
-      const { error: auditError } = await admin.from("audit_logs").insert({
-        business_id: businessId,
-        actor_id: user.id,
-        action: "platform.finance_record_created",
-        entity_type: "platform_financial_record",
-        entity_id: data.id,
-        details: { record_type: recordType, amount, currency, description },
+      const { data, error } = await admin.rpc("create_platform_financial_record_transactional", {
+        p_business_id: businessId,
+        p_record_type: recordType,
+        p_description: description,
+        p_amount: amount,
+        p_currency: currency,
+        p_occurred_at: occurredAt,
+        p_reference: reference,
+        p_actor_id: user.id,
       });
-      return reply(200, {
-        ok: true,
-        record: data,
-        audit_warning: auditError ? "El movimiento se guardó, pero no se pudo registrar la auditoría." : null,
-      });
+      if (error) {
+        if (error.code === "23503") return reply(404, { error: "El negocio indicado no existe." });
+        if (error.code === "42501") return reply(403, { error: "La cuenta técnica no está autorizada para registrar movimientos." });
+        if (error.code === "22023") return reply(400, { error: "Los datos del movimiento financiero no son válidos." });
+        console.error("Platform financial record RPC failed:", error);
+        throw error;
+      }
+      const result = data as Record<string, any> | null;
+      if (!result?.record) throw new Error("La RPC financiera no devolvió el movimiento.");
+      return reply(201, { ok: true, record: result.record });
     }
 
     if (action === "create_payroll_record") {
@@ -228,31 +224,25 @@ Deno.serve(async (req: Request) => {
           return reply(400, { error: "La fecha límite no es válida." });
         }
       }
-      const { data, error } = await admin.from("payroll_records").insert({
-        business_id: businessId,
-        payee_name: payeeName,
-        description,
-        amount,
-        currency,
-        status: "pending",
-        due_date: dueDate,
-        created_by: user.id,
-        updated_by: user.id,
-      }).select("id,business_id,payee_name,description,amount,currency,status,due_date,created_at").single();
-      if (error) throw error;
-      const { error: auditError } = await admin.from("audit_logs").insert({
-        business_id: businessId,
-        actor_id: user.id,
-        action: "platform.payroll_created",
-        entity_type: "payroll_record",
-        entity_id: data.id,
-        details: { payee_name: payeeName, amount, currency, due_date: dueDate },
+      const { data, error } = await admin.rpc("create_platform_payroll_record_transactional", {
+        p_business_id: businessId,
+        p_payee_name: payeeName,
+        p_description: description,
+        p_amount: amount,
+        p_currency: currency,
+        p_due_date: dueDate,
+        p_actor_id: user.id,
       });
-      return reply(200, {
-        ok: true,
-        record: data,
-        audit_warning: auditError ? "El registro de nómina se guardó, pero no se pudo registrar la auditoría." : null,
-      });
+      if (error) {
+        if (error.code === "23503") return reply(404, { error: "El negocio indicado no existe." });
+        if (error.code === "42501") return reply(403, { error: "La cuenta técnica no está autorizada para crear registros de nómina." });
+        if (error.code === "22023") return reply(400, { error: "Los datos del registro de nómina no son válidos." });
+        console.error("Platform payroll creation RPC failed:", error);
+        throw error;
+      }
+      const result = data as Record<string, any> | null;
+      if (!result?.record) throw new Error("La RPC de nómina no devolvió el registro.");
+      return reply(201, { ok: true, record: result.record });
     }
 
     if (action === "resolve_payroll_record") {
@@ -446,45 +436,29 @@ Deno.serve(async (req: Request) => {
         slug = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
           .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 110);
       }
-      if (!name || !category || !slug || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+      if (name.length < 2 || category.length < 2 || !slug || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
         return reply(400, { error: "Nombre, categoría y slug válido son obligatorios." });
       }
 
-      // El panel técnico crea únicamente el registro base del negocio.
-      // La descripción, horarios, logo, contacto, pagos y demás datos comerciales
-      // se configuran después desde el panel de su administrador.
-      const { data: business, error: createError } = await admin.from("businesses").insert({
-        name,
-        category,
-        slug,
-        created_by: user.id,
-      }).select("id, name, slug, category, status, created_at").single();
-
-      if (createError) {
-        if (createError.code === "23505") return reply(409, { error: "Ya existe un negocio con ese slug." });
-        throw createError;
-      }
-
-      const { error: auditError } = await admin.from("audit_logs").insert({
-        business_id: business.id,
-        actor_id: user.id,
-        action: "business.created",
-        entity_type: "business",
-        entity_id: business.id,
-        details: { name: business.name, slug: business.slug },
+      // El panel técnico crea únicamente el registro base. La configuración
+      // comercial queda a cargo del administrador de ese negocio.
+      const { data, error } = await admin.rpc("create_technical_business_transactional", {
+        p_name: name,
+        p_category: category,
+        p_slug: slug,
+        p_actor_id: user.id,
       });
-      // El negocio ya fue creado. No responder como si la creación hubiera
-      // fallado si únicamente falló el registro de auditoría: eso provocaría
-      // reintentos engañosos y errores de slug duplicado.
-      if (auditError) {
-        console.error("Business created but audit insert failed:", auditError);
-        return reply(201, {
-          ok: true,
-          business,
-          audit_warning: "El negocio se creó, pero no se pudo guardar su evento de auditoría. Revisa los registros del servidor.",
-        });
+      if (error) {
+        if (error.code === "23505") return reply(409, { error: "Ya existe un negocio con ese slug." });
+        if (error.code === "42501") return reply(403, { error: "La cuenta técnica no está autorizada para crear negocios." });
+        if (error.code === "22023") return reply(400, { error: "Nombre, categoría o slug no válido." });
+        console.error("Transactional business creation failed:", error);
+        throw error;
       }
-      return reply(201, { ok: true, business });
+
+      const result = data as Record<string, any> | null;
+      if (!result?.business) throw new Error("La RPC de creación no devolvió el negocio.");
+      return reply(201, { ok: true, business: result.business });
     }
 
     if (action === "invite_member") {
