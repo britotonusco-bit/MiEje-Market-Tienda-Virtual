@@ -10,11 +10,11 @@
   let cachedBusinesses = [];
   let cachedProducts = [];
   const statusLabels = {
-    received: 'Recibido', confirmed: 'Confirmado', preparing: 'En preparación',
-    ready: 'Listo', on_the_way: 'En camino', delivered: 'Entregado', cancelled: 'Cancelado'
+    pending: 'Recibido', confirmed: 'Confirmado', preparing: 'En preparación',
+    ready: 'Listo', out_for_delivery: 'En camino', delivered: 'Entregado', cancelled: 'Cancelado'
   };
-  const nextStatus = { received: 'confirmed', confirmed: 'preparing', preparing: 'ready', ready: 'on_the_way', on_the_way: 'delivered' };
-  const statusClass = { received: 'yellow', confirmed: 'blue', preparing: 'blue', ready: 'green', on_the_way: 'blue', delivered: 'green', cancelled: 'red' };
+  const nextStatus = { pending: 'confirmed', confirmed: 'preparing', preparing: 'ready', ready: 'out_for_delivery', out_for_delivery: 'delivered' };
+  const statusClass = { pending: 'yellow', confirmed: 'blue', preparing: 'blue', ready: 'green', out_for_delivery: 'blue', delivered: 'green', cancelled: 'red' };
 
   document.addEventListener('DOMContentLoaded', boot);
 
@@ -1984,7 +1984,7 @@
 
     // Al iniciar el reparto, guardar una referencia que el cliente pueda consultar
     // con su código privado de seguimiento.
-    if (next === 'on_the_way') {
+    if (next === 'out_for_delivery') {
       const tracking = window.prompt(
         'Ingresa una referencia que el cliente podrá ver usando su código privado. No incluyas teléfonos personales, direcciones privadas ni datos sensibles. Ejemplo: Domiciliario del negocio.',
         'Domiciliario del negocio'
