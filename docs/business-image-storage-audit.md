@@ -114,3 +114,19 @@ No se hicieron cargas reales porque el bucket no contenía objetos y no había n
 10. Los archivos privados de postulaciones nunca se sirven desde `business-assets`.
 
 La prioridad antes de producción es revisar y probar el borrador SQL de Storage en ensayo. Después se debe realizar una prueba real de carga, visualización, reemplazo y eliminación con dos negocios de prueba.
+
+
+## 9. Verificación adicional del panel y de imágenes públicas
+
+Durante la revisión posterior se detectó que el archivo `panel-live.js` tenía un bloque duplicado fuera del cierre de su función principal. Ese bloque contenía restos de una validación anterior y repetía funciones del panel. Se retiró únicamente el contenido sobrante posterior al primer cierre completo.
+
+Comprobaciones estáticas posteriores:
+
+- El archivo conserva una sola función principal autoejecutable y un solo cierre.
+- Existe una sola declaración de `saveProduct` y una sola función de validación de rutas de imágenes.
+- La función principal contiene todas las funciones que aparecían en el bloque duplicado; no se eliminaron funciones exclusivas.
+- Se mantiene la limpieza de imágenes antiguas de productos y logos, con validación de origen, negocio, carpeta y nombre de archivo.
+- La rama incorpora un manejador de errores de carga para las imágenes públicas de tarjetas de negocios, tarjetas de productos y encabezados de tienda. Si una imagen no carga, se oculta y se muestra el texto accesible “Imagen no disponible”.
+- Se añadieron estilos para que el espacio de la imagen conserve una presentación estable.
+
+La verificación fue estática sobre el contenido de GitHub. No se ejecutó el panel en navegador ni se realizó una prueba de carga real en Storage. Por ello, esta corrección no se considera validada en ejecución hasta probarla en un entorno de ensayo.
