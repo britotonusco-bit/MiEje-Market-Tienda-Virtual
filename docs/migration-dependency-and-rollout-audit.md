@@ -84,7 +84,7 @@ Referencia: https://supabase.com/changelog/45329-breaking-change-tables-not-expo
 
 ### 3.5 Lectura pública de la configuración global
 
-El borrador deja `platform_public_settings` sin permisos directos para `anon` y `authenticated`, lo cual evita escrituras públicas. La rama sí incluye `supabase/functions/get-platform-public-settings/index.ts`: usa credenciales de servidor y devuelve solo nombre, descripción, logo, imagen principal y WhatsApp. Por tanto, la lectura pública está contemplada; la prueba pendiente es verificar que la tabla esté disponible para el Data API que usa el cliente de servicio, sin conceder acceso directo a visitantes.
+El borrador deja `platform_public_settings` sin permisos directos para `anon` y `authenticated`, lo cual evita escrituras públicas. La rama incluye `supabase/functions/get-platform-public-settings/index.ts`: usa credenciales de servidor y devuelve solo nombre, descripción, logo, imagen principal y WhatsApp. Sin embargo, esa función no figura en el inventario de Edge Functions activas del proyecto consultado. La lectura está preparada en código, pero todavía debe desplegarse y probarse en staging; además, verificar que la tabla esté disponible para el Data API usado por el cliente de servicio.
 
 ### 3.6 Integridad de datos antes de crear índices y cambiar claves
 
