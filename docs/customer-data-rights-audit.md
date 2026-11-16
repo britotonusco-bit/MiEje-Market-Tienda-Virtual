@@ -229,3 +229,26 @@ Límites de la corrección:
 Commits de la rama:
 - `app.js`: `eac652a511410976867ba933584629289c94c031`
 - `supabase/functions/create-job-application/index.ts`: `09635732018b6398215e5b76b85bdc1c43a7db53`
+
+
+### Auditoría del acceso a postulaciones y descarga de hojas de vida desde el panel — 16 nov 2026
+
+**Panel real revisado:** `panel-negocio.html` + `panel-live.js`. El archivo `panel-admin.html` es un prototipo visual general desconectado; no debe confundirse con el panel operativo del administrador de negocio.
+
+**Controles verificados en código y Supabase activo (consultas de solo lectura):**
+- `loadJobApplications()` consulta los campos necesarios de `job_applications`, filtra por `business_id = businessId` y limita la lista a 100 registros.
+- La política RLS `job_applications_business_admin_read` permite SELECT únicamente cuando `private.has_business_role(job_applications.business_id, ['business_admin'])` devuelve verdadero. La función comprueba `auth.uid()`, membresía activa, perfil no bloqueado y rol exacto.
+- El administrador actualiza estado/notas con filtros por ID y `business_id`; la política UPDATE exige el rol de administrador y que el negocio esté activo, tanto en USING como en WITH CHECK.
+- La tabla no concede SELECT a `anon`; la política pública existente es INSERT con consentimiento verdadero y vacante publicada/aprobada en negocio activo. La tabla de sesiones de carga no concede privilegios a `anon` ni `authenticated`.
+- El bucket `job-applications-private` está marcado como privado, con límite de 5 MiB y MIME permitidos PDF/DOC/DOCX.
+- La política de lectura de Storage exige bucket correcto, carpeta inicial con UUID de negocio, negocio activo y membresía `business_admin` para ese negocio. No se encontró una política pública de lectura para ese bucket.
+- El panel crea enlaces firmados de descarga con vigencia de 300 segundos por archivo, después de consultar la postulación. La URL temporal no es un enlace permanente.
+- La función `private.has_business_role` es SECURITY DEFINER pero está en esquema no expuesto, fija `search_path` vacío y compara contra `auth.uid()`; no se observó una autorización basada en metadata editable del usuario.
+
+**Riesgos y pendientes:**
+- El panel solicita hasta 100 postulaciones y crea enlaces firmados en paralelo para cada CV; conviene implementar paginación y generar el enlace solo cuando el administrador pulse Descargar, para reducir solicitudes simultáneas y exposición innecesaria de URLs temporales.
+- El panel muestra datos de contacto, mensaje y respuestas de cada postulante al administrador del negocio; esto coincide con la función de selección, pero debe reflejarse en el aviso de privacidad y en una política de conservación/eliminación.
+- No se realizaron pruebas dinámicas con dos cuentas y dos negocios; por tanto, el aislamiento está respaldado por filtros y políticas inspeccionadas, pero no se declara probado en ejecución.
+- No se descargaron archivos ni se consultaron filas reales de postulantes.
+
+**Resultado:** no se detectó una vía de lectura pública en las políticas inspeccionadas ni una consulta del panel sin filtro de negocio. No se modificó código en este paso porque los controles existentes observados ya aplican la separación por negocio. Quedan pendientes pruebas dinámicas, paginación/descarga bajo demanda, conservación y evidencia de consentimiento versionada.
