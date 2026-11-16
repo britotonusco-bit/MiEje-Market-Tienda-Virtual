@@ -27,29 +27,10 @@ CREATE INDEX IF NOT EXISTS orders_business_payment_method_idx
   ON public.orders (business_id, payment_method_id)
   WHERE payment_method_id IS NOT NULL;
 
--- Vinculación de pedidos con clientes autenticados y favoritos.
--- Los pedidos de invitados conservan customer_user_id = NULL.
-ALTER TABLE public.orders
-  ADD COLUMN IF NOT EXISTS customer_user_id uuid
-  REFERENCES auth.users(id) ON DELETE SET NULL;
-
-CREATE INDEX IF NOT EXISTS orders_customer_user_created_idx
-  ON public.orders (customer_user_id, created_at DESC)
-  WHERE customer_user_id IS NOT NULL;
-
-CREATE TABLE IF NOT EXISTS public.customer_favorites (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  product_id uuid NOT NULL REFERENCES public.products(id) ON DELETE CASCADE,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT customer_favorites_user_product_unique UNIQUE (user_id, product_id)
-);
-
-ALTER TABLE public.customer_favorites ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON TABLE public.customer_favorites FROM PUBLIC, anon, authenticated;
-GRANT SELECT, DELETE ON TABLE public.customer_favorites TO authenticated;
-GRANT INSERT (user_id, product_id) ON TABLE public.customer_favorites TO authenticated;
-
+-- customer-account-migration.sql (paso 8) es la única fuente de verdad
+-- para customer_user_id, su índice y la tabla customer_favorites.
+-- Aquí solo se ajustan las políticas de favoritos y las políticas de lectura
+-- necesarias para el historial de pedidos.
 DROP POLICY IF EXISTS customer_favorites_select_own ON public.customer_favorites;
 CREATE POLICY customer_favorites_select_own ON public.customer_favorites
   FOR SELECT TO authenticated USING (user_id = (SELECT auth.uid()));
