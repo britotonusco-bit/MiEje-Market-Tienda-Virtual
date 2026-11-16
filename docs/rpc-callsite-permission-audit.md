@@ -87,7 +87,7 @@ No se encontró discrepancia de argumentos. Siguen pendientes los hallazgos de p
 
 - `cuenta.js` invoca `get_customer_order_history()`. La firma coincide con `order-financial-access-draft.sql`, pero la RPC no existe aún en la base activa.
 - `resolve-my-access`, `get-public-storefront`, `get-platform-public-settings` y `track-public-order` no invocan RPC SQL en los archivos revisados; usan consultas de servidor o construyen la respuesta.
-- La portada invoca `get-public-storefront`, `create-job-application`, `create-public-order`, `track-public-order` y `get-platform-public-settings`.
+- La portada invoca `get-public-storefront`, `create-job-application`, `create-public-order`, `track-public-order` y `get-platform-public-settings`. En el proyecto Supabase consultado, `get-platform-public-settings` todavía no figura como función activa, aunque su código sí está en la rama; el soporte técnico que depende de esa función fallará hasta desplegarla en staging y verificarla.
 
 ## 6. Permisos de las consultas directas del panel
 
@@ -112,7 +112,7 @@ La interfaz usa `business_ai_settings.upsert`; el borrador concede SELECT/INSERT
 
 ## 7. Catálogo activo de Supabase
 
-La consulta de solo lectura encontró estas RPC públicas relevantes:
+La consulta de solo lectura encontró estas RPC públicas relevantes. La lista de Edge Functions activas contiene seis funciones: `technical-business-management` v6, `create-public-order` v3, `track-public-order` v1, `resolve-my-access` v2, `get-public-storefront` v2 y `create-job-application` v2. La rama incluye además `get-platform-public-settings` y `cleanup-job-application-data`, que no aparecen activas en el proyecto consultado:
 - `consume_checkout_rate_limit(text)`
 - `consume_job_application_rate_limit(text)`
 - `create_public_order(...)`
