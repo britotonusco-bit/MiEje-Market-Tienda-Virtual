@@ -1865,7 +1865,7 @@
       const paymentAction = admin && o.payment_status === 'pending' && o.status !== 'cancelled'
         ? ` <button class="small-button" data-mark-payment="${esc(o.id)}" data-payment-method="${esc(o.payment_method || '')}">Confirmar pago recibido</button>`
         : '';
-      const action = `${nextStatus[o.status] ? `<button class="small-button" data-next="${nextStatus[o.status]}" data-order="${esc(o.id)}">Marcar: ${statusLabels[nextStatus[o.status]]}</button>` : ''}${paymentAction}${!['delivered','cancelled'].includes(o.status) ? ` <button class="small-button" data-cancel-request="${esc(o.id)}">Solicitar cancelación</button>` : ''}` || '—';
+      const action = `${nextStatus[o.status] ? `<button class="small-button" data-next="${nextStatus[o.status]}" data-order="${esc(o.id)}" data-current-status="${esc(o.status)}">Marcar: ${statusLabels[nextStatus[o.status]]}</button>` : ''}${paymentAction}${!['delivered','cancelled'].includes(o.status) ? ` <button class="small-button" data-cancel-request="${esc(o.id)}">Solicitar cancelación</button>` : ''}` || '—';
       const base = [esc(`#${o.order_number}`), esc(o.customer_name || 'Cliente'), esc(o.customer_phone || '—'), esc(o.delivery_address || '—') + (o.delivery_notes ? `<br><small>${esc(o.delivery_notes)}</small>` : '') + (o.delivery_tracking ? `<br><small>Seguimiento: ${esc(o.delivery_tracking)}</small>` : ''), items || 'Sin detalle', `<span class="pill ${statusClass[o.status] || ''}">${statusLabels[o.status] || esc(o.status)}</span>`, dateTime(o.created_at)];
       if (admin) {
         const methodLabel = o.payment_method_name || ({cash:'Efectivo',transfer:'Transferencia',card:'Tarjeta',other:'Otro'}[o.payment_method] || o.payment_method || '—');
@@ -1876,7 +1876,7 @@
     });
     const headers = admin ? ['Pedido','Cliente','Teléfono','Entrega','Productos','Total / pago','Estado','Creado','Acción'] : ['Pedido','Cliente','Teléfono','Entrega','Productos','Estado','Creado','Acción'];
     target.innerHTML = tableHtml(headers, rows);
-    target.querySelectorAll('[data-next][data-order]').forEach(button => button.addEventListener('click', () => changeOrderStatus(button.dataset.order, button.dataset.next, button)));
+    target.querySelectorAll('[data-next][data-order][data-current-status]').forEach(button => button.addEventListener('click', () => changeOrderStatus(button.dataset.order, button.dataset.currentStatus, button.dataset.next, button)));
     target.querySelectorAll('[data-mark-payment]').forEach(button => button.addEventListener('click', () => markOrderPaymentReceived(button.dataset.markPayment, button.dataset.paymentMethod, button)));
     target.querySelectorAll('[data-cancel-request]').forEach(button => button.addEventListener('click', () => requestCancellation(button.dataset.cancelRequest, button)));
   }
@@ -2050,7 +2050,13 @@
     await loadBusinessAdmin();
   }
 
-  async function changeOrderStatus(orderId, next, button) {
+  async function changeOrderStatus(orderId, currentStatus, next, button) {
+    const allowedNext = nextStatus[currentStatus];
+    if (!allowedNext || allowedNext !== next) {
+      alert('El estado del pedido cambió o la transición ya no está permitida. Actualiza la lista antes de continuar.');
+      if (panel === 'employee') await loadEmployeeOrders(); else await loadBusinessOrders();
+      return;
+    }
     button.disabled = true;
     const changes = { status: next };
 
@@ -2078,10 +2084,11 @@
       .update(changes)
       .eq('id', orderId)
       .eq('business_id', businessId)
+      .eq('status', currentStatus)
       .select('id,status,delivery_tracking')
       .maybeSingle();
     if (error || !updatedOrder) {
-      alert(`No se pudo cambiar el estado: ${error?.message || 'El pedido no existe, pertenece a otro negocio o no tienes permiso para cambiarlo.'}`);
+      alert(`No se pudo cambiar el estado: ${error?.message || 'El pedido pudo cambiar en otra sesión. Se actualizará la lista para evitar sobrescribir un estado más reciente.'}`);
       button.disabled = false;
       return;
     }
