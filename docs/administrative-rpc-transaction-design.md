@@ -271,3 +271,42 @@ La Edge Function de la rama ya invoca ambas RPC en `set_business_status` y `mode
 Verificación de lectura de retorno: los nombres de las cinco RPC nuevas coinciden con los llamados correspondientes de la Edge Function. Esta comprobación no equivale a compilación TypeScript ni a ejecución SQL. La función también contiene otras RPC preexistentes para nómina y solicitudes de bloqueo, que no forman parte de este borrador.
 
 Pendiente: pruebas de errores, auditoría y concurrencia en staging; revisión final del contrato de respuesta; integración y despliegue solo después de instalar y verificar las migraciones en un entorno aislado. El proyecto Supabase activo sigue sin cambios.
+
+
+## Invitaciones y asignación de integrantes — revisión y cambio en rama
+
+### Hallazgos verificados
+
+- La función `private.handle_new_auth_user()` ya se ejecuta después de insertar un usuario en `auth.users` y crea `public.profiles` usando `raw_user_meta_data.display_name`. La Edge Function no debe volver a insertar manualmente el perfil: eso duplicaba trabajo y abría una ventana de carrera innecesaria.
+- `profiles` contiene `platform_role`, `is_blocked` y `display_name`. La nueva RPC exige que el perfil del destinatario exista y no tenga bloqueo global antes de asignarle acceso.
+- `business_memberships` tiene unicidad por negocio/usuario y campos `role`, `status`, `blocked_reason`, `created_by`; `job_title` aún no está en la base activa y se añade en el borrador SQL que depende de la migración de límites de administrador.
+- El flujo anterior enviaba primero el correo y después hacía inserciones separadas en perfil, membresía y auditoría. Si fallaba la última escritura, podía quedar una cuenta Auth sin asignación o una membresía sin evento de auditoría.
+
+### Cambio preparado en la rama
+
+Se añadió `create_business_membership_assignment` a `database/security/administrative-membership-rpcs-draft.sql`. La RPC bloquea el negocio, valida al actor técnico, valida el perfil destinatario y su bloqueo global, evita duplicar una membresía y escribe la membresía más el evento de auditoría en una sola transacción. Usa `SECURITY INVOKER`, `search_path` vacío, revoca ejecución a roles cliente y concede `EXECUTE` solo a `service_role`.
+
+La acción `invite_member` en `supabase/functions/technical-business-management/index.ts` ahora:
+
+1. Valida el identificador del negocio, correo, rol, nombre y cargo.
+2. Busca la cuenta existente con paginación limitada. Si llega al límite sin completar la búsqueda, se detiene y no asume que el correo está libre.
+3. Para una cuenta nueva, usa `inviteUserByEmail`. Para una cuenta existente sin correo confirmado, usa el flujo `auth.resend` de tipo `signup`; para una cuenta confirmada no envía un correo innecesario.
+4. Llama a la RPC para crear la asignación y su auditoría de forma atómica.
+5. Devuelve un error recuperable si Auth envió el correo pero la asignación no pudo terminar. La cuenta no debe volver a crearse; el administrador puede reintentar la misma asignación.
+
+Se retiraron de esa acción las inserciones directas en `profiles`, `business_memberships` y `audit_logs`. La función existente que crea perfiles automáticamente permanece como responsable de crear el perfil inicial.
+
+### Configuración de correo pendiente de comprobar
+
+Supabase documenta que el SMTP predeterminado de proyectos hospedados no está destinado a producción y limita los destinatarios a direcciones autorizadas del equipo de la organización. Si MiEje Market sigue usando ese SMTP, eso puede explicar por qué los correos de invitación no llegan a destinatarios externos. No se ha inspeccionado ni modificado la configuración SMTP del proyecto. Antes de probar invitaciones reales, revisar SMTP personalizado, remitente/dominio y límites de envío.
+
+También hay que comprobar que la URL de `aceptar-invitacion.html` esté incluida en las Redirect URLs permitidas de Auth. Si no está permitida, Supabase puede ignorar `redirectTo` y usar la Site URL configurada.
+
+### Límites y pruebas pendientes
+
+- La llamada de correo de Auth y la transacción PostgreSQL no pueden ser una sola transacción distribuida. Si Auth crea el usuario y luego falla la asignación, el flujo deja un usuario pendiente en Auth; el reintento detecta la cuenta y puede volver a enviar la confirmación antes de finalizar la asignación. Una tabla outbox de invitaciones con estado y reintentos sería una mejora posterior si se necesita recuperación automática sin intervención.
+- Aún no se ha compilado ni desplegado la Edge Function y las RPC no están instaladas en Supabase.
+- Probar en staging: usuario nuevo, usuario existente confirmado, usuario existente sin confirmar, perfil globalmente bloqueado, negocio suspendido, membresía duplicada, SMTP rechazado, fallo de auditoría y dos solicitudes simultáneas.
+- Confirmar la URL de redirección permitida y la configuración SMTP antes de cualquier envío externo.
+
+Estado: borrador SQL y Edge Function modificados solo en `correcciones-funcionales`; Supabase activo sin cambios.
