@@ -62,13 +62,10 @@ Deno.serve(async (req: Request) => {
   let sessionErrors = 0;
 
   try {
-    const { data: sessions, error: sessionsError } = await admin
-      .from("job_application_upload_sessions")
-      .select("id,business_id,content_page_id,resume_path,expires_at,consumed_at")
-      .is("consumed_at", null)
-      .lte("expires_at", expiredBefore)
-      .order("expires_at", { ascending: true })
-      .limit(BATCH_SIZE);
+    const { data: sessions, error: sessionsError } = await admin.rpc(
+      "list_expired_job_application_upload_sessions",
+      { p_limit: BATCH_SIZE },
+    );
     if (sessionsError) throw sessionsError;
 
     for (const session of sessions ?? []) {
@@ -88,8 +85,19 @@ Deno.serve(async (req: Request) => {
           .maybeSingle();
         if (applicationError) throw applicationError;
 
-        // Nunca borrar un archivo asociado a una postulación existente.
+        // La postulación conserva su CV. Solo se retira la sesión temporal.
         if (application) {
+          const { data: deletedSession, error: deleteSessionError } = await admin
+            .from("job_application_upload_sessions")
+            .delete()
+            .eq("id", session.id)
+            .eq("business_id", session.business_id)
+            .eq("resume_path", session.resume_path)
+            .is("consumed_at", null)
+            .lte("expires_at", expiredBefore)
+            .select("id");
+          if (deleteSessionError) throw deleteSessionError;
+          if ((deletedSession ?? []).length > 0) sessionsRemoved++;
           sessionsSkipped++;
           continue;
         }
