@@ -232,6 +232,13 @@
     </div>
   </aside>
 
+  <section id="productDetailModal" class="product-detail-modal hidden" role="dialog" aria-modal="true" aria-labelledby="productDetailTitle" aria-hidden="true">
+    <div class="product-detail-backdrop" data-action="close-product-detail"></div>
+    <article class="product-detail-dialog">
+      <button type="button" class="product-detail-close" data-action="close-product-detail" aria-label="Cerrar ficha">×</button>
+      <div id="productDetailContent"></div>
+    </article>
+  </section>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body>
 </html>
