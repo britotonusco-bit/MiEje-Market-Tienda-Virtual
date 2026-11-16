@@ -77,7 +77,7 @@
       const { error } = await client.auth.updateUser({ password });
       if (error) throw error;
 
-      const { error: signOutError } = await client.auth.signOut();
+      const { error: signOutError } = await client.auth.signOut({ scope: 'local' });
       if (signOutError) {
         console.warn('La contraseña se actualizó, pero no se pudo cerrar la sesión automáticamente.', signOutError);
       }
