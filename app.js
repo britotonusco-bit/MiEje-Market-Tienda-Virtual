@@ -200,6 +200,8 @@
   let selectedCategory = "Todas";
   let currentBusinessId = null;
   let cart = [];
+  let favoriteProductIds = new Set();
+  let favoriteUserId = null;
   let pendingCheckoutRequest = null;
   let toastTimer;
   const checkoutSessionKey = "mieje:checkout-pending:v2";
@@ -344,6 +346,21 @@
       }));
       const registeredIds = new Set(registered.map(business => business.id));
       businesses = [...registered, ...businesses.filter(business => !registeredIds.has(business.id))];
+
+      const { data: authData, error: authError } = await client.auth.getUser();
+      if (authError) throw authError;
+      if (!authData.user) {
+        favoriteProductIds = new Set();
+        favoriteUserId = null;
+        return;
+      }
+
+      const { data: favoriteRows, error: favoritesError } = await client.from("customer_favorites")
+        .select("product_id")
+        .eq("user_id", authData.user.id);
+      if (favoritesError) throw favoritesError;
+      favoriteProductIds = new Set((favoriteRows || []).map(row => row.product_id));
+      favoriteUserId = authData.user.id;
     } catch (error) {
       console.warn("No se pudo cargar el directorio de negocios registrados; se mantiene la vista local de demostración.", error);
     }
@@ -470,8 +487,19 @@
       const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
       const { data: userData, error: userError } = await client.auth.getUser();
       if (userError || !userData.user) {
+        favoriteProductIds = new Set();
+        favoriteUserId = null;
+        renderListing();
         window.location.href = "cuenta.html";
         return;
+      }
+      if (favoriteUserId !== userData.user.id) {
+        const { data: favoriteRows, error: favoritesError } = await client.from("customer_favorites")
+          .select("product_id")
+          .eq("user_id", userData.user.id);
+        if (favoritesError) throw favoritesError;
+        favoriteProductIds = new Set((favoriteRows || []).map(row => row.product_id));
+        favoriteUserId = userData.user.id;
       }
       const { data: existing, error: lookupError } = await client.from("customer_favorites")
         .select("id").eq("user_id", userData.user.id).eq("product_id", productId).maybeSingle();
@@ -479,12 +507,18 @@
       if (existing) {
         const { error } = await client.from("customer_favorites").delete().eq("id", existing.id);
         if (error) throw error;
-        button.textContent = "♡ Guardar";
+        favoriteProductIds.delete(productId);
+        document.querySelectorAll('[data-action="favorite"]').forEach(favoriteButton => {
+          if (favoriteButton.dataset.product === productId) favoriteButton.textContent = "♡ Guardar";
+        });
         showToast("Producto retirado de tus favoritos.");
       } else {
         const { error } = await client.from("customer_favorites").insert({ user_id:userData.user.id, product_id:productId });
         if (error) throw error;
-        button.textContent = "♥ Guardado";
+        favoriteProductIds.add(productId);
+        document.querySelectorAll('[data-action="favorite"]').forEach(favoriteButton => {
+          if (favoriteButton.dataset.product === productId) favoriteButton.textContent = "♥ Guardado";
+        });
         showToast("Producto agregado a tus favoritos.");
       }
     } catch (error) {
@@ -510,7 +544,7 @@
               data-action="add"
               data-business="${escapeHtml(business.id)}"
               data-product="${escapeHtml(product.id)}">${buttonText}</button>
-            ${business.isRegistered === true ? `<button type="button" class="add-button" data-action="favorite" data-product="${escapeHtml(product.id)}">♡ Guardar</button>` : ""}
+            ${business.isRegistered === true ? `<button type="button" class="add-button" data-action="favorite" data-product="${escapeHtml(product.id)}">${favoriteProductIds.has(product.id) ? "♥ Guardado" : "♡ Guardar"}</button>` : ""}
           </div>
         </div>
       </article>`;
