@@ -450,3 +450,47 @@ La consulta de pedidos del panel administrativo seleccionaba `payment_method_nam
 - No se ejecutó SQL, no se desplegó ninguna Edge Function y no se modificó `main` ni GitHub Pages.
 - La comprobación de permisos es una inspección de catálogos/RLS; no sustituye pruebas de acceso con cuentas reales de administrador y empleado.
 - En staging, probar que el empleado no pueda leer importes, estados de pago ni precios de línea, y que el administrador sí los reciba por las RPC; comprobar también que la consulta corregida carga pedidos correctamente.
+
+
+## Revisión de estados y operaciones financieras de pedidos — 16 nov 2026
+
+### Incompatibilidad de estados corregida en el borrador
+
+La interfaz ya utiliza el flujo `received → confirmed → preparing → ready → on_the_way → delivered`, pero el trigger de transición en `business-admin-boundaries.sql` todavía aceptaba `pending` y `out_for_delivery`. La base activa confirma que su CHECK y su valor predeterminado también usan el vocabulario anterior.
+
+Se corrigió el borrador para que, al aplicarse en un entorno de ensayo:
+- convierta pedidos históricos `pending` a `received`;
+- convierta `out_for_delivery` a `on_the_way`;
+- reemplace el CHECK con los siete estados usados por la interfaz;
+- establezca `received` como valor predeterminado;
+- valide las transiciones normales con los nuevos nombres.
+
+La operación retira temporalmente el CHECK dentro de la misma ejecución SQL, transforma los valores y vuelve a crear la restricción. Debe probarse primero con una copia de la base y revisar que no existan estados históricos fuera del CHECK vigente.
+
+### Controles financieros revisados
+
+- `mark_order_payment_received`: solo administrador activo del negocio; exige pago pendiente, bloquea el pedido, registra el movimiento financiero, actualiza el pago y audita en una transacción. No cobra automáticamente.
+- `complete_order_refund`: solo administrador activo; exige pedido cancelado, pago registrado y conciliado por el total, cancelación aprobada y ausencia de reembolso previo. Registra transacción, detalle, estado y auditoría en una sola operación. Es registro de un reembolso ya realizado externamente, no mueve dinero.
+- `request_order_cancellation`: permite al administrador o empleado registrar la solicitud, pero no decidirla.
+- `decide_order_cancellation`: solo administrador activo; aprueba o rechaza. La aprobación cancela el pedido y repone inventario de forma transaccional; no realiza reembolsos.
+- Gastos: `register_business_expense`, `pay_business_expense`, `void_business_expense` y `attach_business_expense_receipt` validan administrador activo, bloquean el gasto cuando corresponde y escriben auditoría. El empleado no tiene acciones de gasto en la interfaz.
+
+### Brechas que permanecen en Supabase activo
+
+- El trigger activo de pedidos aún permite al propietario técnico cambiar estados y acepta el vocabulario antiguo.
+- Las políticas activas de pedidos y líneas todavía dan al propietario técnico lectura global; la política de actualización también le permite cambiar estados.
+- La interfaz y los borradores de SQL están preparados para el flujo nuevo, pero el CHECK, trigger y políticas corregidos todavía no están instalados.
+- Las funciones de cancelación y reembolso son borradores y no están disponibles en producción hasta aplicar sus migraciones y probarlas.
+
+### Pruebas obligatorias en staging
+
+1. Cada transición válida del flujo nuevo funciona para administrador y empleado del mismo negocio.
+2. Saltos, retrocesos, cambio directo a `cancelled`, negocio suspendido, técnico y usuario de otro negocio son rechazados.
+3. La migración convierte correctamente los estados históricos y conserva los pedidos y sus auditorías.
+4. Empleado no puede confirmar pagos, registrar reembolsos ni leer datos financieros.
+5. Administrador de otro negocio no puede operar sobre el pedido.
+6. Cancelación aprobada restaura inventario una sola vez; rechazo no modifica inventario.
+7. Reembolso duplicado o sin pago conciliado se rechaza.
+8. Gasto, pago de gasto, anulación y comprobante quedan auditados y no admiten edición libre.
+
+No se ejecutó SQL ni se desplegaron funciones durante esta revisión.
