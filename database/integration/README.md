@@ -147,3 +147,18 @@ Solo entonces preparar el PR de integración. La fusión/publicación y cualquie
 La consulta read-only confirmó que faltan las RPC de idempotencia, historial de clientes, finanzas del administrador, confirmación de pago recibido, solicitud/decisión de cancelaciones y registro de reembolsos. Los paneles ya llaman a estos procedimientos, pero las funciones no existen en el proyecto activo. Aplicar el orden de migraciones de este documento y ejecutar el verificador antes de considerar operativos esos botones o módulos.
 
 En particular, no confundir las tablas existentes (`orders`, `order_items`, `order_cancellation_requests`) con el flujo completo: sin sus RPC y triggers correspondientes, la interfaz no puede completar esas operaciones de forma segura.
+
+
+## Auditoría de Edge Functions y procesos automáticos (16 nov 2026)
+
+Informe completo: [docs/edge-functions-and-automation-audit.md](../../docs/edge-functions-and-automation-audit.md).
+
+Hallazgos principales:
+- La función técnica activa v6 no exige MFA AAL2; la versión candidata de la rama sí, pero no está desplegada.
+- La función pública de métodos de pago activa omite `id` en su consulta y luego intenta devolverlo; la versión de la rama corrige el SELECT.
+- El checkout activo v3 no tiene idempotencia. Las RPC de la versión candidata aún no existen en la base activa.
+- Las invitaciones y mutaciones activas pueden dejar pasos parciales; la rama usa RPC transaccionales para membresías, creación y suspensión, pero Auth y el envío de correo siguen fuera de la transacción.
+- Las postulaciones requieren límite de tamaño para respuestas JSON, inspección real de CV y análisis antimalware.
+- La limpieza de sesiones de CV existe solo en la rama y depende de una RPC SQL todavía no instalada.
+
+No se hicieron cambios en Supabase ni despliegues. Mantener los cambios en la rama hasta disponer de staging y completar las pruebas descritas en el informe.
