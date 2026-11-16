@@ -773,6 +773,7 @@
     const inviteSelect = document.querySelector('#inviteBusinessSelect'); if (inviteSelect) inviteSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.filter(b => b.status === 'active').map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
     renderBusinesses();
     await loadSelectedBusiness('');
+    await loadAccessEvents(null, '#accessContainer');
     await loadAuditEvents(null, '#auditContainer');
     await loadFinance();
     await loadBlockRequests();
@@ -1742,14 +1743,56 @@
 
   async function loadAccessEvents(id, selector) {
     const target = document.querySelector(selector);
-    let query = db.from('audit_logs').select('id,business_id,actor_id,action,details,created_at').eq('action', 'panel.login').order('created_at', { ascending: false }).limit(100);
-    if (id) query = query.eq('business_id', id);
-    const { data, error } = await query;
-    if (error) return showError(target, error);
-    const rows = data || [];
-    const names = await getUserNames(rows.map(e => e.actor_id));
-    if (!rows.length) { target.innerHTML = '<div class="empty">No hay registros de acceso para este filtro todavía.</div>'; return; }
-    target.innerHTML = tableHtml(['Fecha y hora','Usuario','Panel','Evento'], rows.map(e => [dateTime(e.created_at), names.get(e.actor_id) || shortId(e.actor_id), esc(e.details?.panel || '—'), 'Inicio de sesión']));
+    if (!target) return;
+    target.innerHTML = '<div class="empty">Consultando registros de acceso…</div>';
+    let rows = [];
+    let names = new Map();
+
+    if (panel === 'technical') {
+      try {
+        // El propietario consulta los accesos mediante la función privilegiada,
+        // sin depender de una lectura directa de audit_logs desde el navegador.
+        const result = await callTechnicalFunction({
+          action: 'list_audit_logs',
+          business_id: id || undefined,
+          limit: 100
+        });
+        rows = (result.audit_logs || []).filter(entry =>
+          entry.action === 'panel.login' ||
+          entry.action === 'log_login' ||
+          entry.action === 'panel_open'
+        );
+        names = new Map(rows.filter(entry => entry.actor_name)
+          .map(entry => [entry.actor_id, entry.actor_name]));
+      } catch (error) {
+        return showError(target, error);
+      }
+    } else {
+      let query = db.from('audit_logs')
+        .select('id,business_id,actor_id,action,details,created_at')
+        .eq('action', 'panel.login')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (id) query = query.eq('business_id', id);
+      const { data, error } = await query;
+      if (error) return showError(target, error);
+      rows = data || [];
+      names = await getUserNames(rows.map(entry => entry.actor_id));
+    }
+
+    if (!rows.length) {
+      target.innerHTML = '<div class="empty">No hay registros de acceso para este filtro todavía.</div>';
+      return;
+    }
+    target.innerHTML = tableHtml(
+      ['Fecha y hora', 'Usuario', 'Panel', 'Evento'],
+      rows.map(entry => [
+        dateTime(entry.created_at),
+        names.get(entry.actor_id) || shortId(entry.actor_id),
+        esc(entry.details?.panel || entry.panel || '—'),
+        'Inicio de sesión'
+      ])
+    );
   }
 
   async function loadAuditEvents(id, selector) {
