@@ -599,7 +599,7 @@
     const target = document.querySelector('#ordersContainer');
     target.innerHTML = '<div class="empty">Cargando pedidos…</div>';
     const [ordersResult, financeResult] = await Promise.all([
-      db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,delivery_tracking,payment_method_name,status,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100),
+      db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,delivery_tracking,status,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100),
       db.rpc('get_business_admin_order_financials', {
         p_business_id: businessId,
         p_refundable_only: false,
