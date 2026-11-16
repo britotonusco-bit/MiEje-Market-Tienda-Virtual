@@ -53,7 +53,7 @@ La Edge Function `technical-business-management` invoca 13 RPC con un cliente de
 | `moderate_business_content_transactionally` | `(uuid,text,text,uuid)` | Solo `service_role` |
 | `resolve_access_block_request` | `(uuid,text,text,uuid)` | Solo `service_role` |
 
-Los nombres de parámetros enviados coinciden con las declaraciones SQL. El actor técnico se obtiene del usuario autenticado y validado por la Edge Function, no de un campo arbitrario del navegador. La Edge Function comprueba rol de propietario y AAL2.
+Los nombres de parámetros enviados coinciden con las declaraciones SQL. El actor técnico se obtiene del usuario autenticado y validado por la Edge Function, no de un campo arbitrario del navegador. La columna `job_title` la crea `business-admin-boundaries.sql`; el archivo de RPC técnicas depende de ella y ya no repite su definición. La Edge Function comprueba rol de propietario y AAL2.
 
 **Bloqueo:** ninguna de estas 13 RPC existía en el catálogo activo consultado. Desplegar esta Edge Function antes de aplicar sus migraciones produciría errores de función inexistente.
 
