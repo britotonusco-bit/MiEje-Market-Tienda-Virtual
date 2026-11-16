@@ -150,3 +150,39 @@ Este documento es una propuesta de diseño. En esta revisión:
 - No se desplegaron Edge Functions.
 - No se borraron postulaciones, sesiones ni archivos.
 - No se fijaron plazos de retención sin aprobación.
+
+## 8. Limpieza técnica de sesiones y límites de solicitudes (implementación preparada)
+
+La revisión de solo lectura del proyecto independiente confirmó:
+
+- `job_application_upload_sessions`: 0 filas.
+- `job_application_rate_limits`: 0 filas.
+- `job_applications`: 0 filas.
+- El bucket `job-applications-private` existe y es privado; admite PDF, DOC y DOCX, con límite de 5 MiB.
+- No se encontraron funciones de limpieza.
+- `pg_cron` y `pg_net` no están instalados en la base consultada; por eso no hay un programador de tareas activo.
+
+### Comportamiento de la función preparada
+
+La Edge Function `cleanup-job-application-data`:
+
+1. Rechaza llamadas que no incluyan el secreto de servicio en el encabezado privado `x-cleanup-secret`.
+2. Procesa un lote acotado de sesiones de carga vencidas y no consumidas.
+3. Solo acepta rutas con la estructura exacta `business_id/session_id/uuid.ext`, con extensión PDF, DOC o DOCX.
+4. Comprueba que no exista una postulación vinculada a esa sesión antes de tocar el archivo.
+5. Si el objeto existe, lo elimina mediante Storage API. Si Storage falla, conserva la fila de sesión para un nuevo intento.
+6. Elimina la fila temporal solo después de confirmar que el objeto ya no existe o que Storage completó la eliminación.
+7. Limpia hasta 500 contadores de rate limit cuya ventana de 15 minutos ya venció. La condición de borrado vuelve a comprobar la fecha para no eliminar un contador que se haya renovado entre lectura y borrado.
+8. No borra postulaciones ni hojas de vida asociadas a ellas.
+
+El selector SQL devuelve únicamente rutas válidas. Las sesiones con rutas malformadas no se borran automáticamente y deben revisarse manualmente.
+
+### Sesiones consumidas
+
+El borrador SQL actualiza `submit_public_job_application` para eliminar la fila de sesión temporal dentro de la misma transacción en la que se inserta la postulación. La postulación conserva `resume_path` y el archivo permanece en el bucket privado. Si el registro de la postulación falla, la transacción revierte y la sesión no se pierde.
+
+### Programación pendiente
+
+La función está protegida para no ser invocada desde el navegador. La programación periódica queda pendiente hasta que se aprueben e instalen los componentes necesarios (`pg_cron` y `pg_net`) y se guarden las credenciales de invocación en Vault. No se debe poner la clave de servicio en el código, en GitHub, en el navegador ni en una migración SQL.
+
+No se instaló ninguna extensión ni se creó una tarea programada en producción.
