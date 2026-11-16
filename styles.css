@@ -582,3 +582,137 @@ button:focus-visible,input:focus-visible,select:focus-visible {
 }
 .store-hero:after { z-index:1; }
 .store-hero-copy { z-index:2; }
+
+
+/* ==========================================================
+   MIEJE MARKET · IDENTIDAD VISUAL DE LA TIENDA PÚBLICA
+   ========================================================== */
+:root{
+  --navy:#142c25;
+  --navy2:#214638;
+  --lime:#d8f078;
+  --paper:#f5f7f1;
+  --ink:#1a2d23;
+  --muted:#758177;
+  --line:#e4eae0;
+}
+body{background:#f5f7f1;color:var(--ink);font-family:"DM Sans",system-ui,sans-serif}
+.header{
+  height:82px;padding-inline:clamp(18px,5vw,82px);
+  background:rgba(255,255,255,.92);backdrop-filter:blur(18px);
+  border-bottom:1px solid rgba(222,232,219,.75);
+  box-shadow:0 8px 30px rgba(23,49,34,.045);
+}
+.logo{letter-spacing:-.045em}
+.logo-icon{
+  width:46px;height:46px;border-radius:15px;
+  background:linear-gradient(145deg,#e7f7a6,#cde86a);
+  box-shadow:0 7px 18px rgba(46,70,26,.14),inset 0 1px 0 #fff;
+}
+.logo b{color:#3f7753}
+.nav button{font-size:12px;transition:background .2s,color .2s,transform .2s}
+.nav button:hover,.nav button.active{background:#edf5e4;color:#214b35}
+.search,.listing-search{
+  border-color:#e1e9de;background:#f9fbf7;border-radius:14px;
+  padding:12px 15px;transition:border-color .2s,box-shadow .2s;
+}
+.search:focus,.listing-search:focus{outline:none;border-color:#9ab878;box-shadow:0 0 0 4px #9ab87825}
+.cart-button{
+  border-radius:13px;background:linear-gradient(135deg,#1b513c,#102f27);
+  box-shadow:0 7px 16px rgba(20,62,43,.15);transition:transform .2s,box-shadow .2s;
+}
+.cart-button:hover{transform:translateY(-2px);box-shadow:0 11px 22px rgba(20,62,43,.2)}
+.hero{
+  min-height:570px;
+  background:
+    linear-gradient(90deg,rgba(12,38,29,.94) 0%,rgba(16,48,36,.76) 48%,rgba(16,48,36,.15) 100%),
+    url("https://images.unsplash.com/photo-1518837695005-2083093ee35b?auto=format&fit=crop&w=2000&q=85") center/cover;
+}
+.hero:after{
+  content:"";position:absolute;right:-110px;bottom:-260px;width:560px;height:560px;
+  border:1px solid rgba(216,240,120,.28);border-radius:50%;
+  box-shadow:0 0 0 45px rgba(216,240,120,.035),0 0 0 90px rgba(216,240,120,.025);
+  pointer-events:none;
+}
+.hero-content{width:min(760px,88%);margin-left:clamp(6%,9vw,150px);padding:78px 0}
+.hero h1{font-size:clamp(39px,5.4vw,68px);letter-spacing:-.065em;line-height:1.04}
+.hero-content>p:not(.eyebrow){font-size:15px;line-height:1.85;color:#e2ebe4}
+.hero .eyebrow{letter-spacing:.2em}
+.hero-actions{gap:13px}
+.btn{border-radius:13px;padding:15px 20px;box-shadow:0 8px 20px rgba(0,0,0,.12)}
+.btn.lime{background:linear-gradient(135deg,#e3f69a,#cbe969);color:#183b2a}
+.btn.outline{border-color:#ffffff70;background:rgba(255,255,255,.09);backdrop-filter:blur(8px)}
+.intro{padding:88px 0 65px;gap:70px}
+.intro h2,.section-heading h2{letter-spacing:-.055em}
+.intro>p{font-size:14px;line-height:2;color:#69786e}
+.section{padding:30px 0 82px}
+.section-heading{margin-bottom:27px}
+.category-grid{gap:17px}
+.category-card{
+  border-radius:22px;box-shadow:0 14px 35px rgba(20,45,31,.1);
+  transition:transform .35s cubic-bezier(.2,.8,.2,1),box-shadow .35s;
+}
+.category-card:hover{transform:translateY(-7px) scale(1.008);box-shadow:0 22px 45px rgba(20,45,31,.18)}
+.category-card img{transition:transform .7s cubic-bezier(.2,.8,.2,1)}
+.category-card:hover img{transform:scale(1.08)}
+.shade{background:linear-gradient(0deg,rgba(8,29,21,.9),rgba(8,29,21,.02) 85%)}
+.category-text strong{letter-spacing:-.045em}
+.business-grid{gap:22px}
+.business-card{
+  border:1px solid #e5ebe1;border-radius:21px;
+  box-shadow:0 10px 30px rgba(24,47,32,.055);
+  transition:transform .3s cubic-bezier(.2,.8,.2,1),box-shadow .3s,border-color .3s;
+}
+.business-card:hover{transform:translateY(-7px);border-color:#d2e1ca;box-shadow:0 20px 45px rgba(24,47,32,.12)}
+.business-image{height:205px;background:#e8eee3}
+.business-card-body{padding:19px}
+.business-card h3{letter-spacing:-.04em}
+.rating{color:#688a38}
+.small-link{
+  border-radius:10px;background:#eff5e7;color:#315a3c;
+  padding:9px 13px;font-weight:800;transition:background .2s,transform .2s;
+}
+.small-link:hover{background:#e2efcf;transform:translateY(-1px)}
+.product-card,.info-panel,.assistant-panel{
+  border-radius:18px;border-color:#e4eae0;
+  box-shadow:0 9px 25px rgba(25,47,33,.05);
+}
+.product-card{transition:transform .25s,box-shadow .25s}
+.product-card:hover{transform:translateY(-5px);box-shadow:0 16px 32px rgba(25,47,33,.11)}
+.add-button{border-radius:10px;background:linear-gradient(135deg,#e1f39a,#cbe96a);color:#203d2c}
+.store-hero{border-radius:25px;box-shadow:0 16px 40px rgba(22,47,31,.12)}
+.store-hero:after{background:linear-gradient(0deg,rgba(12,37,27,.9),rgba(12,37,27,.08))}
+.info-panel,.assistant-panel{padding:22px}
+.assistant-panel{background:linear-gradient(145deg,#173e30,#102b25)}
+.footer{
+  background:linear-gradient(115deg,#102d25,#173e30);
+  padding:40px clamp(18px,5vw,82px);
+}
+.footer small{border-color:#ffffff22}
+.cart-drawer{box-shadow:-20px 0 60px rgba(10,35,24,.2)}
+.cart-heading{border-color:#e7eee3}
+.checkout-form input,.checkout-form select,.job-application-form input,.job-application-form textarea{
+  border:1px solid #dce6d9;border-radius:11px;padding:12px;background:#fbfdf9;
+}
+.checkout-form input:focus,.checkout-form select:focus,.job-application-form input:focus,.job-application-form textarea:focus{
+  outline:none;border-color:#91b374;box-shadow:0 0 0 4px #91b37425;background:#fff;
+}
+.policy-hero{background:linear-gradient(125deg,#153c2e,#102a24);border-radius:24px}
+.policy-content{border-radius:20px;box-shadow:0 10px 32px rgba(25,47,33,.05)}
+.toast{background:#173e30;border-color:#476d55;border-radius:14px;box-shadow:0 12px 30px rgba(10,35,24,.22)}
+@media(max-width:720px){
+  .header{height:72px}
+  .hero{min-height:490px;background-position:58% center}
+  .hero-content{padding:62px 0}
+  .intro{padding:55px 0 35px;gap:12px}
+  .section{padding:20px 0 55px}
+  .business-image{height:150px}
+  .footer{padding:28px 18px}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}
+}
+
+.motion-reveal{opacity:0;transform:translateY(18px) scale(.995);transition:opacity .65s ease,transform .65s cubic-bezier(.2,.75,.25,1)}
+.motion-reveal.is-visible{opacity:1;transform:translateY(0) scale(1)}
+@media(prefers-reduced-motion:reduce){.motion-reveal{opacity:1;transform:none;transition:none}}
