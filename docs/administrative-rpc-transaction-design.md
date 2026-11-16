@@ -604,3 +604,20 @@ Pendiente para la siguiente corrección:
 - definir un plazo de conservación y proceso de eliminación/anonimización para postulaciones, sin borrar registros que deban conservarse por obligación legal o auditoría.
 
 La misma revisión de ciclo de vida debe definir cómo un cliente solicita corrección o eliminación de datos personales y cómo se conserva la trazabilidad comercial de pedidos sin mantener innecesariamente datos identificables.
+
+
+## Resumen de continuidad — autenticación y ciclo de vida de cuentas (16 nov 2026)
+
+La rama mantiene implementados los flujos de login de clientes y personal, confirmación de correo prevista, recuperación con evento `PASSWORD_RECOVERY`, activación de invitaciones y revalidación periódica del acceso a paneles. El trigger de Auth solo copia el nombre visible desde metadata editable y no asigna roles ni membresías.
+
+Quedan bloqueos antes de producción:
+- `cuenta.html` no presenta aviso ni aceptación de privacidad en el registro de clientes; no se encontró una página legal de privacidad en la raíz de esta rama.
+- No existe flujo de autoservicio para solicitar corrección o eliminación de datos personales.
+- La configuración Auth (confirmación, URL allowlist, plantillas, SMTP, política de contraseña, CAPTCHA y duración de sesión) no puede comprobarse desde la conexión actual; requiere revisión manual en Dashboard.
+- La protección de contraseñas filtradas aparece deshabilitada en Security Advisor. La documentación vigente de Supabase indica que esa función requiere Pro o superior, por lo que no debe presentarse como solucionable desde código ni activarse mediante una modificación no autorizada del plan.
+- El código valida 10 caracteres en frontend para registro, invitación y recuperación; falta confirmar que Auth aplique la misma longitud en servidor.
+- La migración de favoritos e historial no está aplicada. Su diseño contempla `ON DELETE CASCADE` para favoritos y `ON DELETE SET NULL` para la relación pedido-cuenta, preservando los pedidos si se elimina una cuenta.
+
+La auditoría del trigger `private.handle_new_auth_user()` confirma `SECURITY DEFINER`, `search_path` vacío, inserción de solo `id/display_name` y ausencia de EXECUTE para roles API. No se identificó escalamiento de privilegios desde `raw_user_meta_data.display_name`.
+
+No se realizaron cambios en Auth ni SQL, no se enviaron correos, no se eliminaron usuarios, no se desplegaron Edge Functions y no se publicó el sitio. Los hallazgos detallados están en `docs/customer-auth-session-audit.md`.
