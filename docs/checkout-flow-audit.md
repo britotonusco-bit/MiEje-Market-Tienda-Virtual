@@ -63,19 +63,27 @@ La versión actual incorpora:
 
 Los controles estáticos confirmaron que el archivo ya no contiene el fragmento incompleto ni duplicaciones y que conserva un único cierre `COMMIT`. **Esto no sustituye una validación de sintaxis en PostgreSQL.** El archivo sigue siendo un borrador y no se ha ejecutado en Supabase.
 
-### 4. Carrito con datos desactualizados
+### 4. Respuesta de errores del checkout
+
+El navegador anteriormente mostraba el mensaje genérico de `supabase-js` cuando la Edge Function respondía con un error HTTP, aunque el servidor enviara una explicación útil (por ejemplo, inventario insuficiente o método de pago deshabilitado).
+
+Se corrigió `app.js` en la rama para leer el JSON de la respuesta HTTP mediante `error.context.clone().json()` y mostrar el campo `error` enviado por la función. Si no hay un cuerpo JSON legible, conserva el mensaje técnico de respaldo. La clave idempotente pendiente no se elimina cuando la solicitud falla, de modo que el cliente puede reintentar el mismo intento.
+
+La corrección pasó controles estáticos, pero falta comprobarla desde el navegador con respuestas reales 400, 409, 429 y 500.
+
+### 5. Carrito con datos desactualizados
 
 El navegador conserva en memoria los precios y existencias que recibió al cargar el catálogo. El servidor vuelve a comprobarlos al crear el pedido, lo cual evita aceptar precios o inventario antiguos. Sin embargo, cuando el servidor rechaza un pedido por cambio de precio, producto inactivo o falta de stock, el navegador no actualiza automáticamente el catálogo y el carrito para mostrar la situación nueva.
 
 Antes de implementar se debe añadir una recuperación clara: informar el motivo, volver a consultar el negocio y sus productos, señalar qué líneas cambiaron y permitir que el cliente revise el nuevo total antes de volver a confirmar.
 
-### 5. Reintentos después de perder la respuesta
+### 6. Reintentos después de perder la respuesta
 
 El navegador guarda temporalmente la clave de idempotencia en `sessionStorage` y la reutiliza cuando el mismo contenido se vuelve a enviar en la misma sesión. Esto ayuda si el servidor creó el pedido, pero la respuesta no llegó al navegador.
 
-El carrito como tal permanece solo en memoria. Debe probarse el caso de recarga/cierre de página durante el checkout y decidir si se guarda una copia temporal del carrito y de los datos no sensibles necesarios para reconstruir el mismo intento. No guardar datos de pago sensibles.
+El carrito como tal permanece solo en memoria; `sessionStorage` conserva la huella de la solicitud y la clave, no las líneas del carrito. Si se recarga la página, el cliente debe reconstruir el mismo carrito y volver a escribir los mismos datos para que coincida la huella y se recupere la clave anterior. Debe probarse este escenario y decidir si se guarda temporalmente el carrito (solo identificadores de producto y cantidades) para facilitar la recuperación. No guardar datos de pago sensibles.
 
-### 6. Reglas del carrito y del método de pago
+### 7. Reglas del carrito y del método de pago
 
 - El carrito admite productos de un solo negocio a la vez; al elegir otro negocio, pide confirmación para vaciarlo.
 - Los productos de demostración y los negocios suspendidos no pueden iniciar una compra.
@@ -106,7 +114,8 @@ No existen registros reales con los que ejecutar pruebas de compra o concurrenci
 7. Reintento con la misma clave y el mismo contenido.
 8. Reutilización de la clave con contenido diferente.
 9. Error de red después de que el servidor haya creado el pedido.
-10. Recarga de página durante el checkout.
+10. Recarga de página durante el checkout y recuperación del carrito/clave idempotente.
+15. Comprobar que el navegador muestra el mensaje real de la Edge Function en errores 400, 409, 429 y 500.
 11. Método de pago desactivado entre la carga de la tienda y la confirmación.
 12. Pedido inferior al mínimo y cantidades fuera de los límites.
 13. Carrito con productos de dos negocios.
