@@ -272,3 +272,11 @@ Solo lectura del proyecto activo y revisión de archivos de la rama. No se alter
 - RLS de lectura de postulaciones y Storage limita el acceso al administrador, pero la política Storage desplegada necesita endurecimiento de ruta.
 - No se descargaron hojas de vida, no se generaron postulaciones, no se enviaron correos, no se subieron ni borraron archivos, no se ejecutó SQL de escritura y no se desplegó Edge Function.
 
+
+
+### Asesor de seguridad — consulta de cierre, 16-Nov-2026
+El asesor volvió a mostrar:
+- 3 avisos INFO `rls_enabled_no_policy`: `private.checkout_rate_limits`, `public.job_application_rate_limits` y `public.job_application_upload_sessions`.
+- 1 aviso WARN `auth_leaked_password_protection`: protección contra contraseñas filtradas deshabilitada.
+
+Las tres tablas de control son estructuras internas y las consultas previas confirmaron que los roles API no tienen permisos de acceso; los RPC de rate limit y envío de postulaciones solo permiten ejecución a `service_role`. No se deben crear políticas RLS genéricas para ocultar los avisos. La protección de contraseñas filtradas debe revisarse desde la configuración Auth/plan, no con una política SQL.
