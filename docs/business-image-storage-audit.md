@@ -130,3 +130,14 @@ Comprobaciones estáticas posteriores:
 - Se añadieron estilos para que el espacio de la imagen conserve una presentación estable.
 
 La verificación fue estática sobre el contenido de GitHub. No se ejecutó el panel en navegador ni se realizó una prueba de carga real en Storage. Por ello, esta corrección no se considera validada en ejecución hasta probarla en un entorno de ensayo.
+
+
+## 10. Confirmación de políticas activas (consulta de solo lectura)
+
+Se volvió a consultar el proyecto independiente después de las correcciones de código. El bucket `business-assets` continúa configurado como público, con límite de 5 MiB y tipos PNG, JPEG y WEBP.
+
+Las cuatro políticas activas (`INSERT`, `SELECT`, `UPDATE` y `DELETE`) todavía contienen la expresión incorrecta `storage.foldername(b.name)` dentro de la subconsulta a `businesses`. Por tanto, el borrador corregido no se ha aplicado al proyecto.
+
+La lectura pública por URL es coherente con un bucket público; según la documentación actual de Supabase, el acceso público omite RLS para servir/descargar el objeto, pero subir, actualizar y eliminar siguen sujetos a las políticas. Los archivos de candidatos deben permanecer en el bucket privado y no deben mezclarse con imágenes públicas.
+
+Esta confirmación fue únicamente de lectura. No se modificaron políticas, buckets, archivos ni datos.
