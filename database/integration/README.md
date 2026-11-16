@@ -231,3 +231,16 @@ Correcciones en esta rama:
 - Se documentó la verificación obligatoria de esa cabecera en staging.
 
 La consulta de solo lectura al esquema activo confirmó que existe la restricción única `products(business_id, id)` requerida por la FK compuesta del registro de inventario. También confirmó que las tablas/columnas nuevas de clientes, inventario e idempotencia todavía no están instaladas. No se ejecutaron migraciones ni se modificó Supabase.
+
+
+## Auditoría del flujo de pagos, cancelaciones, inventario y reembolsos (16 nov 2026)
+Informe: [docs/order-payment-cancellation-refund-inventory-audit.md](../../docs/order-payment-cancellation-refund-inventory-audit.md).
+
+Hallazgos principales:
+- La confirmación de pago bloquea el pedido, valida el administrador activo y registra movimiento financiero, estado y auditoría en una transacción.
+- La cancelación aprobada actualiza el pedido y restituye inventario de forma atómica; la restitución genera movimientos de inventario.
+- El reembolso exige pedido cancelado, pago conciliado, cancelación aprobada y administrador activo. Solo registra un reembolso externo ya realizado; no transfiere dinero.
+- Las migraciones incorporan índices únicos parciales para impedir pagos y reembolsos completados duplicados.
+- El esquema activo contiene las columnas y relaciones base, pero todavía no tiene esos índices nuevos ni las RPC candidatas.
+
+La revisión estática fue favorable y no requirió modificar las migraciones. Concurrencia, rollback, aislamiento A/B y movimientos de inventario siguen pendientes de pruebas en staging. No se ejecutó SQL ni se desplegó nada.
