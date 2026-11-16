@@ -62,6 +62,14 @@ La estructura de registro, inicio de sesión, recuperación y aceptación de inv
 - La interfaz `cuenta.js` consume el historial mediante el RPC y escapa los textos antes de insertarlos en el HTML. También comprueba que la respuesta corresponda al usuario que sigue activo para evitar renderizar datos de una consulta anterior tras un cambio de sesión.
 - Los favoritos se protegen por RLS con `user_id = auth.uid()`; la inserción requiere producto activo y negocio activo, y el usuario solo puede borrar sus propios favoritos. La restricción única impide guardar dos veces el mismo producto para la misma cuenta.
 
+### Interfaz pública de favoritos
+
+- Se encontró que las tarjetas de producto siempre mostraban `♡ Guardar`, incluso cuando el producto ya estaba guardado por la cuenta actual. El servidor sí comprobaba correctamente si el favorito existía antes de insertar o eliminar, pero la etiqueta visual no reflejaba el estado real.
+- Se corrigió `app.js` en la rama: al cargar la tienda consulta los IDs favoritos de la cuenta autenticada, muestra `♥ Guardado` para los productos guardados y actualiza el conjunto local después de insertar o retirar un favorito.
+- Si no hay sesión, el conjunto se limpia y el usuario es dirigido a `cuenta.html` cuando intenta guardar.
+- Esta corrección es de presentación y sincronización de interfaz; la autorización real sigue dependiendo de RLS y de los permisos de la base de datos. El conjunto local del navegador solo controla la etiqueta visual, nunca concede acceso ni sustituye las políticas.
+- La consulta inicial depende de que `customer_favorites` esté creada y expuesta en Data API. Mientras la migración y configuración estén pendientes, la consulta puede fallar y los botones no podrán guardar favoritos. No se ha probado en navegador con una tabla activa.
+
 ### Requisito adicional de Data API
 
 La migración concede privilegios SQL mínimos y activa RLS en `customer_favorites`, pero eso no garantiza por sí solo que la tabla sea accesible desde `client.from()`. Desde el 30-Oct-2026 las tablas nuevas no se exponen automáticamente por defecto en todos los proyectos. Antes de habilitar favoritos, el propietario debe confirmar en Dashboard > Integrations > Data API que el esquema `public` esté expuesto y que la tabla esté incluida. No se cambió esa configuración durante esta auditoría. <https://supabase.com/changelog/45329-breaking-change-tables-not-exposed-to-data-and-graphql-api-automatically>
