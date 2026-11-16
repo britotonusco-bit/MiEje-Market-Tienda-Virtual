@@ -499,6 +499,55 @@ USING (
   AND private.business_is_active(business_id)
 );
 
+-- El panel de negocio permite revisar postulaciones. La política RLS por sí
+-- sola no concede UPDATE: se habilitan únicamente las columnas que usa esa
+-- pantalla y se mantiene el alcance limitado al negocio activo.
+DROP POLICY IF EXISTS job_applications_business_admin_update ON public.job_applications;
+CREATE POLICY job_applications_business_admin_update
+ON public.job_applications
+FOR UPDATE
+TO authenticated
+USING (
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+)
+WITH CHECK (
+  private.has_business_role(business_id, ARRAY['business_admin']::text[])
+  AND private.business_is_active(business_id)
+);
+
+REVOKE UPDATE ON TABLE public.job_applications FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE (status, admin_notes, reviewed_by, reviewed_at)
+ON TABLE public.job_applications FROM PUBLIC, anon, authenticated;
+GRANT UPDATE (status, admin_notes, reviewed_by, reviewed_at)
+ON TABLE public.job_applications TO authenticated;
+
+-- El actor y la hora de revisión se generan en la base de datos, no se confía
+-- en los valores enviados desde el navegador.
+CREATE OR REPLACE FUNCTION private.stamp_job_application_review()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''
+AS $function$
+BEGIN
+  IF auth.uid() IS NOT NULL THEN
+    NEW.reviewed_by := auth.uid();
+    NEW.reviewed_at := now();
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION private.stamp_job_application_review()
+FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS job_applications_stamp_review ON public.job_applications;
+CREATE TRIGGER job_applications_stamp_review
+BEFORE UPDATE OF status, admin_notes ON public.job_applications
+FOR EACH ROW
+EXECUTE FUNCTION private.stamp_job_application_review();
+
 
 -- Impedir trasladar registros entre tiendas cuando una misma cuenta
 -- administra más de un negocio. La política RLS valida el destino, pero
