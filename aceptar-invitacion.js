@@ -52,7 +52,7 @@
     try {
       const { error } = await client.auth.updateUser({ password });
       if (error) throw error;
-      await client.auth.signOut();
+      await client.auth.signOut({ scope: 'local' });
       show('Cuenta activada. Ya puedes iniciar sesión con tu correo y la contraseña que acabas de crear.', 'success');
       form.reset();
       button.textContent = 'Cuenta activada';
