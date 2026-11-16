@@ -341,3 +341,8 @@ Verificación de solo lectura en Supabase activo:
 - No se ejecutaron pruebas dinámicas A/B ni análisis de archivos reales; no se consultaron datos personales de postulantes.
 
 Antes de habilitar vacantes públicamente, alinear la Edge Function en staging, añadir evidencia versionada de autorización, limitar tamaño/estructura de respuestas, validar el contenido real de CV, probar el aislamiento de negocio y definir retención/eliminación de postulaciones y archivos. No desplegar ni ejecutar migraciones en el proyecto activo.
+
+
+### Corrección de carga de hojas de vida — 16 nov 2026
+
+En `correcciones-funcionales` se añadió la validación de consentimiento antes de emitir el token de carga, límites para respuestas personalizadas y una comprobación básica de firma binaria del CV antes de registrar la postulación. La función desplegada en Supabase sigue siendo v2: no se desplegó esta corrección. Falta análisis antimalware, evidencia de consentimiento versionada, política de retención y pruebas dinámicas en staging. Detalle en `docs/customer-data-rights-audit.md`.
