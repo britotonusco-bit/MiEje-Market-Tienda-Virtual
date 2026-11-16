@@ -116,10 +116,11 @@ Durante la normalización de estados, el trigger `orders_audit_status` permanece
 
 ## Riesgos y límites pendientes de la idempotencia
 
-1. La Edge Function consulta el registro del método de pago antes de buscar la respuesta idempotente. Si el método se desactiva, la fila aún existe y el pedido anterior se puede recuperar; si el método se elimina físicamente, la búsqueda previa devuelve 409 y no recupera el pedido, aunque exista una copia histórica del nombre del método en el pedido. Debe definirse que los métodos usados en pedidos se desactiven o archiven, y no se eliminen físicamente.
+1. La Edge Function consulta el registro del método de pago antes de buscar la respuesta idempotente. En el esquema activo, los administradores autenticados no tienen permiso SQL de DELETE sobre `business_payment_methods`; las operaciones normales de configuración desactivan métodos en vez de borrarlos. Esto permite recuperar un pedido anterior aunque el método se haya desactivado. La eliminación física solo está disponible para `service_role` y debe evitarse si existe historial asociado.
 2. Las RPC de idempotencia solo deben ser ejecutables por `service_role`. La Edge Function debe mantenerse como la única puerta pública; no conceder ejecución de esas RPC a `anon` ni `authenticated`.
 3. El límite por IP usa `cf-connecting-ip` y, como respaldo, `x-forwarded-for`. Antes de publicar, confirmar que el encabezado de respaldo lo establece un proxy confiable y no puede ser enviado libremente por el cliente; de lo contrario, debe eliminarse el respaldo y rechazarse solicitudes sin IP confiable.
 4. La consulta de respuesta idempotente se hace antes de reservar un nuevo intento. Esto evita contar dos veces los reintentos legítimos, pero debe probarse que una clave no permita recuperar datos de pedido a alguien que no conoce el contenido original. No exponer la RPC de búsqueda directamente al navegador.
+5. La tabla `private.checkout_idempotency` no tiene todavía una política de limpieza ni un plazo de conservación. No se debe inventar un plazo: hay que definirlo junto con la política de retención de pedidos, teniendo en cuenta que borrar la clave demasiado pronto puede permitir que un reintento tardío cree un segundo pedido.
 
 ## Estado de la base de datos al revisar
 
@@ -145,6 +146,12 @@ No existen registros reales con los que ejecutar pruebas de compra o concurrenci
 9. Error de red después de que el servidor haya creado el pedido.
 10. Recarga de página durante el checkout y recuperación del carrito/clave idempotente.
 15. Comprobar que el navegador muestra el mensaje real de la Edge Function en errores 400, 409, 429 y 500.
+16. Cerrar la pestaña después de enviar el pedido, volver a abrir la tienda y repetir exactamente el mismo pedido: debe recuperarse el mismo número, sin descontar inventario otra vez.
+17. Reintentar el mismo intento desde otra red/IP: debe crear la reserva para la IP nueva y recuperar/continuar el mismo pedido.
+18. Intentar cambiar los datos o la cuenta mientras existe un intento sin resolver: el navegador debe bloquear un segundo checkout.
+19. Abrir dos pestañas y enviar el mismo pedido simultáneamente: debe existir un solo pedido y un solo descuento de inventario.
+20. Deshabilitar un método de pago entre la carga de la tienda y la confirmación; no debe crearse el pedido con un método deshabilitado.
+21. Intentar borrar un método desde una cuenta de administrador; la operación debe estar denegada y el método histórico debe conservarse.
 11. Método de pago desactivado entre la carga de la tienda y la confirmación.
 12. Pedido inferior al mínimo y cantidades fuera de los límites.
 13. Carrito con productos de dos negocios.
