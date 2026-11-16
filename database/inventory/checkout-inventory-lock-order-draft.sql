@@ -138,7 +138,8 @@ BEGIN
     INTO v_unit_cost
     FROM public.product_costs AS pc
     WHERE pc.product_id = v_product.id
-      AND pc.business_id = p_business_id;
+      AND pc.business_id = p_business_id
+    FOR SHARE;
 
     v_subtotal := v_subtotal + (v_product.price * v_quantity);
 
