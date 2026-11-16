@@ -1176,3 +1176,46 @@ La consulta de solo lectura confirmó:
 - Supabase anunció que las tablas nuevas de esquemas expuestos dejaron de exponerse automáticamente a Data API a partir del 30 de octubre de 2026. Las migraciones nuevas deben incluir los GRANT mínimos necesarios y comprobar la configuración de exposición; conceder GRANT no sustituye RLS. Referencia: https://supabase.com/changelog/45329-breaking-change-tables-not-exposed-to-data-and-graphql-api-automatically.
 
 **Estado:** corrección de UUID duplicados guardada y verificada en `correcciones-funcionales`. El resto de observaciones live se documenta como pendiente de migraciones y pruebas. No se ejecutó SQL ni se desplegaron Edge Functions; `main` y GitHub Pages no fueron modificados.
+
+
+## Revisión de cuentas de clientes, historial y favoritos
+
+Se revisaron `cuenta.js`, `app.js`, la Edge Function `create-public-order`, la migración `database/customers/customer-account-migration.sql` y la RPC de historial incluida en `database/orders/order-financial-access-draft.sql`.
+
+### Vinculación de pedidos con cuentas
+
+- El checkout valida el JWT con `auth.getUser(token)` en el servidor. Si hay sesión, consulta el perfil y rechaza perfiles inexistentes o bloqueados.
+- El ID de cliente no se acepta desde el formulario: se obtiene del usuario autenticado y se pasa a las RPC de checkout.
+- Las funciones de checkout crean el pedido y vinculan `customer_user_id` dentro de la misma transacción; si la vinculación falla, la operación completa debe revertirse.
+- Las compras realizadas como invitado permanecen con `customer_user_id = NULL`. No se vinculan automáticamente después de que el comprador crea una cuenta. La página de cuenta informa esta limitación.
+
+### Historial de compras
+
+- `get_customer_order_history()` valida que exista sesión, rechaza perfiles bloqueados y filtra exclusivamente por `orders.customer_user_id = auth.uid()`.
+- Devuelve como máximo los 50 pedidos más recientes, con productos, cantidades, importes, método snapshot y estado.
+- No devuelve al cliente su dirección de entrega, teléfono ni correo desde esta RPC.
+- `private.customer_owns_order(uuid)` permite comprobar la propiedad de las líneas del pedido sin exponer `customer_user_id` en una consulta directa.
+- El permiso EXECUTE de la RPC de historial se limita a `authenticated`; la función privada no se concede a `anon`.
+
+### Favoritos
+
+- `app.js` consulta el usuario mediante `auth.getUser()` y solo entonces agrega o retira el favorito.
+- `cuenta.js` consulta los favoritos del usuario activo y permite eliminarlos.
+- La migración crea una restricción única por usuario/producto, RLS para lectura, inserción y eliminación propias, y no concede UPDATE.
+- La inserción exige que el producto esté activo y pertenezca a un negocio activo. La política RLS vuelve a comprobar la propiedad del usuario; no se confía solo en el filtro del navegador.
+- Al cerrar sesión, la página limpia el historial y los favoritos mostrados.
+
+### Estado confirmado en Supabase Independiente
+
+La consulta de solo lectura confirmó que todavía no existen `orders.customer_user_id`, `customer_favorites`, `get_customer_order_history()` ni `private.customer_owns_order(uuid)`. También confirmó cero pedidos y cero líneas de pedido; hay un perfil. Por ello no se pueden realizar pruebas reales de historial, favoritos ni aislamiento entre dos cuentas.
+
+### Dependencias y pruebas pendientes
+
+1. Aplicar primero `customer-account-migration.sql` en un entorno de ensayo.
+2. Aplicar después los borradores de checkout/idempotencia y acceso financiero en el orden documentado; probar que una compra autenticada se vincula al usuario validado y una compra invitada queda sin vínculo.
+3. Probar dos cuentas distintas: cada una solo debe ver su propio historial y favoritos; intentar leer, insertar o borrar filas de la otra debe fallar.
+4. Comprobar que un favorito duplicado no se inserta, que un producto inactivo no se puede guardar y que se puede retirar un favorito propio aunque el producto deje de estar disponible.
+5. Comprobar que al cerrar sesión se limpia la información en pantalla y que al iniciar sesión con otra cuenta no se muestran datos de la sesión anterior.
+6. Probar que borrar una cuenta deja los pedidos conservados con `customer_user_id = NULL`, mientras sus favoritos se eliminan por la FK `ON DELETE CASCADE`.
+
+**Estado:** auditoría estática y consultas live de solo lectura completadas. No se detectó un fallo de autorización en el código de rama durante esta revisión. Las funciones y tablas de clientes siguen siendo borradores pendientes de instalación; no se ejecutó SQL, no se desplegó ninguna Edge Function y no se modificaron `main` ni GitHub Pages.
