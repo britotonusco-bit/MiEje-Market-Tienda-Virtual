@@ -54,7 +54,8 @@ BEGIN
   SELECT p.platform_role, p.is_blocked
     INTO v_actor_role, v_actor_blocked
   FROM public.profiles AS p
-  WHERE p.id = p_actor_id;
+  WHERE p.id = p_actor_id
+  FOR SHARE;
 
   IF NOT FOUND OR v_actor_role IS DISTINCT FROM 'platform_owner'
      OR v_actor_blocked IS DISTINCT FROM false THEN
@@ -92,11 +93,28 @@ BEGIN
 
   SELECT p.is_blocked INTO v_target_blocked
   FROM public.profiles AS p
-  WHERE p.id = v_before.user_id;
+  WHERE p.id = v_before.user_id
+  FOR SHARE;
 
   IF NOT FOUND OR v_target_blocked IS DISTINCT FROM false THEN
     RAISE EXCEPTION 'No se puede asignar un rol a una cuenta inexistente o bloqueada globalmente.'
       USING ERRCODE = '42501';
+  END IF;
+
+  IF v_before.role IS NOT DISTINCT FROM p_role
+     AND v_before.job_title IS NOT DISTINCT FROM v_job_title THEN
+    RETURN pg_catalog.jsonb_build_object(
+      'ok', true,
+      'unchanged', true,
+      'membership', pg_catalog.jsonb_build_object(
+        'id', v_before.id,
+        'business_id', v_before.business_id,
+        'user_id', v_before.user_id,
+        'role', v_before.role,
+        'status', v_before.status,
+        'job_title', v_before.job_title
+      )
+    );
   END IF;
 
   IF v_before.role = 'business_admin'
@@ -183,7 +201,8 @@ BEGIN
   SELECT p.platform_role, p.is_blocked
     INTO v_actor_role, v_actor_blocked
   FROM public.profiles AS p
-  WHERE p.id = p_actor_id;
+  WHERE p.id = p_actor_id
+  FOR SHARE;
 
   IF NOT FOUND OR v_actor_role IS DISTINCT FROM 'platform_owner'
      OR v_actor_blocked IS DISTINCT FROM false THEN
@@ -309,7 +328,8 @@ BEGIN
   SELECT p.platform_role, p.is_blocked
     INTO v_actor_role, v_actor_blocked
   FROM public.profiles AS p
-  WHERE p.id = p_actor_id;
+  WHERE p.id = p_actor_id
+  FOR SHARE;
 
   IF NOT FOUND OR v_actor_role IS DISTINCT FROM 'platform_owner'
      OR v_actor_blocked IS DISTINCT FROM false THEN
