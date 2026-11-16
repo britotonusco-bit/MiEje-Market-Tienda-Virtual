@@ -51,6 +51,26 @@
         avatarNode.style.backgroundPosition = 'center';
       }
       document.querySelector('#logoutBtn').addEventListener('click', signOut);
+      const technicalNavItems = [...document.querySelectorAll('aside nav .nav-item')];
+      const syncTechnicalNavigation = () => {
+        const currentHash = window.location.hash || '#resumen';
+        technicalNavItems.forEach(item => {
+          const active = item.getAttribute('href') === currentHash;
+          item.classList.toggle('active', active);
+          if (active) item.setAttribute('aria-current', 'location');
+          else item.removeAttribute('aria-current');
+        });
+      };
+      technicalNavItems.forEach(item => item.addEventListener('click', () => {
+        technicalNavItems.forEach(navItem => {
+          navItem.classList.remove('active');
+          navItem.removeAttribute('aria-current');
+        });
+        item.classList.add('active');
+        item.setAttribute('aria-current', 'location');
+      }));
+      window.addEventListener('hashchange', syncTechnicalNavigation);
+      syncTechnicalNavigation();
       document.querySelector('#refreshTechnicalBtn')?.addEventListener('click', refreshTechnical);
       document.querySelector('#createBusinessForm')?.addEventListener('submit', createBusiness);
       document.querySelector('#inviteMemberForm')?.addEventListener('submit', inviteBusinessMember);
