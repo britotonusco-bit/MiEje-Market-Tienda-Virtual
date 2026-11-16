@@ -356,3 +356,8 @@ La ruta operativa revisada es `panel-negocio.html` + `panel-live.js`; `panel-adm
 ### Descargas de CV bajo demanda — 16 nov 2026
 
 `panel-live.js` ahora genera el enlace firmado de 300 segundos solo cuando el administrador pulsa Descargar, en vez de crear enlaces para todos los CV al cargar la lista. Verificación estática del archivo guardado confirmada; falta prueba real en navegador con cuentas de negocio y archivos de prueba.
+
+
+### Hallazgo crítico: cambio de estado de pedidos en los paneles — 16 nov 2026
+
+La ruta del panel llama UPDATE directo sobre `orders`, pero el rol `authenticated` no tiene privilegio SQL UPDATE en la tabla activa. Hay política RLS de UPDATE, pero eso no otorga el privilegio; la acción de cambiar estado no puede completarse por la ruta actual. También existe desajuste de estados: checkout y DB usan `pending/out_for_delivery`, mientras la interfaz usa `received/on_the_way`. Productos y costos sí tienen RLS que restringe escritura a `business_admin`; empleados pueden leer pedidos, pero no modificar productos ni costos. Corrección pendiente: RPC transaccional y restringida para cambios operativos, y alineación de trigger/constraint con el flujo acordado. No se cambió código ni base activa. Ver detalle en `docs/order-panel-callsite-integration-audit.md`.
