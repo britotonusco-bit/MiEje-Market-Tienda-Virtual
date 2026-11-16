@@ -494,3 +494,16 @@ La operación retira temporalmente el CHECK dentro de la misma ejecución SQL, t
 8. Gasto, pago de gasto, anulación y comprobante quedan auditados y no admiten edición libre.
 
 No se ejecutó SQL ni se desplegaron funciones durante esta revisión.
+
+
+### Corrección adicional: escrituras directas de gastos
+
+La inspección de privilegios efectivos del esquema activo encontró que `authenticated` conserva INSERT y UPDATE de tabla y también privilegios por columna sobre prácticamente todos los campos de `business_expenses`. Las políticas RLS permiten esos cambios a administradores activos. Aunque la interfaz usa RPCs, un cliente podía intentar insertar o modificar directamente y omitir la auditoría transaccional de los procedimientos.
+
+Se corrigió `database/finance/business-expense-audit-draft.sql` para:
+- revocar INSERT, UPDATE y DELETE de `business_expenses` a PUBLIC, anon y authenticated;
+- revocar explícitamente los privilegios por columna para INSERT y UPDATE;
+- retirar las políticas de escritura directa `business_expenses_insert` y `business_expenses_update`;
+- conservar la lectura RLS del administrador y las escrituras mediante RPCs auditadas.
+
+Los procedimientos de gastos son SECURITY DEFINER, validan `auth.uid()`, negocio activo y rol `business_admin`, y registran auditoría dentro de la misma transacción. El cambio es solo un borrador en la rama; verificar en staging que las cuatro RPCs sigan funcionando y que los intentos de INSERT/UPDATE/DELETE directo fallen para authenticated.
