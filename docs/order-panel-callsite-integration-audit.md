@@ -163,3 +163,26 @@ La validación `required` del navegador impide normalmente enviar el formulario 
 - Omitir o falsear el campo desde una llamada directa a la Edge Function: el servidor debe rechazarlo si la autorización es requisito.
 - Verificar versión del aviso, marca temporal y finalidades.
 - Comprobar que desmarcar autorizaciones promocionales no impida una compra cuando sean opcionales.
+
+
+### Auditoría de permisos y flujo de estados de pedidos en paneles — 16 nov 2026
+
+**Hallazgo crítico confirmado en Supabase activo (solo lectura):** el panel `panel-live.js` ejecuta `db.from('orders').update(changes)` desde `changeOrderStatus()` para administradores y empleados. La tabla tiene política RLS `orders_members_update_status`, pero el rol `authenticated` no tiene privilegio SQL UPDATE sobre `public.orders` (`has_table_privilege = false`). La existencia de una política RLS no concede por sí sola el privilegio SQL. Por tanto, la acción de cambio de estado del panel no puede completarse por esa ruta directa con los permisos actuales. No se ejecutó un cambio de estado para probarlo.
+
+**Inconsistencia adicional de estados:**
+- El checkout/RPC `create_public_order` crea pedidos con estado `pending`.
+- La restricción `orders_status_check` admite `pending, confirmed, preparing, ready, out_for_delivery, delivered, cancelled`.
+- El trigger `private.enforce_order_status_transition()` espera transiciones desde `pending` y usa `out_for_delivery`.
+- El panel representa `received` y `on_the_way`, y su mapa de avance empieza en `received` y usa `on_the_way`.
+
+Esto impide que el flujo de interfaz y el modelo de base de datos compartan un vocabulario coherente. Además, el trigger solo permite cancelar con una solicitud aprobada, mientras que la UI de avance normal no debe ofrecer cancelación como transición directa.
+
+**Permisos de productos y costos:**
+- RLS de `products` permite INSERT/UPDATE/DELETE únicamente al rol `business_admin` del negocio activo; empleados no pasan esas políticas aunque el rol tenga privilegios SQL generales.
+- RLS de `product_costs` restringe SELECT/INSERT/UPDATE al administrador del negocio activo o al propietario de plataforma.
+- La lectura de pedidos y sus líneas se limita a miembros activos del negocio (administrador/empleado) y al propietario de plataforma.
+- El panel filtra sus consultas y actualizaciones de pedidos por `business_id`; la protección final debe seguir en RLS/RPC, no depender solo del filtro JavaScript.
+
+**Corrección necesaria antes de habilitar la operación:** preparar una RPC transaccional de cambio de estado que compruebe `auth.uid()`, membresía activa y negocio activo, acepte solo los campos operativos (`status` y `delivery_tracking`), aplique la máquina de estados acordada (`received → confirmed → preparing → ready → on_the_way → delivered`) y registre auditoría. Revocar la escritura directa amplia y conceder EXECUTE solo a `authenticated` con comprobación explícita de rol dentro de la función. Alinear la restricción CHECK y el trigger con el vocabulario definitivo, conservando compatibilidad o migración controlada para pedidos históricos `pending/out_for_delivery`. No conceder UPDATE de tabla como solución rápida.
+
+**Estado de este paso:** hallazgo documentado; no se modificó el panel ni la base activa. La corrección requiere una migración y una RPC coordinadas, pruebas de estados y permisos con cuentas de administrador/empleado de dos negocios en staging. No desplegar sobre el proyecto activo.
