@@ -1234,15 +1234,35 @@
     if (!rows.length) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene publicaciones.</div>'; return; }
     const labels = { promotion: 'Promoción', job_form: 'Empleo', announcement: 'Anuncio', contact: 'Información' };
     target.innerHTML = tableHtml(
-      ['Tipo', 'Título', 'Estado de revisión', 'Visible', 'Fecha'],
+      ['Tipo', 'Título', 'Estado de revisión', 'Visible', 'Fecha', 'Acción'],
       rows.map(row => [
         esc(labels[row.content_type] || row.content_type),
         '<strong>' + esc(row.title) + '</strong><br><small>' + esc(row.body) + '</small>' + (row.moderation_note ? '<br><small>Nota técnica: ' + esc(row.moderation_note) + '</small>' : ''),
         esc(row.moderation_status),
         row.is_published ? 'Sí' : 'No',
-        dateTime(row.created_at)
+        dateTime(row.created_at),
+        row.is_published
+          ? '<button type="button" class="small-button" data-archive-content="' + esc(row.id) + '">Despublicar</button>'
+          : '<span class="muted">No publicada</span>'
       ])
     );
+    target.querySelectorAll('[data-archive-content]').forEach(button => button.addEventListener('click', async () => {
+      const id = button.dataset.archiveContent;
+      if (!window.confirm('¿Despublicar esta publicación? Se ocultará al público, pero se conservarán la vacante y todas sus postulaciones.')) return;
+      button.disabled = true;
+      try {
+        const { error: archiveError } = await db.from('business_content_pages')
+          .update({ is_published: false, updated_by: currentUser.id })
+          .eq('id', id)
+          .eq('business_id', businessId);
+        if (archiveError) throw archiveError;
+        alert('Publicación despublicada. Se conservaron las postulaciones y sus archivos.');
+        await loadBusinessContent();
+      } catch (error) {
+        alert('No se pudo despublicar la publicación: ' + (error.message || 'Error desconocido'));
+        button.disabled = false;
+      }
+    }));
   }
 
   async function loadJobApplications() {
