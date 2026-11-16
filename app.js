@@ -40,21 +40,16 @@
   };
 
   const categoryInfo = {
-    Comidas: {
-      description: "Restaurantes, comidas rápidas y sabores de la región."
-    },
-    Moda: {
-      description: "Prendas, accesorios y estilo para todos los días."
-    },
-    Tecnología: {
-      description: "Accesorios y productos tecnológicos."
-    },
-    Mercado: {
-      description: "Frutas, verduras y productos para tu despensa."
-    },
-    Hogar: {
-      description: "Detalles para hacer tu casa más acogedora."
-    }
+    Hogar: { description: "Artículos para el hogar y electrodomésticos." },
+    Salud: { description: "Productos de salud y cuidado personal." },
+    Muebles: { description: "Muebles y soluciones para tus espacios." },
+    Tecnología: { description: "Celulares, accesorios y productos tecnológicos." },
+    Belleza: { description: "Belleza, maquillaje y cuidado personal." },
+    Mascotas: { description: "Productos y accesorios para tus mascotas." },
+    Juguetes: { description: "Juguetes, juegos y novedades." },
+    Moda: { description: "Prendas, accesorios y tendencias." },
+    Comidas: { description: "Restaurantes, comidas rápidas y sabores de la región." },
+    Mercado: { description: "Frutas, verduras y productos para tu despensa." }
   };
 
   let businesses = [
@@ -437,8 +432,20 @@
     const query = $("#listingSearch").value.trim().toLocaleLowerCase("es");
 
     const filtered = businesses.filter(business => {
-      const matchesCategory =
-        selectedCategory === "Todas" || business.category === selectedCategory;
+      const categoryAliases = {
+        Hogar: ["hogar", "electrodoméstico", "electrodomestico"],
+        Salud: ["salud", "farmacia", "cuidado personal"],
+        Muebles: ["mueble", "mobiliario"],
+        Tecnología: ["tecnología", "tecnologia", "celular", "móvil", "movil"],
+        Belleza: ["belleza", "maquillaje", "cosmética", "cosmetica"],
+        Mascotas: ["mascota", "veterinaria", "animal"],
+        Juguetes: ["juguete", "juego"],
+        Moda: ["moda", "ropa", "calzado", "accesorio"]
+      };
+      const businessCategory = String(business.category || "").toLocaleLowerCase("es");
+      const matchesCategory = selectedCategory === "Todas" ||
+        (categoryAliases[selectedCategory] || [selectedCategory.toLocaleLowerCase("es")])
+          .some(alias => businessCategory.includes(alias));
 
       const searchable = [
         business.name,
