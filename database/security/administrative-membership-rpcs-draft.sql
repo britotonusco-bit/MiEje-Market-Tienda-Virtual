@@ -440,3 +440,256 @@ GRANT EXECUTE ON FUNCTION public.reactivate_business_membership(uuid, text, uuid
   TO service_role;
 
 -- FIN DEL BORRADOR. No ejecutar en el proyecto activo sin staging y revisión.
+
+
+
+-- Cambiar el estado de un negocio y auditar el cambio en la misma transacción.
+CREATE OR REPLACE FUNCTION public.set_technical_business_status(
+  p_business_id uuid,
+  p_status text,
+  p_reason text,
+  p_public_message text,
+  p_actor_id uuid
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_actor_role text;
+  v_actor_blocked boolean;
+  v_before public.businesses%ROWTYPE;
+  v_after public.businesses%ROWTYPE;
+  v_reason text := NULLIF(pg_catalog.btrim(p_reason), '');
+  v_public_message text := NULLIF(pg_catalog.btrim(p_public_message), '');
+BEGIN
+  IF p_business_id IS NULL OR p_actor_id IS NULL
+     OR p_status IS NULL
+     OR p_status NOT IN ('active', 'suspended', 'closed')
+     OR (p_status = 'suspended' AND v_reason IS NULL)
+     OR pg_catalog.char_length(COALESCE(v_reason, '')) > 2000
+     OR pg_catalog.char_length(COALESCE(v_public_message, '')) > 1000 THEN
+    RAISE EXCEPTION 'Datos de estado del negocio no válidos.'
+      USING ERRCODE = '22023';
+  END IF;
+
+  SELECT p.platform_role, p.is_blocked
+    INTO v_actor_role, v_actor_blocked
+  FROM public.profiles AS p
+  WHERE p.id = p_actor_id
+  FOR SHARE;
+
+  IF NOT FOUND OR v_actor_role IS DISTINCT FROM 'platform_owner'
+     OR v_actor_blocked IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'Actor técnico no autorizado.'
+      USING ERRCODE = '42501';
+  END IF;
+
+  SELECT b.* INTO v_before
+  FROM public.businesses AS b
+  WHERE b.id = p_business_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'No se encontró el negocio.'
+      USING ERRCODE = 'P0002';
+  END IF;
+
+  IF p_status = 'suspended' THEN
+    v_public_message := COALESCE(
+      v_public_message,
+      'Este negocio está temporalmente suspendido.'
+    );
+  ELSE
+    v_reason := NULL;
+    v_public_message := NULL;
+  END IF;
+
+  IF v_before.status IS NOT DISTINCT FROM p_status
+     AND v_before.suspension_reason IS NOT DISTINCT FROM v_reason
+     AND v_before.public_suspension_message IS NOT DISTINCT FROM v_public_message THEN
+    RETURN pg_catalog.jsonb_build_object(
+      'ok', true,
+      'unchanged', true,
+      'business', pg_catalog.jsonb_build_object(
+        'id', v_before.id,
+        'name', v_before.name,
+        'slug', v_before.slug,
+        'status', v_before.status,
+        'suspension_reason', v_before.suspension_reason,
+        'public_suspension_message', v_before.public_suspension_message
+      )
+    );
+  END IF;
+
+  UPDATE public.businesses
+  SET status = p_status,
+      suspension_reason = v_reason,
+      public_suspension_message = v_public_message
+  WHERE id = p_business_id
+  RETURNING * INTO v_after;
+
+  INSERT INTO public.audit_logs (
+    business_id, actor_id, action, entity_type, entity_id, details
+  ) VALUES (
+    p_business_id,
+    p_actor_id,
+    'business.status_changed',
+    'business',
+    p_business_id::text,
+    pg_catalog.jsonb_build_object(
+      'previous_status', v_before.status,
+      'new_status', v_after.status,
+      'previous_reason', v_before.suspension_reason,
+      'reason', v_after.suspension_reason,
+      'previous_public_message', v_before.public_suspension_message,
+      'public_message', v_after.public_suspension_message
+    )
+  );
+
+  RETURN pg_catalog.jsonb_build_object(
+    'ok', true,
+    'unchanged', false,
+    'business', pg_catalog.jsonb_build_object(
+      'id', v_after.id,
+      'name', v_after.name,
+      'slug', v_after.slug,
+      'status', v_after.status,
+      'suspension_reason', v_after.suspension_reason,
+      'public_suspension_message', v_after.public_suspension_message
+    )
+  );
+END;
+$function$;
+
+
+-- Moderar contenido con bloqueo de fila y auditoría atómica.
+CREATE OR REPLACE FUNCTION public.moderate_business_content_transactionally(
+  p_content_id uuid,
+  p_decision text,
+  p_moderation_note text,
+  p_actor_id uuid
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_actor_role text;
+  v_actor_blocked boolean;
+  v_before public.business_content_pages%ROWTYPE;
+  v_after public.business_content_pages%ROWTYPE;
+  v_note text := NULLIF(pg_catalog.btrim(p_moderation_note), '');
+BEGIN
+  IF p_content_id IS NULL OR p_actor_id IS NULL
+     OR p_decision IS NULL
+     OR p_decision NOT IN ('approved', 'rejected')
+     OR pg_catalog.char_length(COALESCE(v_note, '')) > 2000 THEN
+    RAISE EXCEPTION 'Datos de moderación no válidos.'
+      USING ERRCODE = '22023';
+  END IF;
+
+  SELECT p.platform_role, p.is_blocked
+    INTO v_actor_role, v_actor_blocked
+  FROM public.profiles AS p
+  WHERE p.id = p_actor_id
+  FOR SHARE;
+
+  IF NOT FOUND OR v_actor_role IS DISTINCT FROM 'platform_owner'
+     OR v_actor_blocked IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'Actor técnico no autorizado.'
+      USING ERRCODE = '42501';
+  END IF;
+
+  SELECT c.* INTO v_before
+  FROM public.business_content_pages AS c
+  WHERE c.id = p_content_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'No se encontró la publicación.'
+      USING ERRCODE = 'P0002';
+  END IF;
+
+  IF v_before.moderation_status = p_decision
+     AND v_before.moderation_note IS NOT DISTINCT FROM v_note
+     AND (p_decision <> 'rejected' OR v_before.is_published = false) THEN
+    RETURN pg_catalog.jsonb_build_object(
+      'ok', true,
+      'unchanged', true,
+      'content', pg_catalog.jsonb_build_object(
+        'id', v_before.id,
+        'business_id', v_before.business_id,
+        'title', v_before.title,
+        'content_type', v_before.content_type,
+        'is_published', v_before.is_published,
+        'moderation_status', v_before.moderation_status,
+        'moderation_note', v_before.moderation_note,
+        'moderated_at', v_before.moderated_at
+      )
+    );
+  END IF;
+
+  UPDATE public.business_content_pages
+  SET moderation_status = p_decision,
+      moderation_note = v_note,
+      moderated_by = p_actor_id,
+      moderated_at = pg_catalog.now(),
+      is_published = CASE
+        WHEN p_decision = 'rejected' THEN false
+        ELSE is_published
+      END
+  WHERE id = p_content_id
+  RETURNING * INTO v_after;
+
+  INSERT INTO public.audit_logs (
+    business_id, actor_id, action, entity_type, entity_id, details
+  ) VALUES (
+    v_after.business_id,
+    p_actor_id,
+    CASE
+      WHEN p_decision = 'approved' THEN 'business.content_approved'
+      ELSE 'business.content_rejected'
+    END,
+    'business_content_page',
+    v_after.id::text,
+    pg_catalog.jsonb_build_object(
+      'title', v_after.title,
+      'content_type', v_after.content_type,
+      'previous_moderation_status', v_before.moderation_status,
+      'moderation_status', v_after.moderation_status,
+      'previous_is_published', v_before.is_published,
+      'is_published', v_after.is_published,
+      'moderation_note', v_after.moderation_note
+    )
+  );
+
+  RETURN pg_catalog.jsonb_build_object(
+    'ok', true,
+    'unchanged', false,
+    'content', pg_catalog.jsonb_build_object(
+      'id', v_after.id,
+      'business_id', v_after.business_id,
+      'title', v_after.title,
+      'content_type', v_after.content_type,
+      'is_published', v_after.is_published,
+      'moderation_status', v_after.moderation_status,
+      'moderation_note', v_after.moderation_note,
+      'moderated_at', v_after.moderated_at
+    )
+  );
+END;
+$function$;
+
+
+REVOKE ALL ON FUNCTION public.set_technical_business_status(uuid, text, text, text, uuid)
+  FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.moderate_business_content_transactionally(uuid, text, text, uuid)
+  FROM PUBLIC, anon, authenticated;
+
+GRANT EXECUTE ON FUNCTION public.set_technical_business_status(uuid, text, text, text, uuid)
+  TO service_role;
+GRANT EXECUTE ON FUNCTION public.moderate_business_content_transactionally(uuid, text, text, uuid)
+  TO service_role;
