@@ -212,3 +212,10 @@ No se identificó escalamiento de privilegios a través del campo de metadata us
 
 ### Estado de esta continuación
 Solo lectura del proyecto activo y revisión de archivos de la rama. No se alteró Auth, no se crearon ni eliminaron usuarios, no se enviaron correos, no se ejecutó SQL de escritura, no se desplegaron funciones y no se cambió GitHub Pages.
+
+
+### Compatibilidad Supabase revisada el 16-Nov-2026
+- Se revisó el índice oficial de cambios. No aparece un cambio incompatible nuevo de Supabase Auth que obligue a modificar los flujos actuales de email/contraseña, recuperación o MFA de este proyecto.
+- El cambio relevante para la integración es que, desde el 30-Oct-2026, las tablas nuevas de `public` ya no quedan expuestas automáticamente a Data API. La migración de favoritos incluye GRANT explícitos y RLS, lo que debe verificarse en el proyecto una vez aplicada; RLS y exposición/grants son controles distintos.
+- La breaking change de CLI v3 no afecta los archivos estáticos ni los flujos Auth auditados; sí debe tenerse presente si se actualiza el CLI, porque ahora apunta a entorno local por defecto y confirma cambios alojados.
+- Referencias: Supabase Changelog (16-Nov-2026): https://supabase.com/changelog.md. Guía de seguridad de contraseñas: https://supabase.com/docs/guides/auth/password-security.
