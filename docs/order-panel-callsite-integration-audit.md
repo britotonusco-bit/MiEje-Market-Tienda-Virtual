@@ -142,3 +142,24 @@ Esto significa que los textos legales no describen correctamente el comportamien
 ### Resultado
 
 **No existe todavía un sistema de notificaciones automáticas de pedidos.** Solo hay seguimiento manual por código y auditoría interna de cambios de estado. La implementación de notificaciones, la cola/outbox, los proveedores y las pruebas siguen pendientes. No se modificó la base activa, no se enviaron mensajes ni correos, no se desplegaron funciones y no se cambió la publicación.
+
+
+### 8. Evidencia de autorización en el checkout
+
+La vista del checkout en `index.html` muestra una casilla obligatoria `privacyConsent` con el texto de autorización para gestionar el pedido. Sin embargo:
+
+- El manejador de checkout en `app.js` no lee ni envía `privacyConsent` en el payload de `create-public-order`.
+- La Edge Function desplegada `create-public-order` tampoco recibe un campo de autorización.
+- La RPC activa `create_public_order` no tiene parámetro de consentimiento y no registra fecha, versión del aviso, finalidad ni evidencia de aceptación.
+- La tabla activa `orders` no tiene columnas de consentimiento/privacidad.
+
+La validación `required` del navegador impide normalmente enviar el formulario sin marcar la casilla, pero eso no crea evidencia verificable del consentimiento en el servidor. Un cliente modificado puede omitir la validación de interfaz; la operación de servidor no tiene un dato con el que comprobarlo.
+
+**Riesgo alto de cumplimiento y trazabilidad:** no debe confundirse la casilla visible con un registro persistente de autorización. Antes de activar el flujo comercial, definir con asesoría legal la base aplicable y qué autorizaciones son necesarias; si se requiere autorización, registrar en servidor el usuario/identificador de pedido, fecha, versión exacta del aviso, finalidades y canal, sin guardar más datos de los necesarios. El servidor debe rechazar una solicitud que requiera autorización si no recibe y valida la evidencia correspondiente. Separar autorización para gestionar el pedido de cualquier consentimiento opcional de marketing.
+
+### Pruebas adicionales
+
+- Enviar checkout con casilla marcada y verificar evidencia persistida y vinculada al pedido.
+- Omitir o falsear el campo desde una llamada directa a la Edge Function: el servidor debe rechazarlo si la autorización es requisito.
+- Verificar versión del aviso, marca temporal y finalidades.
+- Comprobar que desmarcar autorizaciones promocionales no impida una compra cuando sean opcionales.
