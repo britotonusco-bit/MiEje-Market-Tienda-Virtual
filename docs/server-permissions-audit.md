@@ -1219,3 +1219,62 @@ La consulta de solo lectura confirmó que todavía no existen `orders.customer_u
 6. Probar que borrar una cuenta deja los pedidos conservados con `customer_user_id = NULL`, mientras sus favoritos se eliminan por la FK `ON DELETE CASCADE`.
 
 **Estado:** auditoría estática y consultas live de solo lectura completadas. No se detectó un fallo de autorización en el código de rama durante esta revisión. Las funciones y tablas de clientes siguen siendo borradores pendientes de instalación; no se ejecutó SQL, no se desplegó ninguna Edge Function y no se modificaron `main` ni GitHub Pages.
+
+
+## Revisión de registro, inicio de sesión, recuperación e invitaciones
+
+Se revisaron los flujos de cliente y personal en cuenta.js, login.js, recuperar-clave.js, actualizar-clave.js, aceptar-invitacion.js, y las Edge Functions resolve-my-access y technical-business-management.
+
+### Registro público y perfil
+
+- El registro de clientes usa auth.signUp() y guarda display_name en user_metadata. Ese dato solo se utiliza para mostrar el saludo; no determina roles ni permisos.
+- La base tiene el trigger on_auth_user_created, que ejecuta private.handle_new_auth_user() y crea profiles(id, display_name). La función no lee roles desde metadata ni crea membresías internas.
+- La consulta live confirmó un usuario Auth, un perfil, un usuario con correo confirmado y cero usuarios sin confirmar o bloqueados. Esto solo describe el estado actual; no prueba el flujo de registro con un usuario nuevo.
+- La página de clientes usa su propio formulario de acceso. El login de panel exige además una respuesta válida de resolve-my-access y una membresía activa, o el rol de propietario técnico con MFA. Por eso un cliente sin membresía no recibe acceso a los paneles.
+
+### Inicio de sesión y autorización de paneles
+
+- resolve-my-access valida el token con auth.getUser(token), consulta el perfil desde el servidor y rechaza perfiles inexistentes o bloqueados.
+- Solo devuelve membresías activas asociadas a negocios activos. La interfaz no decide el rol a partir de user_metadata.
+- El panel técnico requiere platform_role = platform_owner y nivel MFA AAL2; la Edge Function vuelve a comprobar ambos en servidor.
+- Se corrigió el cierre de sesión ejecutado cuando falla la validación del login: ahora usa signOut({ scope: 'local' }), para no revocar sesiones del mismo usuario en otros dispositivos.
+- El cierre voluntario desde la página de cuenta permanece global, porque es una acción explícita del usuario.
+
+### Recuperación de contraseña e invitaciones
+
+- resetPasswordForEmail() dirige a actualizar-clave.html y la página solo habilita el cambio al recibir el evento PASSWORD_RECOVERY; una sesión normal ya abierta no es suficiente.
+- La página de recuperación exige una contraseña de al menos 10 caracteres y confirmación coincidente. Tras cambiarla, cierra la sesión local.
+- La invitación se acepta solo cuando la URL indica type=invite en query o fragmento. Si recibe token_hash, lo verifica como invitación; exige sesión válida, limpia los tokens de la barra de direcciones y permite crear contraseña.
+- Tras aceptar la invitación, se cierra la sesión local, no las sesiones remotas del mismo usuario.
+- La Edge Function técnica envía invitaciones desde servidor con inviteUserByEmail; no expone la clave de servicio al navegador.
+
+### Hallazgo pendiente: reenvío de invitaciones
+
+Si el correo ya corresponde a un usuario Auth existente y aún no tiene membresía en el negocio seleccionado, la función técnica lo asigna directamente y devuelve invitation_sent = false. No genera ni reenvía un enlace de invitación en ese caso. La respuesta actual informa que se asignó un usuario existente, pero no ofrece una acción para reenviar el enlace si la cuenta sigue sin confirmar o la invitación anterior venció.
+
+Esto no concede el acceso a alguien distinto del titular de esa cuenta, pero puede dejar al usuario sin una ruta clara para completar el alta. Queda pendiente diseñar una acción controlada de reenvío/recuperación para cuentas existentes no confirmadas, con límites de frecuencia, comprobación de correo y registro de auditoría. No se improvisó el uso de generateLink porque requiere definir el tratamiento del usuario existente y el correo que recibirá.
+
+### Configuración Auth que no se pudo verificar desde la conexión disponible
+
+- URL Site y allowlist exacta de Redirect URLs.
+- Plantillas de confirmación, recuperación e invitación.
+- SMTP personalizado, límites efectivos de envío y prueba de entrega.
+- Confirmación de correo, política de contraseñas y CAPTCHA/rate limits en el Dashboard.
+- Duración real de enlaces y sesiones.
+
+Los destinos usados por el código deben estar permitidos explícitamente por Supabase Auth. El enlace de invitación está fijado al dominio/ruta de GitHub Pages; registro y recuperación construyen su destino desde la página actual. La allowlist debe limitarse al dominio y rutas exactas del proyecto, sin comodines amplios. La documentación vigente de Supabase confirma que los destinos redirectTo deben coincidir con la lista permitida: https://supabase.com/docs/guides/auth/redirect-urls.
+
+El proyecto independiente está en plan Free. Supabase anunció que los proyectos nuevos Free que usan SMTP predeterminado no pueden personalizar las plantillas Auth; para personalizarlas se requiere SMTP propio. El correo SMTP predeterminado también tiene límites bajos y no debe considerarse listo para invitaciones/registro público de producción. Referencia: https://supabase.com/changelog/46599-changes-to-email-template-customisation-on-free-tier.
+
+### Pruebas pendientes antes de habilitar usuarios externos
+
+1. Registro de cliente nuevo con confirmación de correo y creación automática del perfil.
+2. Inicio de sesión de cliente sin membresías: debe permanecer en la cuenta de cliente y no acceder a paneles.
+3. Inicio de sesión de empleado y administrador, incluyendo varias membresías y selección de negocio.
+4. Bloqueo de perfil y suspensión de membresía: verificar que sus efectos sean distintos.
+5. Recuperación real desde correo, enlace vencido, enlace reutilizado y cambio de contraseña.
+6. Invitación nueva, invitación vencida, correo ya registrado y reenvío de invitación.
+7. MFA del propietario: enrolamiento inicial, verificación AAL2 y rechazo de acciones técnicas con AAL1.
+8. Comprobar Site URL, Redirect URLs, SMTP, plantillas, confirmación de correo, CAPTCHA y límites en el Dashboard.
+
+**Estado:** revisión estática del código y consultas live de solo lectura completadas. Se corrigió el cierre de sesión global accidental en errores de login, recuperación e invitación, limitándolo a la sesión local. No se enviaron correos, no se cambió la configuración Auth, no se desplegaron Edge Functions y no se ejecutó SQL.
