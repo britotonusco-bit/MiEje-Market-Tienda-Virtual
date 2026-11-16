@@ -1,0 +1,111 @@
+# Auditoría de recuperación de cuentas, invitaciones y auditoría de actividad
+
+**Fecha:** 16 de noviembre de 2026  
+**Proyecto Supabase:** MiEje Market Independiente (`cqixlrwbqatbhzmpygiz`)  
+**Rama revisada:** `correcciones-funcionales`
+
+## Alcance
+
+Revisión de los flujos web de inicio de sesión, MFA del propietario, recuperación de contraseña y aceptación de invitaciones; del código servidor para asignar usuarios; y de la tabla de auditoría activa. Se separan hallazgos del proyecto activo de cambios realizados únicamente en la rama.
+
+No se enviaron correos, no se modificaron usuarios de Auth, no se cambiaron ajustes de Auth, no se ejecutaron SQL y no se desplegó código.
+
+## Resumen de hallazgos
+
+| ID | Hallazgo | Severidad | Estado |
+|---|---|---|---|
+| ACC-01 | Usuario existente sin confirmar puede recibir membresía sin reenvío de confirmación | Alta | Pendiente |
+| ACC-02 | La aceptación de invitación valida el tipo del enlace y actualiza la contraseña | Correcto con pruebas pendientes |
+| ACC-03 | Recuperación de contraseña depende del evento `PASSWORD_RECOVERY` y tiene espera máxima de 10 segundos | Media | Diseño defensivo; requiere prueba real |
+| ACC-04 | La URL de recuperación conservaba parámetros después de validar el enlace | Media | Corregido solo en la rama |
+| ACC-05 | Los detalles del evento de acceso guardaban el correo además de `actor_id` | Baja / privacidad | Corregido solo en la rama |
+| AUD-01 | `service_role` puede actualizar y borrar auditoría; no hay trigger de inmutabilidad | Alta | Pendiente de diseño |
+| AUD-02 | No hay una tabla propia de ciclo de invitación/reenvío/revocación | Media-alta | Pendiente |
+| CFG-01 | Comentario de `config.toml` describía el secreto antiguo de limpieza | Baja / documentación | Corregido solo en la rama |
+
+## ACC-01 — Usuario existente no confirmado
+
+El flujo técnico busca una cuenta por correo. Si no encuentra usuario, usa `inviteUserByEmail`. Si encuentra una cuenta ya existente, no envía una invitación nueva. Después puede crear la membresía.
+
+Cuando la cuenta existente todavía no tiene correo confirmado, la respuesta indica que debe confirmar el correo, pero no reenvía la confirmación. Esto deja un caso operativo incompleto: la membresía existe, pero el usuario puede no tener un enlace vigente para completar el acceso.
+
+**Corrección necesaria:** diseñar un proceso de reenvío controlado para cuentas existentes no confirmadas. Debe comprobar que la dirección pertenece a la invitación/membresía prevista, limitar reenvíos, respetar expiración y no revelar si una cuenta existe a solicitantes no autorizados. No asumir que `inviteUserByEmail` sirve para usuarios ya registrados.
+
+**Pruebas obligatorias:** correo nuevo, usuario existente confirmado, usuario existente sin confirmar, invitación vencida, correo no entregado, reenvío repetido, asignación duplicada y negocio suspendido. Usar solo cuentas y correos ficticios en staging.
+
+## ACC-02 — Aceptación de invitación
+
+`aceptar-invitacion.js` exige que el enlace incluya el tipo `invite` en los parámetros de consulta o fragmento. Si recibe `token_hash`, verifica el OTP de tipo invitación. Luego exige una sesión y permite actualizar la contraseña con un mínimo de 10 caracteres. Después cierra la sesión local y redirige al login.
+
+La página no confía únicamente en una sesión que ya estuviera guardada en el navegador: requiere que el enlace se identifique como invitación. Tras verificar, limpia la URL visible con `history.replaceState`.
+
+**Pendiente:** probar enlace válido, vencido, reutilizado, alterado, cuenta equivocada, correo no confirmado, cambio de contraseña fallido y retorno a login. Confirmar en Auth que las URL de redirección permitidas incluyen únicamente la URL de ensayo mientras se prueban estos flujos.
+
+## ACC-03 — Recuperación de contraseña
+
+`recuperar-clave.js` usa `resetPasswordForEmail` y una respuesta genérica: “Si el correo corresponde a una cuenta registrada…”. Esto reduce la exposición de si un correo tiene cuenta. La página de cambio de contraseña escucha `PASSWORD_RECOVERY` antes de consultar la sesión y no acepta una sesión ordinaria como autorización para cambiar la clave.
+
+El flujo espera hasta 10 segundos el evento. Si no llega, muestra que el enlace no se validó. Esto puede ocurrir por diferencias de red, intercambio PKCE, configuración de URL o correo; requiere prueba en el navegador y con los ajustes reales de Auth.
+
+**Pendiente:** probar correo correcto, correo no registrado, enlace vencido, enlace reutilizado, navegador con sesión previa, PKCE, fragmento de URL, redirección y límites de envío de correo. No desactivar la validación específica de `PASSWORD_RECOVERY` para “arreglar” fallos de enlace.
+
+## ACC-04 — Limpieza de URL de recuperación
+
+La versión de rama de `actualizar-clave.js` ahora limpia consulta y fragmento de la URL solo después de recibir y validar el evento `PASSWORD_RECOVERY`. Así no se elimina el código antes de que Supabase lo intercambie, pero tampoco queda en la barra de direcciones después de validar.
+
+Cambio solo en `correcciones-funcionales`; no está publicado.
+
+## ACC-05 — Minimización de datos en auditoría
+
+El evento `panel.login` ya identifica al usuario mediante `actor_id`. La rama elimina el correo electrónico del JSON `details`, que era redundante y aumentaba la cantidad de datos personales guardados.
+
+Cambio solo en `correcciones-funcionales`; no está desplegado.
+
+## AUD-01 — Auditoría no inmutable ante credenciales privilegiadas
+
+En la base activa, `audit_logs` no concede INSERT, UPDATE ni DELETE a `anon` o `authenticated`. La única política SELECT permite lectura al propietario técnico, al administrador del negocio correspondiente o al propio actor.
+
+Sin embargo, la comprobación de privilegios confirmó que `service_role` tiene INSERT, UPDATE y DELETE. La tabla tampoco tiene triggers no internos que bloqueen UPDATE o DELETE. Por tanto, la auditoría está protegida frente a escrituras directas desde los roles normales de la API, pero no es inmutable frente a código backend que use credenciales privilegiadas.
+
+**Corrección necesaria:** decidir y documentar el modelo de retención. Como mínimo, evitar que las funciones de negocio expongan acciones de edición/borrado de auditoría; considerar un trigger de solo inserción que rechace UPDATE/DELETE incluso desde funciones privilegiadas; definir un proceso excepcional de retención/archivo con autorización, doble control y registro externo. No aplicar un trigger a ciegas: verificar primero las tareas de mantenimiento y los requisitos legales de conservación.
+
+**Pruebas:** intentar UPDATE y DELETE con roles anon/authenticated (deben fallar); comprobar que el servicio puede insertar eventos; comprobar que ninguna función de aplicación borra o edita eventos; y validar el mecanismo excepcional de archivo si se implementa.
+
+## AUD-02 — Ciclo de vida de invitaciones incompleto
+
+El flujo de Auth y la membresía no tienen un registro propio que permita administrar explícitamente estados como pendiente, enviado, confirmado, vencido, revocado o fallido. Auth contiene su propio estado de usuario, pero el panel no dispone de una vista completa de los intentos de invitación y su reconciliación.
+
+La rama ya mejora el registro transaccional de la membresía y devuelve si el correo fue enviado; no resuelve por sí sola el reenvío ni la revocación de un enlace pendiente.
+
+**Diseño recomendado:** registro de invitación con identificador, negocio, correo normalizado, rol, cargo, actor que invita, estado, fecha de creación, expiración, fecha de envío, contador/último reenvío, fecha de aceptación y motivo de revocación. No guardar tokens de invitación ni enlaces completos. Asegurar unicidad de una invitación pendiente por correo/negocio y registrar cada transición en auditoría.
+
+Revocar una invitación debe impedir completar la asignación, incluso si el enlace de Auth sigue vigente. La aceptación debe comprobar el registro pendiente, negocio activo, cuenta destinataria y rol previsto. Si no puede verificarse de forma atómica, mantener la membresía inactiva hasta completar la confirmación.
+
+## CFG-01 — Comentario de secreto de limpieza
+
+Se corrigió el comentario de `supabase/config.toml`: la función `cleanup-job-application-data` requiere el secreto independiente `JOB_APPLICATION_CLEANUP_SECRET`, no reutilizar `SUPABASE_SERVICE_ROLE_KEY` como secreto HTTP. Es una corrección documental en la rama; no cambia configuración activa.
+
+## Pruebas de salida
+
+1. Cuenta nueva invitada: correo de invitación, verificación, contraseña, membresía correcta y acceso al panel correspondiente.
+2. Cuenta existente confirmada: asignación sin correo duplicado.
+3. Cuenta existente no confirmada: reenvío seguro y controlado; no dejar acceso operativo sin confirmación.
+4. Invitación vencida o revocada: no debe crear sesión con acceso funcional ni activar membresía.
+5. Usuario con membresía suspendida o negocio suspendido: login no debe permitir entrar al panel.
+6. Recuperación: solo evento de recuperación válido permite cambiar contraseña; enlace vencido/reutilizado rechazado.
+7. MFA: propietario AAL1 rechazado por la función técnica y propietario AAL2 aceptado.
+8. Auditoría: mínimo privilegio de lectura, sin PII redundante, sin edición/borrado desde aplicación y trazabilidad de operaciones.
+9. Reintentos: fallos de correo, Auth, RPC y base no deben duplicar membresías ni dejar estados imposibles.
+10. Todos los ensayos con correos y usuarios ficticios, nunca con cuentas reales.
+
+## Cambios en rama realizados durante esta revisión
+
+- `actualizar-clave.js`: elimina consulta y fragmento de la URL después de validar `PASSWORD_RECOVERY`.
+- `supabase/functions/technical-business-management/index.ts`: deja de duplicar el correo en los detalles de `panel.login`.
+- `supabase/config.toml`: corrige el comentario para usar `JOB_APPLICATION_CLEANUP_SECRET` independiente.
+
+Los cambios no están desplegados ni publicados. No se modificó Auth ni la base de datos.
+
+## Conclusión
+
+El inicio de sesión, MFA, aceptación de invitaciones y recuperación tienen controles útiles en la rama, pero aún no puede considerarse completo el ciclo de invitaciones. El punto más importante pendiente es el usuario ya existente sin correo confirmado y la capacidad de reenvío/revocación. La auditoría tampoco es inmutable frente a `service_role`; debe definirse una protección de solo inserción antes de declarar cerrada esa parte.
