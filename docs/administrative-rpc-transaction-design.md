@@ -560,3 +560,33 @@ La RPC `attach_business_expense_receipt` verifica que el archivo exista, que la 
 9. Verificar validación de contenido real y antimalware antes de habilitar cargas de CV en producción.
 
 No se ejecutaron cambios de Storage, no se subieron ni descargaron archivos y no se desplegó ninguna Edge Function.
+
+
+## Privacidad de clientes y postulantes — 16 nov 2026
+
+### Pedidos y datos personales
+La inspección read-only del proyecto activo confirmó que RLS limita los pedidos a miembros del negocio y las líneas de pedido a los miembros del negocio correspondiente, pero los GRANT de columna de `authenticated` todavía permiten consultar directamente campos de cliente (correo, teléfono, dirección, notas de entrega), importes, estado de pago y token de seguimiento. El rol técnico también aparece en las políticas live como bypass para pedidos y líneas.
+
+El borrador `database/orders/order-financial-access-draft.sql` revoca la lectura directa amplia y concede únicamente campos operativos al personal del negocio. El administrador recibe datos financieros mediante RPCs con validación de rol. El cliente autenticado recibe su historial mediante `get_customer_order_history()`, que filtra por `auth.uid()` y limita la respuesta a sus últimos 50 pedidos. La migración `database/customers/customer-account-migration.sql` añade `orders.customer_user_id` y favoritos privados; ambas siguen sin aplicarse en el proyecto activo.
+
+El borrador `database/security/business-admin-boundaries.sql` elimina el bypass del propietario técnico en las políticas de pedidos y líneas y permite consultar perfiles por Data API únicamente al propio usuario. El técnico consulta los datos administrativos mediante Edge Function de confianza.
+
+### Postulaciones
+La política live `job_applications_business_admin_read` limita la lectura al administrador del negocio, pero no comprueba que el negocio esté activo. La rama ya reemplaza esa política con una condición adicional `private.business_is_active(business_id)`. Los empleados no tienen una política de lectura para postulaciones. La política live de UPDATE también exige negocio activo, aunque actualmente no se observó un GRANT de UPDATE para authenticated en la tabla.
+
+### Seguimiento público de pedidos
+El endpoint público `track-public-order` acepta un UUID aleatorio como código privado de seguimiento y devuelve datos mínimos de estado, fecha, negocio y seguimiento de entrega, con `Cache-Control: no-store, private`. En la rama se retiraron el total y el nombre del método de pago de la respuesta pública: no son necesarios para consultar el avance del pedido. La página pública se ajustó para no mostrar ese importe en el seguimiento; el total y método ya se informan al confirmar la compra.
+
+### Matriz de pruebas obligatorias en staging
+1. Empleado A puede consultar solo los datos operativos de pedidos del negocio A y no puede consultar email, importes, pagos ni tokens mediante Data API.
+2. Empleado A no puede consultar pedidos ni líneas de B, aunque conozca sus UUID.
+3. Administrador A ve los datos y finanzas de A, pero no los de B.
+4. El técnico no obtiene pedidos ni perfiles de clientes mediante Data API; las tareas técnicas puntuales pasan por Edge Function con autorización.
+5. Cliente A obtiene solo su historial y favoritos; Cliente B no puede leer, modificar ni borrar los de A.
+6. Los pedidos de invitados no se vinculan a cuentas sin autenticación explícita; eliminar una cuenta conserva pedidos y limpia solo la relación de usuario.
+7. Administrador A no puede consultar postulaciones de B ni postulaciones de A si el negocio está suspendido.
+8. Empleados y clientes no pueden consultar postulaciones ni CV.
+9. Un código de seguimiento válido solo devuelve estado, fecha, negocio y nota de entrega; no devuelve nombre, teléfono, correo, dirección, total ni método de pago.
+10. Todas las respuestas que contienen datos privados usan `Cache-Control: no-store`.
+
+La base activa sigue con los permisos antiguos hasta aplicar el paquete de migraciones. No se ejecutaron SQL ni Edge deploys; los cambios de seguimiento se guardaron únicamente en la rama.
