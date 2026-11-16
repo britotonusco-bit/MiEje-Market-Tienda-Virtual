@@ -628,7 +628,8 @@ Deno.serve(async (req: Request) => {
       const status = textValue(body.status, 30);
       const reason = textValue(body.reason, 2000);
       const publicMessage = textValue(body.public_message, 1000);
-      if (!businessId || !["active", "suspended", "closed"].includes(status)) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(businessId)
+          || !["active", "suspended", "closed"].includes(status)) {
         return reply(400, { error: "Negocio y estado válido son obligatorios." });
       }
       if (status === "suspended" && !reason) return reply(400, { error: "Indica el motivo de la suspensión." });
