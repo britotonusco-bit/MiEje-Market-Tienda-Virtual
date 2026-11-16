@@ -536,21 +536,13 @@ Deno.serve(async (req: Request) => {
         targetUser = inviteData?.user ?? null;
         invitationSent = true;
       } else if (!targetUser.email_confirmed_at) {
-        // Recupera invitaciones anteriores que crearon el usuario pero no
-        // completaron la confirmación del correo.
-        const { error: resendError } = await admin.auth.resend({
-          type: "signup",
-          email,
-          options: { emailRedirectTo: redirectTo },
+        // No usar resend(type: "signup") para una cuenta que pudo nacer de
+        // una invitación: ese endpoint documenta el reenvío de confirmación
+        // de signup, no la repetición del flujo de invitación.
+        return reply(409, {
+          error: "La cuenta ya existe, pero su correo todavía no está confirmado. No se asignó acceso. Primero debe completarse la verificación pendiente o revisarse el envío de la invitación original.",
+          invitation_sent: false,
         });
-        if (resendError) {
-          console.error("Signup confirmation resend failed:", resendError);
-          return reply(502, {
-            error: "La cuenta existe, pero Supabase no confirmó el reenvío del correo de verificación. No se asignó el acceso.",
-            invitation_sent: false,
-          });
-        }
-        invitationSent = true;
       }
 
       if (!targetUser?.id) {
