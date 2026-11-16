@@ -59,12 +59,19 @@ Deno.serve(async (req: Request) => {
     ?? "").trim();
   if (!ip) return reply(400, { error: "No fue posible validar la solicitud." });
 
+  const action = value(body.action, 30);
+  if (action !== "request_upload" && action !== "submit") {
+    return reply(400, { error: "Acción no válida." });
+  }
+
   const admin = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
   try {
-    const ipHash = await sha256(ip + ":" + serviceKey);
+    // Cada etapa tiene su propio contador: preparar una carga y enviar la
+    // postulación son dos peticiones legítimas de una misma solicitud.
+    const ipHash = await sha256(ip + ":" + serviceKey + ":" + action);
     const { data: allowed, error: rateError } = await admin.rpc(
       "consume_job_application_rate_limit",
       { p_ip_hash: ipHash },
@@ -75,7 +82,6 @@ Deno.serve(async (req: Request) => {
     }
     if (allowed !== true) return reply(429, { error: "Se recibieron demasiadas solicitudes. Inténtalo más tarde." });
 
-    const action = value(body.action, 30);
     const businessId = value(body.business_id, 80);
     const contentPageId = value(body.content_page_id, 80);
     if (!isUuid(businessId) || !isUuid(contentPageId)) {
