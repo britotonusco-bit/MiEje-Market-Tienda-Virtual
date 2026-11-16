@@ -3,6 +3,31 @@
 -- BORRADOR: depende de las tablas y helpers existentes y del bucket
 -- business-expense-receipts-draft.sql. Revisar en staging antes de ejecutar.
 
+-- Las escrituras de gastos deben pasar por RPCs transaccionales que validan
+-- el administrador del negocio y registran auditoría. No dejar que un cliente
+-- autenticado inserte o actualice directamente y omita esos registros.
+REVOKE INSERT, UPDATE, DELETE ON TABLE public.business_expenses
+FROM PUBLIC, anon, authenticated;
+
+-- Revocar también permisos concedidos por columna; REVOKE a nivel de tabla
+-- no elimina necesariamente privilegios de columna otorgados por separado.
+REVOKE INSERT (
+  id, business_id, expense_date, category, description, amount,
+  payment_status, payment_method, supplier, transaction_reference,
+  receipt_path, notes, paid_at, status, void_reason, voided_by,
+  voided_at, created_by, created_at, updated_at
+) ON TABLE public.business_expenses FROM PUBLIC, anon, authenticated;
+
+REVOKE UPDATE (
+  id, business_id, expense_date, category, description, amount,
+  payment_status, payment_method, supplier, transaction_reference,
+  receipt_path, notes, paid_at, status, void_reason, voided_by,
+  voided_at, created_by, created_at, updated_at
+) ON TABLE public.business_expenses FROM PUBLIC, anon, authenticated;
+
+DROP POLICY IF EXISTS business_expenses_insert ON public.business_expenses;
+DROP POLICY IF EXISTS business_expenses_update ON public.business_expenses;
+
 -- Mantener la función de trigger compatible con tres cambios permitidos:
 -- (1) pendiente -> pagado, (2) activo -> anulado, (3) adjuntar comprobante una vez.
 CREATE OR REPLACE FUNCTION private.guard_business_expense_update()
