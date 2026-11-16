@@ -516,9 +516,14 @@ BEGIN
     RAISE EXCEPTION 'La membresía cambió durante la operación.' USING ERRCODE = '40001';
   END IF;
 
+  -- Serializa la reactivación con un bloqueo global concurrente del perfil.
+  -- Si el bloqueo global gana primero, esta operación lo verá y rechazará.
+  -- Si la reactivación gana primero, el bloqueo global posterior seguirá
+  -- prevaleciendo en resolve-my-access y en las funciones privadas.
   SELECT p.is_blocked INTO v_target_blocked
   FROM public.profiles AS p
-  WHERE p.id = v_before.user_id;
+  WHERE p.id = v_before.user_id
+  FOR SHARE;
 
   IF NOT FOUND OR v_target_blocked IS DISTINCT FROM false THEN
     RAISE EXCEPTION 'No se puede reactivar una cuenta inexistente o bloqueada globalmente.'
