@@ -418,6 +418,48 @@
     $("#featuredGrid").innerHTML = availableBusinesses.slice(0, 3).map(businessCard).join("");
   }
 
+  function renderPublicSections() {
+    const activeBusinesses = businesses.filter(business => business.isActive !== false);
+    const products = activeBusinesses.flatMap(business =>
+      (business.products || []).map(product => ({ business, product }))
+    ).filter(item => item.business.isRegistered === true);
+    const productGrid = $("#featuredProductsGrid");
+    if (productGrid) {
+      productGrid.innerHTML = products.slice(0, 8).map(({ business, product }) => productCard(business, product)).join("");
+      $("#featuredProductsEmpty")?.classList.toggle("hidden", products.length > 0);
+    }
+
+    const promotions = activeBusinesses.flatMap(business =>
+      (business.contentPages || []).filter(page => page.content_type === "promotion").map(page => ({ business, page }))
+    );
+    const promotionGrid = $("#publicPromotionsGrid");
+    if (promotionGrid) {
+      promotionGrid.innerHTML = promotions.slice(0, 6).map(({ business, page }) => `
+        <article class="info-panel public-content-card">
+          <p class="eyebrow">${escapeHtml(business.name)}</p>
+          <h3>${escapeHtml(page.title)}</h3>
+          <p>${escapeHtml(page.body)}</p>
+          <button class="button secondary" type="button" data-action="store" data-business="${escapeHtml(business.id)}">Ver promoción en la tienda</button>
+        </article>`).join("");
+      $("#publicPromotionsEmpty")?.classList.toggle("hidden", promotions.length > 0);
+    }
+
+    const jobs = activeBusinesses.flatMap(business =>
+      (business.contentPages || []).filter(page => page.content_type === "job_form").map(page => ({ business, page }))
+    );
+    const jobsGrid = $("#publicJobsGrid");
+    if (jobsGrid) {
+      jobsGrid.innerHTML = jobs.slice(0, 6).map(({ business, page }) => `
+        <article class="info-panel public-content-card">
+          <p class="eyebrow">${escapeHtml(business.name)}</p>
+          <h3>${escapeHtml(page.title)}</h3>
+          <p>${escapeHtml(page.body)}</p>
+          <button class="button secondary" type="button" data-action="store" data-business="${escapeHtml(business.id)}">Ver convocatoria y postularme</button>
+        </article>`).join("");
+      $("#publicJobsEmpty")?.classList.toggle("hidden", jobs.length > 0);
+    }
+  }
+
   function renderChips() {
     const categories = ["Todas", "Hogar", "Salud", "Muebles", "Tecnología", "Belleza", "Mascotas", "Juguetes", "Moda"];
 
