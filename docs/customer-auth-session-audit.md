@@ -219,3 +219,56 @@ Solo lectura del proyecto activo y revisión de archivos de la rama. No se alter
 - El cambio relevante para la integración es que, desde el 30-Oct-2026, las tablas nuevas de `public` ya no quedan expuestas automáticamente a Data API. La migración de favoritos incluye GRANT explícitos y RLS, lo que debe verificarse en el proyecto una vez aplicada; RLS y exposición/grants son controles distintos.
 - La breaking change de CLI v3 no afecta los archivos estáticos ni los flujos Auth auditados; sí debe tenerse presente si se actualiza el CLI, porque ahora apunta a entorno local por defecto y confirma cambios alojados.
 - Referencias: Supabase Changelog (16-Nov-2026): https://supabase.com/changelog.md. Guía de seguridad de contraseñas: https://supabase.com/docs/guides/auth/password-security.
+
+
+## Auditoría de postulaciones laborales y hojas de vida — 16 Nov 2026
+
+### Flujo público y protección del archivo
+- `app.js` genera el formulario de empleo desde una vacante publicada y aprobada. Recoge nombre, contacto, respuestas adicionales, mensaje, archivo opcional y una casilla de consentimiento.
+- La casilla solo dice que autoriza el tratamiento para gestionar la postulación. No enlaza a una política o aviso específico; el consentimiento no queda asociado a versión ni fecha.
+- `create-job-application` comprueba que el negocio esté activo y que la vacante pertenezca a ese negocio, sea `job_form`, esté publicada y aprobada.
+- La carga se prepara con un UUID de postulación, ruta aleatoria, sesión de 30 minutos y URL firmada de carga sin upsert. La sesión se consume dentro de la transacción de inserción de la postulación.
+- El bucket `job-applications-private` está configurado como privado, con límite de 5 MiB y MIME permitidos PDF/DOC/DOCX.
+- La Edge Function comprueba extensión, MIME declarado y tamaño indicado por el navegador. Después comprueba que el objeto exista y que los metadatos de tamaño no superen 5 MiB. No inspecciona la firma binaria real del documento ni ejecuta análisis antimalware. El MIME/extension del navegador y los metadatos de Storage no demuestran que el contenido sea seguro.
+- El administrador descarga el archivo mediante URL firmada con duración de 300 segundos. La URL es un token portador: puede seguir funcionando hasta expirar aunque se suspenda el negocio o se retire el permiso después de generarla.
+- La política Storage actualmente desplegada solo comprueba el primer segmento de la ruta y el rol de administrador. No vincula el segundo segmento al UUID de la postulación ni verifica `job_applications.resume_path`. El borrador `database/security/storage-policy-fix.sql` sí añade esas comprobaciones. La política estricta sigue pendiente de aplicación.
+
+### Permisos de lectura y revisión en panel
+- En el proyecto activo, `job_applications` concede SELECT a `authenticated`, y la política SELECT limita la lectura al administrador del negocio. La política desplegada no exige que el negocio esté activo; el borrador de límites administrativos sí añade esa condición.
+- Los permisos actuales no conceden UPDATE a `authenticated`, aunque existe una política RLS de UPDATE. Por tanto, la pantalla `loadJobApplications()` que intenta actualizar `status`, `admin_notes`, `reviewed_by` y `reviewed_at` directamente no tiene el privilegio SQL necesario. El botón Guardar puede fallar con permiso denegado.
+- La rama ahora incorpora en `business-admin-boundaries.sql` una política UPDATE explícita para administradores de negocios activos, permisos UPDATE limitados a las cuatro columnas que usa la interfaz y un trigger que fija `reviewed_by = auth.uid()` y `reviewed_at = now()` desde la base de datos cuando hay usuario autenticado. No concede UPDATE sobre identidad, negocio, datos del postulante ni ruta de la hoja de vida.
+- El estado permitido por la restricción activa es `pending`, `reviewing`, `contacted`, `accepted` y `rejected`. Las notas internas tienen límite de 3000 caracteres.
+- La interfaz no registra una entrada independiente en `audit_logs` cuando cambia el estado o las notas. `reviewed_by` y `reviewed_at` dejan trazabilidad básica en la fila, pero no reemplazan un historial de cambios inmutable.
+
+### Límites de solicitudes y limpieza
+- La función SQL `consume_job_application_rate_limit` permite cinco solicitudes por hash de IP en 15 minutos. El mismo hash se consumía tanto en `request_upload` como en `submit`; una postulación con CV gastaba dos unidades, a diferencia de una postulación sin archivo.
+- La rama cambia el hash para incluir la acción (`request_upload` o `submit`), separando ambos contadores y evitando penalizar doblemente una postulación normal. Cada acción conserva el límite de cinco solicitudes por IP en 15 minutos.
+- La tabla `job_application_rate_limits` conserva una fila por hash y no se observó una tarea de limpieza; los contadores se reinician por ventana, pero las filas antiguas pueden acumularse.
+- Las sesiones de carga vencidas o consumidas también permanecen en `job_application_upload_sessions`; no se encontró un proceso de limpieza programada en el código inspeccionado. Debe definirse limpieza de registros vencidos y objetos huérfanos, con retención y auditoría.
+- En la consulta del proyecto activo, las tablas de postulaciones, sesiones de carga y limitadores estaban vacías (0 filas cada una); no había datos de postulantes que inspeccionar.
+
+### Retención y eliminación
+- La tabla `job_applications` tiene claves foráneas con `ON DELETE CASCADE` hacia el negocio y hacia la vacante (relación compuesta negocio/vacante). La política permite que el administrador elimine contenido del negocio.
+- Eliminar una vacante con postulaciones puede borrar en cascada los registros de los candidatos. Storage no elimina automáticamente el archivo al borrar la fila SQL, por lo que puede dejar hojas de vida huérfanas en el bucket privado.
+- No se encontró una política de retención por antigüedad ni un flujo de eliminación controlada de postulaciones/archivos. Antes de habilitar eliminación de vacantes con candidaturas, se debe cambiar a archivado/no publicado o impedir la eliminación física mientras existan postulaciones. La purga posterior debe coordinar objeto Storage, fila SQL y registro de auditoría.
+- La retención de hojas de vida debe tener un plazo definido por el responsable del tratamiento y el propósito de selección. No se inventa un plazo en este informe.
+
+### Correcciones preparadas en la rama
+1. `supabase/functions/create-job-application/index.ts`: el contador de límites ahora distingue la acción de solicitud de carga de la acción de envío.
+2. `database/security/business-admin-boundaries.sql`: se agrega UPDATE limitado y controlado para que el administrador pueda guardar estado/notas de candidaturas de su negocio activo, con actor y hora asignados por la base de datos.
+3. Estas correcciones no están desplegadas ni aplicadas al proyecto activo. Requieren revisión y pruebas con cuentas de negocio aisladas en un entorno de pruebas.
+
+### Bloqueos antes de producción
+- Publicar el aviso de privacidad real y enlazarlo desde el formulario; registrar versión, fecha/hora del servidor y evidencia del consentimiento, sin confiar solo en el booleano del navegador.
+- Añadir validación del contenido real y análisis antimalware de los CV antes de hacerlos descargables. Mientras no exista ese control, el formato y tamaño no deben confundirse con un análisis de seguridad.
+- Corregir las políticas Storage para comprobar la ruta completa y la relación con la postulación.
+- Aplicar los permisos UPDATE limitados y probar Guardar como administrador, además de confirmar que empleados y otros negocios no pueden leer ni modificar candidaturas.
+- Definir archivado, retención y eliminación coordinada de registros y objetos.
+- Añadir limpieza programada para sesiones vencidas, límites antiguos y objetos sin postulación.
+- Evaluar CAPTCHA y protección contra abuso adicional antes de aumentar el tráfico público.
+
+### Estado de seguridad y pruebas
+- Consultas de solo lectura confirmaron que el bucket es privado; los RPC de envío y rate limit solo permiten EXECUTE a `service_role`; la tabla de postulaciones solo concede SELECT a `authenticated`; no hay privilegios de actualización autenticada en el estado activo.
+- RLS de lectura de postulaciones y Storage limita el acceso al administrador, pero la política Storage desplegada necesita endurecimiento de ruta.
+- No se descargaron hojas de vida, no se generaron postulaciones, no se enviaron correos, no se subieron ni borraron archivos, no se ejecutó SQL de escritura y no se desplegó Edge Function.
+
