@@ -304,34 +304,24 @@ Deno.serve(async (req: Request) => {
       if (assistantName.length < 2) {
         return reply(400, { error: "El nombre del asistente debe tener al menos dos caracteres." });
       }
-      const { data, error } = await admin.from("platform_ai_settings").upsert({
-        id: true,
-        enabled: body.enabled,
-        assistant_name: assistantName,
-        system_instructions: instructions,
-        updated_by: user.id,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: "id" })
-        .select("enabled,assistant_name,system_instructions,updated_at")
-        .single();
-      if (error) throw error;
-
-      const { error: auditError } = await admin.from("audit_logs").insert({
-        business_id: null,
-        actor_id: user.id,
-        action: "platform.ai_settings_updated",
-        entity_type: "platform_ai_settings",
-        entity_id: null,
-        details: { enabled: body.enabled, assistant_name: assistantName },
+      const { data, error } = await admin.rpc("update_platform_ai_settings_transactional", {
+        p_enabled: body.enabled,
+        p_assistant_name: assistantName,
+        p_system_instructions: instructions,
+        p_actor_id: user.id,
       });
-      if (auditError) console.error("Platform AI settings saved but audit insert failed:", auditError);
+      if (error) {
+        if (error.code === "42501") return reply(403, { error: "La cuenta técnica no está autorizada para modificar esta configuración." });
+        if (error.code === "22023") return reply(400, { error: "Los datos de configuración de IA no son válidos." });
+        console.error("Platform AI settings RPC failed:", error);
+        throw error;
+      }
+      const result = data as Record<string, any> | null;
+      if (!result?.settings) throw new Error("La RPC de configuración de IA no devolvió los ajustes.");
       return reply(200, {
         ok: true,
-        settings: data,
-        audit_warning: auditError ? "La configuración se guardó, pero no se pudo registrar el evento de auditoría." : null,
-        message: auditError
-          ? "La configuración del asistente general se guardó, pero falta registrar la auditoría."
-          : "Configuración del asistente general guardada. Esto no activa por sí solo un proveedor de IA.",
+        settings: result.settings,
+        message: "Configuración del asistente general guardada. Esto no activa por sí solo un proveedor de IA.",
       });
     }
 
@@ -348,20 +338,23 @@ Deno.serve(async (req: Request) => {
       if (!siteName || !validImageUrl(logoUrl) || !validImageUrl(heroImageUrl) || (supportWhatsapp && supportWhatsapp.length < 10)) {
         return reply(400, { error: "Revisa el nombre, las direcciones HTTPS de las imágenes y el número de WhatsApp." });
       }
-      const { data, error } = await admin.from("platform_public_settings").upsert({
-        id: true, site_name: siteName, site_description: siteDescription,
-        logo_url: logoUrl || null, hero_image_url: heroImageUrl || null,
-        support_whatsapp: supportWhatsapp || null, updated_by: user.id,
-        updated_at: new Date().toISOString()
-      }, { onConflict: "id" }).select("site_name,site_description,logo_url,hero_image_url,support_whatsapp,updated_at").single();
-      if (error) throw error;
-      const { error: auditError } = await admin.from("audit_logs").insert({
-        business_id: null, actor_id: user.id, action: "platform.public_settings_updated",
-        entity_type: "platform_settings", entity_id: null,
-        details: { site_name: siteName, logo_changed: Boolean(logoUrl), hero_image_changed: Boolean(heroImageUrl), support_updated: Boolean(supportWhatsapp) }
+      const { data, error } = await admin.rpc("update_platform_public_settings_transactional", {
+        p_site_name: siteName,
+        p_site_description: siteDescription,
+        p_logo_url: logoUrl || null,
+        p_hero_image_url: heroImageUrl || null,
+        p_support_whatsapp: supportWhatsapp || null,
+        p_actor_id: user.id,
       });
-      if (auditError) throw auditError;
-      return reply(200, { ok: true, settings: data, message: "Configuración pública de MiEje Market guardada." });
+      if (error) {
+        if (error.code === "42501") return reply(403, { error: "La cuenta técnica no está autorizada para modificar la configuración pública." });
+        if (error.code === "22023") return reply(400, { error: "Los datos de configuración pública no son válidos." });
+        console.error("Platform public settings RPC failed:", error);
+        throw error;
+      }
+      const result = data as Record<string, any> | null;
+      if (!result?.settings) throw new Error("La RPC de configuración pública no devolvió los ajustes.");
+      return reply(200, { ok: true, settings: result.settings, message: "Configuración pública de MiEje Market guardada." });
     }
 
     if (action === "list_businesses") {
