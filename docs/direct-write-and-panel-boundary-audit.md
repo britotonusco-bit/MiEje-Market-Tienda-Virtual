@@ -244,3 +244,26 @@ También se cambió `private.prevent_business_scope_change()` de `SECURITY DEFIN
 **Verificación realizada:** se volvió a consultar el catálogo de triggers del proyecto independiente y se confirmó que existen exactamente los nombres usados por el bloque de migración: `orders_enforce_status_transition`, `orders_audit_status` y `orders_set_updated_at`. Se verificó además en GitHub que el borrador contiene las tres desactivaciones/reactivaciones y que el trigger de pertenencia está declarado como `SECURITY INVOKER`.
 
 **Límite de la verificación:** esto es comprobación estática y de metadatos. No se ejecutó la migración ni se probó una conversión sobre filas reales; esas pruebas siguen pendientes en staging.
+
+
+## 9. Hallazgo adicional: firma desactualizada en confirmación de gastos
+
+**Severidad: alta para la función de registrar pagos de gastos.**
+
+La interfaz de administrador llama a `pay_business_expense` con tres parámetros nombrados:
+- `p_expense_id`
+- `p_payment_method`
+- `p_transaction_reference`
+
+La función existente en el proyecto Supabase activo solo tiene la firma de dos parámetros:
+`pay_business_expense(p_expense_id uuid, p_payment_method text)`.
+
+El borrador `database/finance/business-expense-audit-draft.sql` reemplaza la firma anterior por una versión de tres parámetros, con referencia de transacción opcional. Por tanto, el callsite de la rama coincide con el borrador futuro, pero no con la función actualmente desplegada.
+
+**Impacto:** mientras el borrador no esté aplicado en un entorno de ensayo, la confirmación de pago de un gasto desde el panel no puede considerarse compatible con el proyecto activo; Supabase no encontrará una función que acepte ese conjunto de argumentos nombrados.
+
+**Corrección prevista:** mantener la nueva firma de tres parámetros y verificarla después de aplicar el paso 17 en staging. Probar pagos en efectivo sin referencia y pagos por transferencia/tarjeta con referencia, además de rechazo de referencias faltantes, pagos duplicados y usuario sin rol de administrador.
+
+La revisión también confirmó que el trigger activo `business_expenses_guard_update` ya está enlazado a `private.guard_business_expense_update()`, función que el borrador reemplaza. El borrador no necesita crear un segundo trigger, pero la prueba de staging debe comprobar que el trigger sigue instalado después de la migración.
+
+No se ejecutó la RPC ni se modificó la base activa.
