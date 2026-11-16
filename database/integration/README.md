@@ -361,3 +361,10 @@ La ruta operativa revisada es `panel-negocio.html` + `panel-live.js`; `panel-adm
 ### Hallazgo crítico: cambio de estado de pedidos en los paneles — 16 nov 2026
 
 La ruta del panel llama UPDATE directo sobre `orders`, pero el rol `authenticated` no tiene privilegio SQL UPDATE en la tabla activa. Hay política RLS de UPDATE, pero eso no otorga el privilegio; la acción de cambiar estado no puede completarse por la ruta actual. También existe desajuste de estados: checkout y DB usan `pending/out_for_delivery`, mientras la interfaz usa `received/on_the_way`. Productos y costos sí tienen RLS que restringe escritura a `business_admin`; empleados pueden leer pedidos, pero no modificar productos ni costos. Corrección pendiente: RPC transaccional y restringida para cambios operativos, y alineación de trigger/constraint con el flujo acordado. No se cambió código ni base activa. Ver detalle en `docs/order-panel-callsite-integration-audit.md`.
+
+
+### Auditoría ampliada de paneles — 16 nov 2026
+
+La comparación de llamadas del panel con las funciones SQL activas encontró que solo existen 3 de las 12 RPC invocadas. Faltan nueve, incluidas las de consulta financiera de pedidos, reporte de ganancias, inventario, métodos de pago, confirmación de pagos, cancelaciones y reembolsos. La RPC financiera ausente se llama al iniciar `loadBusinessAdmin()`, por lo que el panel administrativo puede fallar desde el arranque. También se invoca `get-platform-public-settings`, que no aparece entre las seis Edge Functions desplegadas.
+
+Se detectó además exceso de permisos del propietario técnico: RLS le permite modificar filas completas de negocios, administrar métodos de pago, acceder a costos internos y consultar pedidos/datos de clientes de todos los negocios. Esto contradice la separación acordada. Deben sustituirse por acciones técnicas limitadas a cuentas, membresías y estado del negocio, sin acceso comercial transversal. Sin cambios en base ni despliegues. Detalle en `docs/order-panel-callsite-integration-audit.md`.
