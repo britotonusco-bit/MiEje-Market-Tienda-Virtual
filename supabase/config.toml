@@ -22,3 +22,8 @@ verify_jwt = false
 
 [functions.get-platform-public-settings]
 verify_jwt = false
+
+[functions.cleanup-job-application-data]
+# Esta función no se llama desde el navegador. Exige x-cleanup-secret igual
+# a SUPABASE_SERVICE_ROLE_KEY y solo debe invocarse desde un programador privado.
+verify_jwt = false
