@@ -358,3 +358,42 @@ Orden pendiente para un entorno de ensayo:
 4. Revisar los permisos efectivos, RLS y Advisors antes de integrar o desplegar.
 
 No se ejecutó SQL en el proyecto activo, no se desplegó la Edge Function y no se hicieron transferencias ni pagos reales. Estos registros son un control contable interno; no representan movimiento de dinero.
+
+
+## Configuración pública global y asistente IA — cambios en rama
+
+Se revisaron las acciones `get_platform_public_settings`, `get_platform_ai_settings`, `update_platform_ai_settings` y `update_platform_public_settings` de la Edge Function técnica. Antes, las dos acciones de actualización escribían primero la configuración y después intentaban insertar `audit_logs` por separado. En el caso de IA, un fallo de auditoría se devolvía como advertencia aunque la configuración ya hubiera cambiado; en configuración pública, se devolvía un error después de que el cambio ya estaba guardado. Ambos flujos permitían resultados parciales.
+
+### RPC transaccionales añadidas
+
+- `update_platform_public_settings_transactional`, en `database/platform/platform-public-settings-draft.sql`.
+- `update_platform_ai_settings_transactional`, en `database/ai/ai-settings-draft.sql`.
+
+Ambas funciones:
+
+- Usan `SECURITY INVOKER` y `SET search_path = ''`.
+- Vuelven a comprobar que el actor exista, sea `platform_owner` y no esté bloqueado.
+- Validan los límites de los campos.
+- Guardan o actualizan la fila única de configuración y registran `audit_logs` en la misma transacción.
+- Revocan `EXECUTE` a `PUBLIC`, `anon` y `authenticated`, y lo conceden únicamente a `service_role`.
+
+La Edge Function ahora invoca estas RPC en lugar de hacer `upsert` e insertar auditoría en solicitudes separadas. Las acciones de lectura continúan consultando las tablas desde el servidor técnico; no se concede acceso directo a los navegadores.
+
+Guardar la configuración del asistente sigue siendo solo persistencia de nombre, activación e instrucciones. No conecta ni ejecuta un proveedor de IA.
+
+### Esquema activo
+
+Consulta de solo lectura al proyecto Supabase independiente, 16 nov 2026: no existen todavía `platform_public_settings`, `platform_ai_settings`, `business_ai_settings`, `platform_financial_records` ni `payroll_records`. Las migraciones correspondientes siguen siendo borradores y no deben considerarse instaladas.
+
+### Pruebas pendientes
+
+En un entorno de ensayo, probar:
+
+1. Actualización válida de configuración pública y lectura posterior.
+2. Rechazo de URLs que no sean HTTPS y de WhatsApp fuera del formato permitido.
+3. Actualización válida de IA y rechazo de nombre/instrucciones fuera de límites.
+4. Actor bloqueado o sin rol técnico rechazado por cada RPC.
+5. Fallo forzado de inserción en `audit_logs`: la actualización debe revertirse, sin guardar una configuración parcial.
+6. Llamadas directas como `anon` y `authenticated` sin permiso de ejecución.
+
+No se ejecutó ninguna migración en el proyecto activo, no se desplegó la Edge Function y no se conectó un proveedor de IA.
