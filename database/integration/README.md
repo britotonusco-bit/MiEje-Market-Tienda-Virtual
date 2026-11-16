@@ -191,3 +191,17 @@ Hallazgos principales:
 - La tabla activa carece de `job_title`; el paquete candidato depende primero de `business-admin-boundaries.sql`.
 
 El informe detalla pruebas de concurrencia, aislamiento y auditoría. No se ejecutó SQL ni se modificó Supabase; todo sigue en la rama.
+
+
+## Auditoría de permisos de paneles y aislamiento entre negocios (16 nov 2026)
+
+Informe: [docs/panel-permissions-and-tenant-isolation-audit.md](../../docs/panel-permissions-and-tenant-isolation-audit.md).
+
+Hallazgos principales:
+- La base activa mantiene un bypass `platform_owner` en varias políticas RLS que permite lectura global de pedidos, clientes, productos, costos, gastos, pagos, perfiles y membresías.
+- Los privilegios UPDATE activos permiten cambiar `business_id` en productos, métodos de pago, gastos y costos; una cuenta administradora de más de un negocio podría intentar trasladar registros entre tiendas.
+- Los empleados pueden consultar por Data API columnas de pedidos que la interfaz no muestra, como correo, token de seguimiento e importes; también precios de líneas.
+- El DELETE de publicaciones puede eliminar postulaciones vinculadas por una FK `ON DELETE CASCADE`.
+- La rama restringe esos permisos mediante políticas por membresía, grants de columnas, triggers y RPC. La migración 13 separa las columnas operativas de las financieras y conserva el historial propio del cliente mediante RPC.
+
+Pruebas de dos negocios, empleados, administradores y clientes siguen pendientes en staging. No se ejecutó SQL ni se modificó el proyecto activo.
