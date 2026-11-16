@@ -426,3 +426,27 @@ Consulta de solo lectura, 16 nov 2026:
 ### Estado y pruebas pendientes
 
 El cambio es solo de rama. No se aplicó el SQL ni se desplegó la Edge Function. En staging deben probarse: creación por administrador del negocio correcto; rechazo de empleado y de administrador de otro negocio; prevención de duplicados pendientes; aprobación y rechazo; último administrador; doble resolución concurrente; perfil técnico bloqueado; rollback completo si falla la auditoría; y denegación de ejecución directa para `anon` y `authenticated`.
+
+
+## Auditoría de acceso a paneles y consultas — 16 nov 2026
+
+### Verificaciones de solo lectura en Supabase activo
+
+- `resolve-my-access` valida la sesión con Auth, rechaza perfiles inexistentes o bloqueados y devuelve únicamente membresías activas de negocios activos. El cliente comprueba además que el rol de la membresía coincida con el panel solicitado.
+- `technical-business-management` vuelve a validar el usuario en el servidor. Para `platform_owner` exige MFA AAL2 antes de ejecutar cualquier acción técnica. El registro de acceso a panel también comprueba el rol exacto y que el negocio esté activo.
+- Las membresías no admiten INSERT/UPDATE/DELETE desde `authenticated`; las escrituras están reservadas al servidor. La lectura directa está limitada por RLS a la propia membresía, administradores del mismo negocio y propietario técnico en el esquema activo.
+- Los pedidos y sus líneas se pueden consultar por integrantes activos del negocio. El personal necesita datos de cliente, dirección, estado y productos para preparar y entregar pedidos.
+- En el esquema activo, `authenticated` todavía tiene SELECT directo sobre importes y estados de pago de `orders` y sobre `unit_price`/`line_total` de `order_items`. La interfaz de empleado oculta esos valores, pero eso no impide consultarlos directamente por Data API. La migración `database/orders/order-financial-access-draft.sql` ya prepara la revocación de esas columnas y entrega los importes al administrador mediante RPC con validación de rol. Sigue pendiente de aplicar y probar en un entorno aislado.
+- En el esquema activo, la política `businesses_admin_update` conserva el bypass `is_platform_owner()`; el borrador `database/security/business-admin-boundaries.sql` lo elimina y limita las columnas comerciales que puede modificar el administrador. Sigue pendiente de aplicar y probar.
+- No existen aún en la base activa `access_block_requests`, `payroll_records` ni `platform_financial_records`; sus operaciones solo pueden validarse estáticamente hasta que haya un entorno de ensayo con las migraciones.
+
+### Corrección de consulta preparada en la rama
+
+La consulta de pedidos del panel administrativo seleccionaba `payment_method_name`, columna que no existe en la tabla `orders` activa. El resultado era un error de consulta que impedía cargar la bandeja de pedidos del administrador. Se retiró esa columna del SELECT en `panel-live.js`; el método de pago se obtiene de `get_business_admin_order_financials`, que devuelve `payment_method` para el administrador autorizado.
+
+### Alcance y pruebas pendientes
+
+- Cambio de consulta guardado solo en `correcciones-funcionales`.
+- No se ejecutó SQL, no se desplegó ninguna Edge Function y no se modificó `main` ni GitHub Pages.
+- La comprobación de permisos es una inspección de catálogos/RLS; no sustituye pruebas de acceso con cuentas reales de administrador y empleado.
+- En staging, probar que el empleado no pueda leer importes, estados de pago ni precios de línea, y que el administrador sí los reciba por las RPC; comprobar también que la consulta corregida carga pedidos correctamente.
