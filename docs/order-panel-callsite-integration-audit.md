@@ -236,3 +236,48 @@ Aunque la interfaz técnica no exponga necesariamente todos esos botones, RLS es
 7. Probar en staging con dos negocios y cuentas separadas de propietario técnico, administrador y empleado; verificar accesos permitidos y denegados.
 
 No se hicieron cambios en Supabase ni despliegues. La comparación fue de solo lectura. La rama sigue siendo el único destino de documentación; no se modificó `main` ni GitHub Pages.
+
+
+### Corrección de auditoría y conciliación de borradores — 16 nov 2026
+
+#### Rectificación importante sobre permisos de UPDATE en pedidos
+
+La consulta anterior comprobó `has_table_privilege('authenticated','public.orders','UPDATE') = false` y se concluyó erróneamente que la actualización estaba bloqueada. La comprobación correcta de las columnas usadas por `panel-live.js` devuelve `has_column_privilege(..., 'status', 'UPDATE') = true` y `has_column_privilege(..., 'delivery_tracking', 'UPDATE') = true`. La tabla tiene política RLS `orders_members_update_status` con `USING` y `WITH CHECK` para miembros activos (`business_admin`/ `employee`) y propietario técnico, y una política SELECT equivalente. Por ello, el UPDATE del panel cuenta con permisos de columna y política RLS; no se ha demostrado que esté bloqueado por privilegios SQL. La conclusión anterior queda reemplazada.
+
+El problema funcional confirmado era el vocabulario: la interfaz enviaba `received` y `on_the_way`, pero la restricción CHECK y el trigger de la base aceptan `pending` y `out_for_delivery`. Se corrigió la interfaz en la rama para utilizar los valores reales de la base y conservar las etiquetas visibles “Recibido” y “En camino”. También se corrigió el mapa de etiquetas del seguimiento público.
+
+**Cambios branch-only:**
+- `panel-live.js`: estado inicial `pending`, entrega `out_for_delivery`, mapa de transiciones y detección del inicio de reparto alineados con la DB.
+- `app.js`: etiquetas de seguimiento alineadas con `pending/out_for_delivery`.
+
+Verificación estática posterior: ambos archivos recuperados desde GitHub contienen los valores correctos; no quedan referencias de estado `received` ni `on_the_way` en el mapa de estados ni en el seguimiento público. La palabra `received` que permanece en `panel-live.js` corresponde a una variable local de suma de pagos, no a un estado de pedido. No se hizo prueba de navegador ni actualización de un pedido real.
+
+#### Las RPC faltantes sí tienen borradores SQL en la rama
+
+La comprobación anterior se refería a funciones desplegadas en la base activa. Se revisaron ahora los archivos SQL del repositorio y se encontró que las nueve RPC ausentes ya tienen implementaciones de borrador distribuidas así:
+
+- `get_business_admin_order_financials`, `get_business_admin_profit_report`, `mark_order_payment_received`: `database/orders/order-financial-access-draft.sql`.
+- `request_order_cancellation`, `decide_order_cancellation`: `database/orders/cancellation-flow-draft.sql`.
+- `complete_order_refund`: `database/orders/refund-flow-draft.sql`.
+- `adjust_business_inventory`: `database/inventory/inventory-movements-draft.sql`.
+- `save_business_payment_methods`: `database/security/business-payment-methods-atomic-draft.sql`.
+- `attach_business_expense_receipt`: `database/finance/business-expense-audit-draft.sql`.
+
+Esto cambia el siguiente paso: no se deben reescribir desde cero; primero hay que revisar dependencias, firmas exactas, grants, políticas, triggers y orden de aplicación de estos borradores. Ninguno se considera activo o probado solo por existir en GitHub.
+
+#### Edge Function de configuración pública
+
+Rectificación adicional: `get-platform-public-settings` sí existe como código fuente en `supabase/functions/get-platform-public-settings/index.ts`, y hay un borrador de tabla/RPC en `database/platform/platform-public-settings-draft.sql`. Sin embargo, no figura entre las seis Edge Functions activas del proyecto. Por tanto, el hallazgo correcto es **código fuente y esquema en borrador, pero función no desplegada en el proyecto activo**; no “función inexistente”.
+
+#### Asesores Supabase — seguridad y rendimiento
+
+Lectura de los asesores el 16 nov 2026:
+- Seguridad: protección contra contraseñas filtradas deshabilitada (WARN). Debe revisarse/habilitarse desde Auth antes de la activación pública.
+- Seguridad: tres tablas con RLS y sin políticas: `private.checkout_rate_limits`, `public.job_application_rate_limits`, `public.job_application_upload_sessions`. Se comprobó que `anon` y `authenticated` no tienen privilegios de tabla/columna sobre ellas; las dos tablas públicas conceden acceso solo a `service_role`. La tabla privada tampoco concede acceso directo a esos roles. No añadir políticas públicas por silenciar el asesor; conservar el acceso interno controlado por función.
+- Rendimiento: 16 claves foráneas sin índice de cobertura y una advertencia por políticas SELECT permisivas múltiples en `business_content_pages`. También se informaron 17 índices sin uso observado; no eliminarlos basándose solo en ese dato, especialmente con carga de pruebas limitada.
+
+La documentación actual de Supabase recalca que los GRANT y RLS cumplen funciones distintas y deben revisarse juntos. Desde el 30 oct 2026 las tablas nuevas de `public` ya no se exponen automáticamente a Data API por defecto; cualquier futura migración debe declarar explícitamente exposición, GRANT y RLS según necesidad.
+
+#### Estado
+
+Se corrigió el vocabulario de estados en la rama y se conciliaron los hallazgos con los borradores existentes. No se ejecutó SQL, no se desplegaron Edge Functions, no se modificó Auth ni se publicó la rama. Pendiente: revisión línea por línea de los borradores, staging y pruebas con cuentas reales separadas por rol/negocio.
