@@ -5,20 +5,15 @@
 --
 -- Orden previsto:
 -- 1) Aplicar/revisar database/security/business-admin-boundaries.sql
--- 2) Aplicar este archivo para añadir job_title y crear las RPC.
+-- 2) Aplicar este archivo para crear las RPC sobre la columna job_title del paso 1.
 -- 3) Adaptar technical-business-management/index.ts para invocar estas RPC.
 --
 -- Este archivo no envía correos ni realiza cambios en Supabase mientras permanezca
 -- en GitHub como borrador.
 
--- La Edge Function ya lee/escribe job_title, pero la tabla inspeccionada en el
--- proyecto independiente todavía no contiene esa columna.
-ALTER TABLE public.business_memberships
-  ADD COLUMN IF NOT EXISTS job_title text;
-
-COMMENT ON COLUMN public.business_memberships.job_title IS
-  'Cargo descriptivo de la persona dentro del negocio; no sustituye el rol de acceso.';
-
+-- business-admin-boundaries.sql crea job_title, su restricción de longitud y el
+-- permiso de lectura correspondiente. Este archivo depende de ese paso y no
+-- vuelve a crear la columna para mantener una sola fuente de definición.
 
 -- Crear una asignación y su auditoría en una sola transacción.
 -- La creación de usuarios y el envío de correo siguen siendo operaciones de Auth
