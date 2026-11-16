@@ -290,7 +290,7 @@ La acción `invite_member` en `supabase/functions/technical-business-management/
 
 1. Valida el identificador del negocio, correo, rol, nombre y cargo.
 2. Busca la cuenta existente con paginación limitada. Si llega al límite sin completar la búsqueda, se detiene y no asume que el correo está libre.
-3. Para una cuenta nueva, usa `inviteUserByEmail`. Una cuenta existente confirmada puede asignarse sin correo nuevo. Una cuenta existente sin confirmar se detiene con respuesta `409`: no se usa `auth.resend(type: signup)` porque la documentación de ese endpoint describe la confirmación de signup, no el reenvío de una invitación pendiente.
+3. Para una cuenta nueva, usa `inviteUserByEmail`. Una cuenta existente confirmada puede asignarse sin correo nuevo. Una cuenta existente sin confirmar puede recibir la asignación, pero la respuesta indica `requires_email_confirmation: true`; no podrá iniciar sesión hasta confirmar su correo. No se usa `auth.resend(type: signup)` para intentar reenviar una invitación.
 4. Llama a la RPC para crear la asignación y su auditoría de forma atómica.
 5. Devuelve un error recuperable si Auth envió el correo pero la asignación no pudo terminar. La cuenta no debe volver a crearse; el administrador puede reintentar la misma asignación.
 
@@ -304,7 +304,7 @@ También hay que comprobar que la URL de `aceptar-invitacion.html` esté incluid
 
 ### Límites y pruebas pendientes
 
-- La llamada de correo de Auth y la transacción PostgreSQL no pueden ser una sola transacción distribuida. Si Auth crea el usuario y luego falla la asignación, el flujo deja un usuario pendiente en Auth; el reintento detecta la cuenta, pero si continúa sin confirmar se detiene con `409` hasta resolver la verificación. No se intenta un reenvío que no esté documentado para invitaciones. Una tabla outbox de invitaciones con estado y reintentos sería una mejora posterior si se necesita recuperación automática sin intervención.
+- La llamada de correo de Auth y la transacción PostgreSQL no pueden ser una sola transacción distribuida. Si Auth crea el usuario y luego falla la asignación, el flujo deja un usuario pendiente en Auth; el reintento detecta la cuenta y puede finalizar la asignación sin crear otra cuenta ni reenviar automáticamente el correo. La respuesta indica que la confirmación del correo sigue pendiente. Una tabla outbox de invitaciones con estado y reintentos sería una mejora posterior si se necesita recuperación automática sin intervención.
 - Aún no se ha compilado ni desplegado la Edge Function y las RPC no están instaladas en Supabase.
 - Probar en staging: usuario nuevo, usuario existente confirmado, usuario existente sin confirmar, perfil globalmente bloqueado, negocio suspendido, membresía duplicada, SMTP rechazado, fallo de auditoría y dos solicitudes simultáneas.
 - Confirmar la URL de redirección permitida y la configuración SMTP antes de cualquier envío externo.
@@ -314,6 +314,11 @@ Estado: borrador SQL y Edge Function modificados solo en `correcciones-funcional
 
 ### Precisión adicional sobre invitaciones pendientes
 
-Se retiró del código el intento de llamar `auth.resend({ type: 'signup' })` para cuentas existentes sin confirmar. Supabase documenta `resend` para confirmaciones de registro, no como reenvío de una invitación pendiente. En ese caso el flujo devuelve `409` y no crea la membresía hasta que se complete la verificación o se defina un mecanismo explícito de reenvío.
+Se retiró del código el intento de llamar `auth.resend({ type: 'signup' })` para cuentas existentes sin confirmar. Supabase documenta `resend` para confirmaciones de registro, no como reenvío de una invitación pendiente. La asignación puede completarse, pero la respuesta marca `requires_email_confirmation: true` y el usuario no podrá iniciar sesión hasta verificar el correo.
 
 Supabase también ofrece `auth.admin.generateLink({ type: 'invite' })` para generar el enlace sin enviarlo; la documentación indica que estos enlaces deben enviarse mediante un proveedor de correo personalizado. MiEje Market todavía no tiene ese mecanismo integrado, por lo que no se generarán ni expondrán enlaces de invitación manualmente desde esta función.
+
+
+### Recuperación de una asignación interrumpida
+
+La acción devuelve ahora `requires_email_confirmation` según el estado Auth del usuario. Si el primer intento consiguió crear la cuenta y enviar la invitación, pero falló la RPC de asignación, el siguiente intento detecta esa cuenta existente y puede completar la membresía sin crear otra cuenta ni enviar un correo duplicado. Si la cuenta sigue sin confirmar, el acceso queda pendiente de la verificación de correo. Si el mensaje original no llegó, aún se necesita un proceso explícito de reenvío mediante el proveedor de correo; la Edge Function no finge que el correo fue reenviado.
