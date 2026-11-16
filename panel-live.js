@@ -450,7 +450,7 @@
   }
 
   function businessAssetPathFromPublicUrl(value, expectedFolder) {
-    if (!value || !businessId) return null;
+    if (!value || !businessId || !['logo', 'products'].includes(expectedFolder)) return null;
     try {
       const url = new URL(value);
       const supabaseOrigin = new URL(window.MIEJE_SUPABASE_URL).origin;
@@ -459,9 +459,27 @@
       const markerIndex = url.pathname.indexOf(marker);
       if (markerIndex < 0) return null;
       const encodedPath = url.pathname.slice(markerIndex + marker.length);
-      const path = encodedPath.split('/').map(segment => decodeURIComponent(segment)).join('/');
-      const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
-      const pattern = new RegExp('^' + uuid + '/' + expectedFolder + '/' + uuid + '\\.(png|jpg|webp)
+      const segments = encodedPath.split('/').map(segment => decodeURIComponent(segment));
+      const isUuid = value => {
+        const parts = String(value).split('-');
+        return parts.length === 5 && [8, 4, 4, 4, 12].every((length, index) =>
+          parts[index].length === length && /^[0-9a-f]+$/i.test(parts[index])
+        );
+      };
+      if (segments.length !== 3 || segments[0] !== businessId || segments[1] !== expectedFolder || !isUuid(segments[0])) return null;
+      const filename = segments[2].split('.');
+      if (filename.length !== 2 || !isUuid(filename[0]) || !['png', 'jpg', 'webp'].includes(filename[1].toLowerCase())) return null;
+      return segments.join('/');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function removeUploadedBusinessImage(path) {
+    if (!path) return;
+    const { error } = await db.storage.from('business-assets').remove([path]);
+    if (error) console.warn('No se pudo retirar una imagen reemplazada o que quedó sin asociar:', error.message);
+  }
 
   async function saveProduct(event) {
     event.preventDefault();
