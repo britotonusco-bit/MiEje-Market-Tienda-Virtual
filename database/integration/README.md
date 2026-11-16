@@ -346,3 +346,8 @@ Antes de habilitar vacantes públicamente, alinear la Edge Function en staging, 
 ### Corrección de carga de hojas de vida — 16 nov 2026
 
 En `correcciones-funcionales` se añadió la validación de consentimiento antes de emitir el token de carga, límites para respuestas personalizadas y una comprobación básica de firma binaria del CV antes de registrar la postulación. La función desplegada en Supabase sigue siendo v2: no se desplegó esta corrección. Falta análisis antimalware, evidencia de consentimiento versionada, política de retención y pruebas dinámicas en staging. Detalle en `docs/customer-data-rights-audit.md`.
+
+
+### Panel de postulaciones: revisión de lectura y descarga — 16 nov 2026
+
+La ruta operativa revisada es `panel-negocio.html` + `panel-live.js`; `panel-admin.html` sigue siendo un prototipo visual. El panel consulta postulaciones con filtro `business_id`, RLS exige membresía activa con rol `business_admin`, y la política del bucket privado restringe la descarga al administrador del negocio activo correspondiente. Los enlaces firmados duran 300 segundos. No se encontró lectura pública para el bucket ni SELECT público de postulaciones. Pendiente: pruebas dinámicas A/B, paginación y generar enlaces solo al pulsar Descargar, además de retención y consentimiento versionado. No se cambió código ni base de datos en esta revisión.
