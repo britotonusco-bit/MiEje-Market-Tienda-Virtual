@@ -69,7 +69,7 @@ El navegador anteriormente mostraba el mensaje genérico de `supabase-js` cuando
 
 Se corrigió `app.js` en la rama para leer el JSON de la respuesta HTTP mediante `error.context.clone().json()` y mostrar el campo `error` enviado por la función. Si no hay un cuerpo JSON legible, conserva el mensaje técnico de respaldo. La clave idempotente pendiente no se elimina cuando la solicitud falla, de modo que el cliente puede reintentar el mismo intento.
 
-La corrección pasó controles estáticos, pero falta comprobarla desde el navegador con respuestas reales 400, 409, 429 y 500.
+La corrección pasó controles estáticos, pero falta comprobarla desde el navegador con respuestas reales 400, 409, 429 y 500. También se corrigió la clasificación de la respuesta de producto no disponible: el texto real del SQL es plural (`Uno de los productos no está disponible`) y ahora la Edge Function lo devuelve como conflicto HTTP 409, no como error genérico 400.
 
 ### 5. Carrito con datos desactualizados
 
@@ -91,6 +91,16 @@ El carrito como tal permanece solo en memoria; `sessionStorage` conserva la huel
 - La Edge Function comprueba que el método pertenezca al negocio. El borrador idempotente vuelve a bloquear la fila del método con `FOR SHARE`, comprueba que siga habilitado y guarda el nombre como histórico.
 - El navegador no envía el precio como autoridad; la función SQL calcula el precio real.
 - El método de entrega se registra actualmente en las notas del pedido. Debe verificarse que las opciones que se muestran correspondan a las opciones reales configuradas por cada negocio.
+
+## Compatibilidad con cancelaciones y reembolsos
+
+La migración de checkout cambia los estados iniciales al vocabulario canónico: `received` y `on_the_way`. El borrador de cancelaciones usa estados terminales `delivered` y `cancelled`, por lo que no depende de los nombres antiguos `pending` ni `out_for_delivery`.
+
+La cancelación aprobada actualiza el pedido y restituye las existencias dentro de la misma transacción. El borrador de movimientos de inventario registra esa restitución como `cancellation_return`. También propone impedir el borrado físico de productos que ya aparecen en líneas de pedido, para conservar la referencia necesaria para devolver existencias.
+
+Los reembolsos se mantienen separados: el borrador financiero solo registra un reembolso total cuando el pedido ya está cancelado y existe exactamente un pago completado que coincide con el total. No ejecuta transferencias ni llama a una pasarela de pagos.
+
+Durante la normalización de estados, el trigger `orders_audit_status` permanece activo y registrará los cambios de estados antiguos a los canónicos como eventos de auditoría. Debe revisarse ese efecto al preparar la migración definitiva, especialmente si ya existen pedidos reales al momento de aplicarla.
 
 ## Estado de la base de datos al revisar
 
