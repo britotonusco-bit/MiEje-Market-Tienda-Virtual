@@ -27,6 +27,15 @@ Esto protege el stock frente a compras concurrentes sobre la misma fila de produ
 
 ### 1. Idempotencia todavía no activa
 
+La inspección del código realmente desplegado confirma que `create-public-order` está en versión 3. Esa versión no lee ni usa `idempotency_key` y llama directamente a `create_public_order`. Por eso, aunque el navegador guarde una clave temporal en `sessionStorage`, la función activa la ignora: un reintento después de perder la respuesta puede generar un segundo pedido.
+
+Además, la versión desplegada consulta que el método de pago esté habilitado antes de crear el pedido, pero no bloquea la fila del método ni vuelve a validarla dentro de la misma transacción. Si el negocio desactiva el método entre esa consulta y la creación, existe una ventana para registrar un pedido con un método que ya se deshabilitó. La nueva propuesta de rama corrige el diseño con una comprobación transaccional y bloqueo `FOR SHARE`.
+
+La versión 3 consume el límite de solicitudes por IP antes de validar el formato de cada producto y cantidad. Por eso, las solicitudes inválidas también consumen parte del límite de 10 intentos por 10 minutos. La validación de entrada debe ejecutarse antes de reservar el intento, manteniendo el límite también en el servidor.
+
+La función Edge desplegada tampoco vincula el pedido con la cuenta autenticada del cliente. La asociación de pedidos con cuentas y el historial de compras siguen pendientes de aplicar y probar.
+
+
 La base de datos inspeccionada no contiene las funciones `get_public_order_idempotent`, `reserve_checkout_rate_limit` ni `create_public_order_idempotent`. La función Edge activa `create-public-order` está desplegada en versión 3, mientras que la rama contiene una fuente más reciente que depende de esas RPC. Por tanto, el flujo idempotente de la rama no está implementado en el proyecto activo.
 
 El borrador `database/orders/checkout-idempotency-draft.sql` propone una clave única por intento, un hash del contenido, una reserva de límite por IP y bloqueo transaccional para que dos solicitudes simultáneas con la misma clave no creen dos pedidos. Debe revisarse junto con la Edge Function antes de aplicarlo.
