@@ -50,6 +50,12 @@
     }
 
     recoverySessionReady = true;
+    // Una vez intercambiado el enlace, elimina el código/token de la URL visible
+    // para que no permanezca en el historial ni se copie accidentalmente.
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.search = '';
+    cleanUrl.hash = '';
+    window.history.replaceState({}, document.title, cleanUrl.pathname);
     say('Enlace de recuperación validado. Puedes crear una contraseña nueva.', 'success');
     button.disabled = false;
   }
