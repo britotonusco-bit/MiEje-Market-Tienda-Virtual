@@ -879,3 +879,32 @@ GRANT UPDATE (
   voided_at,
   updated_at
 ) ON TABLE public.business_expenses TO authenticated;
+
+
+-- Minimización de datos de pedidos en los paneles.
+-- Los paneles solo consultan datos de contacto/entrega y el estado operativo.
+-- El detalle financiero se obtiene mediante RPC autorizadas; el token público
+-- de seguimiento se usa únicamente en el flujo público de seguimiento.
+-- Evitar que un empleado o administrador pueda extraer por Data API el email,
+-- token de seguimiento, totales o datos de pago que la interfaz no necesita.
+REVOKE SELECT ON TABLE public.orders FROM PUBLIC, anon, authenticated;
+REVOKE SELECT (
+  id, business_id, order_number, customer_name, customer_phone, customer_email,
+  delivery_address, delivery_notes, payment_method, payment_status, status,
+  delivery_tracking, subtotal, delivery_fee, total, public_tracking_token,
+  created_at, updated_at
+) ON TABLE public.orders FROM PUBLIC, anon, authenticated;
+GRANT SELECT (
+  id, business_id, order_number, customer_name, customer_phone,
+  delivery_address, delivery_notes, status, delivery_tracking, created_at
+) ON TABLE public.orders TO authenticated;
+
+-- El personal solo necesita los nombres y cantidades de los productos del pedido.
+-- Los precios de línea se reservan para los reportes financieros del administrador.
+REVOKE SELECT ON TABLE public.order_items FROM PUBLIC, anon, authenticated;
+REVOKE SELECT (
+  id, order_id, product_id, product_name, quantity, unit_price, line_total, created_at
+) ON TABLE public.order_items FROM PUBLIC, anon, authenticated;
+GRANT SELECT (
+  id, order_id, product_name, quantity
+) ON TABLE public.order_items TO authenticated;
