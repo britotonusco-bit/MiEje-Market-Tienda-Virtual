@@ -203,3 +203,29 @@ Por tanto, el código de GitHub no coincide completamente con la función desple
 8. Actualizar el aviso de privacidad y la información de vacantes para explicar responsable, finalidades, destinatarios, conservación y canal para ejercer derechos.
 
 **Resultado:** la postulación sí exige y almacena un booleano de aceptación en servidor, y el bucket de CV es privado. Sin embargo, no hay evidencia versionada del aviso ni política de retención de postulaciones completas; la limpieza candidata solo cubre sesiones/archivos huérfanos. La versión activa de la Edge Function no coincide plenamente con la rama. No se ejecutaron pruebas dinámicas, no se modificó Supabase, no se desplegó ninguna función y no se alteraron archivos de postulantes.
+
+
+### Correcciones preparadas en la rama: carga de CV y validación de respuestas — 16 nov 2026
+
+La revisión complementaria detectó que el navegador cargaba la hoja de vida antes de enviar el consentimiento. Aunque la Edge Function y la RPC rechazaban la postulación final sin consentimiento, la persona podía obtener un token firmado y transferir el archivo antes de esa validación. Esto no cumplía el orden esperado de autorización.
+
+Cambios preparados únicamente en `correcciones-funcionales`:
+- El formulario comprueba la casilla antes de iniciar el proceso.
+- La acción de servidor `request_upload` también exige `privacy_consent = true` antes de crear la sesión y emitir el token firmado. La comprobación del navegador no es la barrera de seguridad.
+- La acción `submit` limita las respuestas personalizadas a 20 campos, claves de hasta 80 caracteres, valores de texto de hasta 500 caracteres y 16 KiB serializados.
+- Antes de registrar la postulación, el servidor descarga el archivo privado y comprueba la firma binaria inicial correspondiente a PDF, DOC u OOXML/ZIP, además de la extensión y el límite de tamaño. Si la firma no coincide, elimina el objeto y la sesión temporal.
+
+Archivos modificados:
+- `app.js`
+- `supabase/functions/create-job-application/index.ts`
+
+Límites de la corrección:
+- La comprobación de cabecera no reemplaza un análisis antimalware ni garantiza que el documento completo sea válido o seguro.
+- La autorización sigue guardándose como booleano; todavía falta registrar versión del aviso, fecha/hora y finalidades autorizadas.
+- La política de conservación y eliminación de CV/postulaciones sigue pendiente.
+- La función activa de Supabase continúa en versión 2. Estos cambios están en GitHub y no están desplegados.
+- No se ejecutaron pruebas dinámicas ni se cargaron documentos reales. Se requiere probar en staging con archivos válidos e inválidos, ausencia de consentimiento, exceso de respuestas, vencimiento de sesiones y aislamiento A/B.
+
+Commits de la rama:
+- `app.js`: `eac652a511410976867ba933584629289c94c031`
+- `supabase/functions/create-job-application/index.ts`: `09635732018b6398215e5b76b85bdc1c43a7db53`
