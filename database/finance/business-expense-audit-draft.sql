@@ -1,7 +1,7 @@
 -- MiEje Market Independiente
 -- Transiciones protegidas y auditoría de gastos.
 -- BORRADOR: depende de las tablas y helpers existentes y del bucket
--- business-expense-receipts-draft.sql. Revisar en staging antes de ejecutar.
+-- expense-receipts-storage-draft.sql. Revisar en staging antes de ejecutar.
 
 -- Las escrituras de gastos deben pasar por RPCs transaccionales que validan
 -- el administrador del negocio y registran auditoría. No dejar que un cliente
