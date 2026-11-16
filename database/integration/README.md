@@ -107,6 +107,7 @@ La inspección de solo lectura del proyecto activo encontró:
 - `business-expense-receipts`: no existe en el proyecto activo. El panel ya intenta usarlo; debe aplicarse en staging `database/finance/expense-receipts-storage-draft.sql` antes de habilitar la función de comprobantes.
 
 No se encontraron objetos en los dos buckets existentes, así que no hubo pruebas de descarga o reemplazo con archivos reales. No cambiar los buckets activos ni aplicar políticas hasta disponer de staging y completar la matriz de pruebas del informe.
+- La Edge Function `cleanup-job-application-data` ya usa el secreto independiente `JOB_APPLICATION_CLEANUP_SECRET` para autenticar la llamada del programador; `SUPABASE_SERVICE_ROLE_KEY` queda solo como credencial interna del servidor. Configurar ambos secretos en staging antes de probar el proceso.
 
 ## 6. Criterios de salida para integrar
 
