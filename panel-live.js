@@ -2091,6 +2091,7 @@
     if (error || !updatedOrder) {
       alert(`No se pudo cambiar el estado: ${error?.message || 'El pedido pudo cambiar en otra sesión. Se actualizará la lista para evitar sobrescribir un estado más reciente.'}`);
       button.disabled = false;
+      if (panel === 'employee') await loadEmployeeOrders(); else await loadBusinessOrders();
       return;
     }
     if (panel === 'employee') await loadEmployeeOrders(); else await loadBusinessOrders();
