@@ -198,3 +198,14 @@ La operación de membresía debe bloquear siempre primero la fila del negocio y 
 - Edge Function: sin cambios.
 - Supabase: sin cambios.
 - Pruebas de concurrencia y fallos de auditoría: pendientes de un entorno aislado.
+
+
+## Revisión del trigger de último administrador en la rama
+
+El archivo `database/security/business-admin-boundaries.sql` de esta rama ya contiene `private.guard_last_active_business_admin()` y el trigger `guard_last_active_business_admin` sobre `public.business_memberships` para cambios de `role`, `status` o eliminación. El trigger cuenta administradores activos restantes y bloquea la fila del negocio antes de permitir retirar al último.
+
+Esta protección está únicamente en el archivo de la rama: la consulta de metadatos del proyecto Supabase independiente confirmó que el trigger todavía no está instalado allí. No debe considerarse activo en producción.
+
+El trigger es una defensa adicional, no sustituye las RPC transaccionales: no escribe `audit_logs`, no valida el actor técnico, no gestiona la transición de estado del negocio y no resuelve la carrera de reactivación contra una suspensión/cierre del negocio. Las RPC de membresía deben adquirir explícitamente el bloqueo del negocio antes de actualizar la membresía y escribir auditoría en la misma transacción. Mantener el mismo orden de bloqueo en todas las operaciones administrativas reduce el riesgo de interbloqueos.
+
+El trigger está declarado como `SECURITY INVOKER` (sin cláusula `SECURITY DEFINER`) y revoca EXECUTE a `PUBLIC`, `anon` y `authenticated`; el disparador se invoca por la operación de tabla, pero su cuerpo depende de los permisos de lectura del rol que ejecuta la actualización. Antes de habilitarlo, hay que verificar esos permisos con el rol servidor en un entorno aislado.
