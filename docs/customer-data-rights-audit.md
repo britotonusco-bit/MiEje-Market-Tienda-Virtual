@@ -128,3 +128,78 @@ Por tanto, los textos publicados no describen con precisión el flujo técnico a
 El checkout presenta una casilla obligatoria `privacyConsent`, pero el manejador de `app.js` no incluye su valor en la llamada a `create-public-order`. La Edge Function y la RPC activa tampoco reciben ni almacenan evidencia de autorización, y `orders` no tiene columnas para fecha, versión del aviso o finalidad. La validación del navegador no es evidencia persistente ni puede sustituir una comprobación del servidor.
 
 Antes de activar el servicio, determinar con asesoría legal qué autorizaciones son necesarias y registrar en servidor la evidencia mínima correspondiente (fecha, versión del aviso, finalidad y vínculo con la operación). Mantener separadas las finalidades necesarias para gestionar el pedido de las comunicaciones promocionales opcionales. La casilla actual no debe presentarse como prueba de consentimiento almacenado.
+
+
+## Auditoría de postulaciones laborales, consentimiento y conservación — 16 nov 2026
+
+### Alcance y evidencia
+
+Se revisaron en modo solo lectura la Edge Function activa `create-job-application`, su versión en `correcciones-funcionales`, la RPC activa `submit_public_job_application`, el esquema/RLS/grants de las tablas de postulaciones y sesiones, y el bucket `job-applications-private`. No se consultaron ni expusieron datos personales de postulantes.
+
+En la consulta realizada, `job_applications`, `job_application_upload_sessions` y `job_application_rate_limits` tenían cero filas. Esto solo describe el estado en el momento de la consulta; no demuestra que el flujo no pueda almacenar postulaciones.
+
+### 1. Consentimiento: comprobación real en servidor, evidencia incompleta
+
+- El formulario de vacantes envía `privacy_consent` como booleano.
+- La Edge Function activa rechaza la postulación si el valor no es `true`.
+- La RPC activa también valida `p_privacy_consent IS DISTINCT FROM true` y la tabla tiene una restricción `privacy_consent = true`. Por tanto, la aceptación no depende únicamente del navegador.
+- La tabla `job_applications` guarda `privacy_consent`, pero no registra una marca temporal específica del consentimiento, versión del aviso, finalidad autorizada ni texto/identificador del aviso aceptado. `created_at` registra la creación de la postulación, pero no identifica de forma independiente qué aviso vio la persona.
+
+**Conclusión:** existe una validación de aceptación y se persiste un booleano, pero la evidencia no es suficientemente detallada para reconstruir qué versión del aviso se aceptó y para qué finalidades. Definir con asesoría legal colombiana el texto y la base jurídica aplicable. Si se requiere autorización, guardar en servidor una versión inmutable del aviso, fecha/hora y finalidades, vinculadas a la postulación. No tratar una sola casilla como autorización general para comunicaciones promocionales.
+
+### 2. Protección de postulaciones y aislamiento por negocio
+
+- RLS está habilitado en `job_applications`, `job_application_upload_sessions` y `job_application_rate_limits`.
+- La política SELECT de `job_applications` permite leer al administrador activo del negocio correspondiente mediante `private.has_business_role(business_id, ['business_admin'])`.
+- La política UPDATE aplica el mismo límite de negocio y exige que el negocio continúe activo; también usa `WITH CHECK`.
+- La función helper comprueba una membresía activa del usuario autenticado, el rol permitido y que el perfil no esté bloqueado.
+- No se encontraron políticas para lectura/escritura directa de las tablas de sesiones temporales o límites; sus grants de tabla observados se reservan a `service_role` y `postgres`.
+- La política activa de Storage para CV permite SELECT a administradores activos del negocio indicado por la primera carpeta de la ruta. No concede lectura a visitantes ni empleados. El helper de membresías no concede acceso global al propietario técnico por el mero hecho de tener el rol de plataforma.
+
+**Pendiente de prueba:** confirmar con cuentas ficticias A/B que el administrador A no puede leer ni descargar postulaciones/archivos de B, que el empleado no puede acceder a CV y que el técnico no obtiene acceso global salvo que exista una autorización de negocio explícita. La consulta de políticas no sustituye pruebas de autorización reales.
+
+### 3. Carga de hojas de vida
+
+Controles observados:
+- El bucket `job-applications-private` es privado, con límite de 5 MB y MIME permitido PDF/DOC/DOCX.
+- La ruta vincula UUID del negocio, UUID de postulación y nombre de archivo aleatorio.
+- La Edge Function valida que el negocio esté activo y que la página corresponda a una vacante publicada, aprobada y del mismo negocio.
+- La solicitud de carga crea una sesión con vencimiento de 30 minutos y devuelve un token de carga firmado.
+- Al enviar, el servidor comprueba sesión, negocio, página, ruta, vencimiento y que el objeto exista; la RPC vuelve a validar la sesión y la consume dentro de una transacción.
+
+Riesgos pendientes:
+- La validación usa extensión, MIME declarado y tamaño. No verifica la firma binaria real del documento ni ejecuta análisis antimalware.
+- El tamaño del archivo se valida inicialmente con el valor enviado por el navegador y después con los metadatos de Storage; se debe conservar el límite del bucket como control del servidor.
+- `form_responses` solo se comprueba como objeto JSON. No se encontró un límite explícito de bytes, número de campos o profundidad antes de guardarlo. Añadir límites de tamaño y estructura para evitar almacenamiento abusivo.
+- No se hicieron pruebas con archivos reales ni pruebas A/B de descargas. No se afirma que el aislamiento haya superado pruebas dinámicas.
+
+### 4. Diferencia entre la función activa y la rama
+
+La Edge Function activa `create-job-application` es versión 2. La revisión de solo lectura mostró que su limitador usa un contador común para las acciones de preparación de carga y envío. En la rama `correcciones-funcionales`, el código valida primero la acción y separa el contador por acción, evitando que la carga legítima consuma el mismo cupo que el envío de la postulación.
+
+Por tanto, el código de GitHub no coincide completamente con la función desplegada. La revisión de la rama no se encuentra activa en Supabase.
+
+**Pendiente:** probar la versión de la rama en staging, desplegarla allí junto con sus dependencias y verificar límites, reintentos, errores y carga/entrega. No desplegar directamente en el proyecto activo.
+
+### 5. Conservación, sesiones temporales y eliminación de CV
+
+- La sesión temporal expira a los 30 minutos, pero eso no borra por sí solo el archivo del bucket.
+- El borrador `database/maintenance/job-application-cleanup-draft.sql` y la Edge Function `cleanup-job-application-data` existen en la rama, pero la función de limpieza no está desplegada y la RPC de listado de sesiones vencidas no está instalada en la base activa.
+- La limpieza candidata elimina archivos huérfanos de sesiones vencidas y filas antiguas del limitador. Cuando una postulación existe, conserva el CV y retira solo la sesión temporal.
+- No se encontró un plazo ni un proceso aprobado para eliminar postulaciones completadas o sus hojas de vida. En consecuencia, los CV asociados a postulaciones pueden permanecer almacenados sin una fecha de eliminación definida.
+- No se encontró una tarea programada activa para ejecutar la limpieza. La extensión `pg_cron` no está instalada en el proyecto consultado; la existencia de una Edge Function en GitHub no equivale a que exista una programación activa.
+
+**Riesgo alto de privacidad:** falta una política de conservación y eliminación para postulaciones completas y CV. Definir plazos por finalidad con asesoría legal y de recursos humanos; aplicar una rutina autenticada, auditable e idempotente que elimine tanto el objeto Storage como los datos que ya no deban conservarse. Mantener separados los registros mínimos que deban preservarse por obligación legal o defensa de reclamaciones. No inventar un plazo hasta que se apruebe.
+
+### 6. Estado y acciones requeridas
+
+1. Alinear la Edge Function activa con la versión revisada de la rama, después de pruebas en staging.
+2. Añadir evidencia de consentimiento con versión del aviso, fecha/hora y finalidades.
+3. Validar tamaño y estructura de `form_responses` en el servidor.
+4. Incorporar validación de contenido real y un proceso de análisis de archivos antes de permitir su descarga.
+5. Probar aislamiento A/B, empleado, visitante y técnico con usuarios ficticios.
+6. Instalar y probar la limpieza de sesiones vencidas y archivos huérfanos; configurar su ejecución controlada.
+7. Definir e implementar retención y eliminación de postulaciones/CV completados.
+8. Actualizar el aviso de privacidad y la información de vacantes para explicar responsable, finalidades, destinatarios, conservación y canal para ejercer derechos.
+
+**Resultado:** la postulación sí exige y almacena un booleano de aceptación en servidor, y el bucket de CV es privado. Sin embargo, no hay evidencia versionada del aviso ni política de retención de postulaciones completas; la limpieza candidata solo cubre sesiones/archivos huérfanos. La versión activa de la Edge Function no coincide plenamente con la rama. No se ejecutaron pruebas dinámicas, no se modificó Supabase, no se desplegó ninguna función y no se alteraron archivos de postulantes.
