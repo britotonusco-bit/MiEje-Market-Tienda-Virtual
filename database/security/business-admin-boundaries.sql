@@ -54,7 +54,12 @@ WITH CHECK (
   AND private.business_is_active(business_id)
 );
 
--- No se crea una política DELETE nueva: se conserva el comportamiento actual.
+-- Las publicaciones con postulaciones deben conservarse: la relación
+-- compuesta de job_applications puede propagar un DELETE y borrar candidatos.
+-- El panel debe despublicar/archivar mediante UPDATE de is_published; no borrar.
+DROP POLICY IF EXISTS business_content_pages_admin_delete ON public.business_content_pages;
+REVOKE DELETE ON TABLE public.business_content_pages FROM PUBLIC, anon, authenticated;
+
 -- No se modifican las políticas de lectura pública del directorio en este cambio.
 
 
