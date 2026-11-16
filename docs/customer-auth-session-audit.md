@@ -347,3 +347,75 @@ El asesor volvió a mostrar:
 - 1 aviso WARN `auth_leaked_password_protection`: protección contra contraseñas filtradas deshabilitada.
 
 Las tres tablas de control son estructuras internas y las consultas previas confirmaron que los roles API no tienen permisos de acceso; los RPC de rate limit y envío de postulaciones solo permiten ejecución a `service_role`. No se deben crear políticas RLS genéricas para ocultar los avisos. La protección de contraseñas filtradas debe revisarse desde la configuración Auth/plan, no con una política SQL.
+
+
+## Auditoría adicional: historial y seguimiento público — 16 nov 2026
+
+### 1. Historial de compras: interfaz preparada, dependencia ausente
+
+La revisión de solo lectura confirmó en el proyecto activo:
+
+- `orders.customer_user_id` no existe.
+- `public.customer_favorites` no existe.
+- `public.get_customer_order_history()` no existe y no tiene privilegios de ejecución asignados.
+- Las tablas `orders` y `order_items` tienen RLS habilitado, pero sus políticas SELECT actuales solo permiten lectura al propietario técnico y a miembros del negocio que corresponda. No hay política de lectura propia para clientes.
+- Los permisos de `authenticated` sobre `orders` y `order_items` son SELECT, pero los permisos por sí solos no conceden acceso: las políticas RLS actuales no contemplan al cliente.
+
+Por tanto, un cliente autenticado no puede consultar directamente sus pedidos en el estado activo. La pantalla `cuenta.js` llama a `get_customer_order_history()`, pero esa función y la columna de propiedad todavía no existen. El código muestra un mensaje de migración pendiente cuando falla la llamada.
+
+### 2. Diseño previsto en los borradores
+
+Los archivos `database/customers/customer-account-migration.sql`, `database/orders/checkout-idempotency-draft.sql` y `database/orders/order-financial-access-draft.sql` proponen:
+
+- Vincular pedidos de clientes autenticados mediante `customer_user_id`, calculado en servidor tras validar el JWT con `auth.getUser()`; el navegador no puede elegir el ID de propietario.
+- Mantener `customer_user_id = NULL` para pedidos de invitados.
+- Exponer el historial mediante `get_customer_order_history()`, que usa `auth.uid()`, rechaza cuentas bloqueadas, limita el resultado a los 50 pedidos más recientes y devuelve nombre del negocio, estado, importes y líneas de producto.
+- Restringir favoritos a la cuenta propietaria con políticas RLS; no conceder UPDATE y permitir borrar únicamente los favoritos propios.
+- Conservar pedidos históricos al eliminar una cuenta mediante `ON DELETE SET NULL`; los favoritos se eliminan con la cuenta.
+
+El diseño es razonable como base, pero no está activo. El historial tampoco tiene paginación en la interfaz: cuando se implemente, solo mostrará hasta 50 pedidos salvo que se añada carga por páginas o un filtro temporal. La fecha se formatea explícitamente en `America/Bogota` y el orden previsto es más reciente primero.
+
+### 3. Seguimiento público por código privado
+
+La tabla activa `orders` tiene `public_tracking_token uuid NOT NULL DEFAULT gen_random_uuid()`. La consulta encontró cero pedidos, por lo que no fue posible probar un token real ni una consulta de extremo a extremo.
+
+La Edge Function `track-public-order` está desplegada y activa como versión 1 con `verify_jwt = false`. El acceso sin sesión es intencional: el UUID privado funciona como credencial de posesión. La función valida el formato UUID y consulta el pedido por igualdad exacta del token. No se identificó un límite de solicitudes por IP ni otro control de frecuencia en el código desplegado.
+
+**Riesgo/pendiente:** aunque un UUID generado aleatoriamente es difícil de adivinar, la ausencia de rate limit deja el endpoint expuesto a abuso automatizado y a consultas repetidas. Añadir limitación del lado servidor, respuestas uniformes para token inválido/no encontrado y registro de abuso sin almacenar el token completo.
+
+### 4. Diferencia entre la función desplegada y la rama
+
+Se comparó el código desplegado de `track-public-order` con `supabase/functions/track-public-order/index.ts` en `correcciones-funcionales`:
+
+- Desplegada: versión 1; devuelve también `total`, aunque la interfaz pública no lo muestra; no establece `Cache-Control: no-store`.
+- Rama: la consulta y respuesta omiten `total` y añaden `Cache-Control: no-store, private`.
+- Ambas versiones carecen de rate limit y devuelven el campo libre `delivery_tracking`.
+
+La función desplegada no coincide con la versión de la rama y debe actualizarse únicamente después de probar el paquete completo en staging y recibir autorización expresa.
+
+### 5. Datos de seguimiento introducidos desde el panel
+
+Al pasar un pedido a `on_the_way`, `panel-live.js` pide una referencia de seguimiento de 3 a 500 caracteres y advierte que no se incluyan teléfonos personales, direcciones privadas ni datos sensibles. Sin embargo, es texto libre y la advertencia está en el navegador; no constituye validación del servidor. La Edge Function devuelve ese texto al visitante que posea el token.
+
+**Corrección recomendada:** sustituir el campo libre por una referencia pública controlada (opciones predefinidas o un campo específico validado en servidor). Si se necesita texto libre, definir una política de contenido y validarlo/normalizarlo antes de exponerlo. No incluir datos de contacto privados, direcciones personales ni datos de terceros.
+
+### 6. Estado de estados del pedido
+
+La interfaz de cliente reconoce `received`, `confirmed`, `preparing`, `ready`, `on_the_way`, `delivered` y `cancelled`. La restricción activa de la base todavía usa `pending` y `out_for_delivery` en lugar de `received` y `on_the_way`. La consulta pública refleja el valor almacenado, por lo que el seguimiento no puede considerarse alineado hasta aplicar y probar la normalización de estados del borrador de límites administrativos.
+
+### 7. Pruebas requeridas en staging
+
+1. Cliente A solo ve sus pedidos; cliente B no puede consultar pedidos de A, ni alterando filtros, IDs o llamadas RPC.
+2. Invitado no obtiene acceso al historial de una cuenta; sus pedidos no se vinculan automáticamente al registrarse.
+3. Cliente bloqueado o sin perfil no consulta el historial.
+4. Favoritos: aislamiento entre cuentas, rechazo de productos inactivos, eliminación propia y ausencia de duplicados.
+5. Token válido devuelve solo los campos públicos necesarios; token mal formado/no existente no revela datos.
+6. Rate limit impide abuso automatizado sin bloquear consultas legítimas; comprobar también respuestas y logs.
+7. Texto de seguimiento no permite publicar datos personales; verificar salida y almacenamiento.
+8. Cambio de estado se refleja en la consulta pública y respeta la máquina de estados canónica.
+9. Verificar fecha/hora de Bogotá, orden descendente y comportamiento de más de 50 pedidos.
+10. Repetir pruebas después del despliegue de la versión de Edge Function aprobada.
+
+### Resultado
+
+El historial de cliente y favoritos no están operativos en la base activa por ausencia de columna, tabla, RPC y políticas de propiedad. El seguimiento público sí tiene una Edge Function desplegada y un token UUID generado por la base, pero requiere rate limit, minimización de datos, control del texto público y sincronización de la versión desplegada con la rama. No se crearon pedidos, no se consultaron datos personales de pedidos, no se modificó SQL, no se desplegó código y no se realizaron pruebas de escritura.
