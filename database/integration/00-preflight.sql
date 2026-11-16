@@ -6,13 +6,13 @@ SELECT current_database() AS database_name,
        current_setting('server_version') AS postgres_version,
        now() AS checked_at;
 
--- Tablas base que las migraciones posteriores esperan encontrar.
+-- Tablas base que ya deben existir ANTES de ejecutar migraciones.
+-- No incluir aquí tablas nuevas como platform_financial_records, payroll_records
+-- o access_block_requests: las crean los propios borradores y se verifican después.
 SELECT x.object_name,
        to_regclass(x.object_name) IS NOT NULL AS exists
 FROM (VALUES
  ('public.businesses'),
- ('public.platform_financial_records'),
- ('public.payroll_records'),
  ('public.profiles'),
  ('public.audit_logs'),
  ('public.business_memberships'),
@@ -26,14 +26,15 @@ FROM (VALUES
  ('public.business_expenses'),
  ('public.order_item_costs'),
  ('public.business_content_pages'),
- ('public.access_block_requests'),
  ('public.job_applications'),
+ ('public.job_application_upload_sessions'),
  ('storage.buckets'),
  ('storage.objects')
 ) AS x(object_name)
 ORDER BY x.object_name;
 
--- Columnas y funciones base.
+-- Columnas y funciones base preexistentes. Las columnas nuevas se verifican en
+-- verify-integration-package.sql después de aplicar el paquete.
 SELECT x.object_name,
        EXISTS (
          SELECT 1 FROM information_schema.columns c
@@ -49,24 +50,6 @@ FROM (VALUES
  ('public.products','inventory'),
  ('public.products','business_id'),
  ('public.businesses','status'),
- ('public.platform_financial_records','id'),
- ('public.platform_financial_records','business_id'),
- ('public.platform_financial_records','record_type'),
- ('public.platform_financial_records','description'),
- ('public.platform_financial_records','amount'),
- ('public.platform_financial_records','currency'),
- ('public.platform_financial_records','occurred_at'),
- ('public.platform_financial_records','created_by'),
- ('public.payroll_records','id'),
- ('public.payroll_records','business_id'),
- ('public.payroll_records','payee_name'),
- ('public.payroll_records','description'),
- ('public.payroll_records','amount'),
- ('public.payroll_records','currency'),
- ('public.payroll_records','status'),
- ('public.payroll_records','paid_at'),
- ('public.payroll_records','created_by'),
- ('public.payroll_records','updated_by'),
  ('public.business_memberships','role'),
  ('public.business_memberships','status'),
  ('public.business_memberships','blocked_reason'),
@@ -87,7 +70,6 @@ FROM (VALUES
  ('public.create_public_order(uuid,text,text,text,text,text,text,jsonb)'),
  ('private.business_is_active(uuid)'),
  ('private.has_business_role(uuid,text[])'),
- ('public.resolve_access_block_request(uuid,text,text,uuid)'),
  ('private.guard_business_expense_update()'),
  ('private.enforce_order_status_transition()'),
  ('extensions.digest(text,text)')
