@@ -34,7 +34,7 @@ Cada archivo es una unidad independiente. Ejecutar uno a uno, revisar el resulta
 | 9 | `database/inventory/inventory-movements-draft.sql` | Crea el registro de movimientos y el RPC de ajuste; cambia la FK de productos en líneas de pedido a `ON DELETE RESTRICT`. |
 | 10 | `database/security/business-payment-methods-atomic-draft.sql` | Después del paso 2; revoca escrituras directas de métodos de pago y exige usar su RPC desde el panel. |
 | 11 | `database/inventory/checkout-inventory-lock-order-draft.sql` | Después de inventario y límites de negocio; sustituye el checkout base y etiqueta movimientos de venta. |
-| 12 | `database/orders/checkout-idempotency-draft.sql` | Depende de clientes, métodos de pago, `create_public_order` del paso 11 y `extensions.digest`. Repite parte de la estructura de clientes, por lo que el paso 8 debe ser la fuente de verdad. |
+| 12 | `database/orders/checkout-idempotency-draft.sql` | Depende de clientes, métodos de pago, `create_public_order` del paso 11 y `extensions.digest`. Configura las políticas del historial/favoritos e incorpora idempotencia y límite de solicitudes; el paso 8 es la única fuente de verdad del esquema de clientes. |
 | 13 | `database/orders/order-financial-access-draft.sql` | Después del checkout; usa `customer_user_id` y `payment_method_name`, y restringe columnas financieras para roles autenticados. |
 | 14 | `database/orders/cancellation-flow-draft.sql` | Depende de estados canónicos, helpers, tabla de solicitudes y trigger; requiere inventario para registrar devoluciones. |
 | 15 | `database/orders/refund-flow-draft.sql` | Después de cancelaciones y finanzas; registra el reembolso externo ya realizado, no transfiere dinero. |
@@ -219,3 +219,15 @@ Correcciones incorporadas en la rama:
 - `business-expense-audit-draft.sql` ahora apunta al nombre real `expense-receipts-storage-draft.sql`.
 
 La revisión estática de las RPC confirmó el uso de `search_path` vacío en las funciones privilegiadas examinadas, validación de sesión/rol en las funciones que admiten usuarios autenticados y ejecución restringida a `service_role` para las operaciones técnicas. La Edge Function obtiene el actor desde `auth.getUser(token)` y exige AAL2 al propietario técnico. Todo sigue pendiente de compilación y pruebas integrales en staging; no se ejecutó SQL ni se desplegó nada.
+
+
+## Auditoría de integridad de clientes, checkout e inventario (16 nov 2026)
+
+Informe: [docs/customer-checkout-inventory-integrity-audit.md](../../docs/customer-checkout-inventory-integrity-audit.md).
+
+Correcciones en esta rama:
+- `customer-account-migration.sql` queda como fuente única de `customer_user_id`, su índice y `customer_favorites`; se retiraron las definiciones duplicadas del paso 12.
+- La Edge Function `create-public-order` ya no usa `x-forwarded-for` como fallback de IP; solo acepta `cf-connecting-ip` del proxy de confianza y falla de forma cerrada si falta.
+- Se documentó la verificación obligatoria de esa cabecera en staging.
+
+La consulta de solo lectura al esquema activo confirmó que existe la restricción única `products(business_id, id)` requerida por la FK compuesta del registro de inventario. También confirmó que las tablas/columnas nuevas de clientes, inventario e idempotencia todavía no están instaladas. No se ejecutaron migraciones ni se modificó Supabase.
