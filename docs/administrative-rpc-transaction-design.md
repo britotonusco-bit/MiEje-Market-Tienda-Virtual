@@ -156,3 +156,45 @@ Consulta realizada el 16 nov 2026 sobre el proyecto independiente. No se modific
 El esquema actual sí permite diseñar RPC transaccionales para las operaciones administrativas descritas, pero primero hay que incorporar y revisar el trigger del último administrador en una migración de ensayo. La Edge Function con `service_role` debe ejecutar funciones que usen permisos compatibles con ese rol; no se debe dar acceso global a los helpers privados ni cambiar sus privilegios sin necesidad.
 
 La verificación fue de metadatos, restricciones, índices, triggers y definiciones de funciones. No demuestra que las operaciones se comporten correctamente bajo concurrencia; eso requiere un entorno de ensayo con datos de prueba.
+
+
+## Revisión del contrato real de la Edge Function — solo lectura
+
+Consulta realizada el 16 nov 2026 sobre `supabase/functions/technical-business-management/index.ts` en `correcciones-funcionales`. No se modificó ni desplegó la función.
+
+### Hallazgos confirmados
+
+- `create_business`: inserta el negocio y luego escribe auditoría en una segunda petición. Si falla auditoría, devuelve `201` con advertencia; el negocio queda creado sin evento correspondiente.
+- `invite_member`: para usuarios nuevos envía primero el correo de Auth; después crea/actualiza perfil, crea membresía y registra auditoría en llamadas separadas. Un fallo posterior puede dejar invitación enviada sin membresía o membresía sin auditoría. Para usuarios existentes no se observa una comprobación de `profiles.is_blocked` antes de asignar acceso.
+- `update_member_assignment`: lee y cuenta administradores desde la Edge Function, actualiza membresía y registra auditoría por separado. La comprobación del último administrador no está serializada en la misma transacción.
+- `block_member`: cuenta administradores, suspende membresía y escribe auditoría en operaciones separadas. Dos solicitudes concurrentes pueden superar la comprobación de último administrador; un fallo de auditoría no revierte la suspensión.
+- `unblock_member`: comprueba el estado del negocio antes de reactivar, pero la lectura y actualización no comparten bloqueo transaccional; la auditoría también va separada.
+- `set_business_status`: actualiza estado del negocio y después registra auditoría. No compara el estado anterior esperado para detectar una transición concurrente.
+- `moderate_business_content`: lee el contenido, actualiza moderación y después registra auditoría. La lectura y escritura no bloquean la fila; una decisión concurrente puede ser sobrescrita.
+- `create_platform_financial_record` y `create_payroll_record`: crean el registro y luego intentan auditarlo por separado. Si falla auditoría, el registro financiero queda guardado y la función devuelve advertencia.
+- `update_platform_ai_settings`: actualiza configuración y audita por separado; informa advertencia si la auditoría falla.
+- `update_platform_public_settings`: actualiza configuración y luego audita. Si falla auditoría, responde con error aunque la configuración ya quedó modificada.
+- `resolve_payroll_record` y `resolve_block_request` ya llaman RPC dedicadas. Deben revisarse como ejemplos del patrón transaccional, sin asumir que su implementación o permisos estén validados solo por la llamada desde Edge Function.
+
+### Orden recomendado para cerrar los huecos
+
+1. **Primero:** `update_member_assignment`, `block_member` y `unblock_member`, usando una única operación de base de datos que bloquee la fila del negocio, valide el último administrador, cambie la membresía y escriba auditoría.
+2. **Segundo:** `set_business_status` y `moderate_business_content`, con bloqueo de fila, comprobación del estado anterior y auditoría en la misma transacción.
+3. **Tercero:** `create_business`, `create_platform_financial_record`, `create_payroll_record` y las dos operaciones de configuración, para eliminar escrituras parciales sin auditoría.
+4. **Cuarto:** rediseñar `invite_member` con registro durable/idempotente de invitación y separación entre envío externo de correo y confirmación de membresía. No se debe prometer atomicidad entre PostgreSQL y el proveedor de correo.
+
+### Contrato técnico a conservar
+
+La Edge Function ya valida el JWT, consulta el perfil y exige MFA `aal2` cuando `platform_role` es `platform_owner`. Las nuevas RPC deben recibir el identificador del actor desde el servidor, volver a verificar `profiles.platform_role = 'platform_owner'` y `is_blocked = false`, y limitar EXECUTE al rol de servidor. El cliente no debe poder invocarlas directamente.
+
+La operación de membresía debe bloquear siempre primero la fila del negocio y después la membresía objetivo. Todas las rutas que cambien rol o estado deben respetar ese mismo orden de bloqueo para evitar interbloqueos y carreras. La auditoría debe insertar el estado anterior y el nuevo, sin incluir datos personales innecesarios.
+
+### Estado actualizado
+
+- Esquema real y columnas de las cinco tablas principales: inspeccionados.
+- Contrato y secuencia de acciones administrativas de la Edge Function: inspeccionados.
+- Huecos de atomicidad: identificados y documentados.
+- SQL RPC: todavía no creado ni aplicado.
+- Edge Function: sin cambios.
+- Supabase: sin cambios.
+- Pruebas de concurrencia y fallos de auditoría: pendientes de un entorno aislado.
