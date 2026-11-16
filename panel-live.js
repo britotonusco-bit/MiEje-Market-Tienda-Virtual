@@ -1388,9 +1388,68 @@
   }
 
   async function saveBusinessAi(event) {
-    event.preventDefault(); const form=event.currentTarget, message=document.querySelector('#businessAiMessage');
-    const payload={business_id:businessId,enabled:form.elements.enabled.checked,assistant_name:form.elements.assistant_name.value.trim(),instructions:form.elements.instructions.value.trim(),updated_by:currentUser.id,updated_at:new Date().toISOString()};
-    const {error}=await db.from('business_ai_settings').upsert(payload,{onConflict:'business_id'}); message.textContent=error?`No se pudo guardar: ${error.message}`:'Configuración de IA de este negocio guardada por separado de la IA general.'; message.className=error?'message error':'message success';
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#businessAiMessage');
+    const payload = {
+      business_id: businessId,
+      enabled: form.elements.enabled.checked,
+      assistant_name: form.elements.assistant_name.value.trim(),
+      instructions: form.elements.instructions.value.trim(),
+      updated_by: currentUser.id,
+      updated_at: new Date().toISOString()
+    };
+
+    const lookup = await db.from('business_ai_settings')
+      .select('business_id')
+      .eq('business_id', businessId)
+      .maybeSingle();
+    if (lookup.error) {
+      message.textContent = 'No se pudo comprobar la configuración de IA: ' + lookup.error.message;
+      message.className = 'message error';
+      return;
+    }
+
+    let result;
+    if (lookup.data) {
+      // business_id es inmutable: el UPDATE envía solo columnas autorizadas.
+      result = await db.from('business_ai_settings')
+        .update({
+          enabled: payload.enabled,
+          assistant_name: payload.assistant_name,
+          instructions: payload.instructions,
+          updated_by: payload.updated_by,
+          updated_at: payload.updated_at
+        })
+        .eq('business_id', businessId)
+        .select('business_id')
+        .maybeSingle();
+    } else {
+      result = await db.from('business_ai_settings')
+        .insert(payload)
+        .select('business_id')
+        .maybeSingle();
+      if (result.error?.code === '23505') {
+        // Si otra sesión creó la fila al mismo tiempo, actualizar sin tocar la PK.
+        result = await db.from('business_ai_settings')
+          .update({
+            enabled: payload.enabled,
+            assistant_name: payload.assistant_name,
+            instructions: payload.instructions,
+            updated_by: payload.updated_by,
+            updated_at: payload.updated_at
+          })
+          .eq('business_id', businessId)
+          .select('business_id')
+          .maybeSingle();
+      }
+    }
+
+    const error = result.error || (!result.data ? new Error('No se encontró la configuración después de guardarla.') : null);
+    message.textContent = error
+      ? 'No se pudo guardar: ' + error.message
+      : 'Configuración de IA de este negocio guardada por separado de la IA general.';
+    message.className = error ? 'message error' : 'message success';
   }
 
   async function loadBlockTargetUsers() {
