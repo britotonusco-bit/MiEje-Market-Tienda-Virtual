@@ -121,3 +121,10 @@ La sección 7 del aviso de tratamiento de datos y los apartados de pedidos/pagos
 Por tanto, los textos publicados no describen con precisión el flujo técnico actual. La consulta de solo lectura encontró cero pedidos en la tabla activa, pero eso no elimina el hecho de que el código puede transmitir y almacenar datos personales cuando se utiliza.
 
 **Pendiente antes de activar el servicio:** actualizar política, aviso y términos para identificar qué datos de cliente/domicilio se recogen, quién decide el tratamiento, finalidades, proveedores reales, conservación, derechos, pagos, entrega, cancelaciones y canales de comunicación. Distinguir mensajes necesarios para gestionar una compra de comunicaciones promocionales. Completar los datos del responsable que siguen como marcadores `[COMPLETAR]` y validar los textos con asesoría legal colombiana. No se modificaron los textos legales en esta auditoría.
+
+
+### Evidencia de autorización del checkout pendiente
+
+El checkout presenta una casilla obligatoria `privacyConsent`, pero el manejador de `app.js` no incluye su valor en la llamada a `create-public-order`. La Edge Function y la RPC activa tampoco reciben ni almacenan evidencia de autorización, y `orders` no tiene columnas para fecha, versión del aviso o finalidad. La validación del navegador no es evidencia persistente ni puede sustituir una comprobación del servidor.
+
+Antes de activar el servicio, determinar con asesoría legal qué autorizaciones son necesarias y registrar en servidor la evidencia mínima correspondiente (fecha, versión del aviso, finalidad y vínculo con la operación). Mantener separadas las finalidades necesarias para gestionar el pedido de las comunicaciones promocionales opcionales. La casilla actual no debe presentarse como prueba de consentimiento almacenado.
