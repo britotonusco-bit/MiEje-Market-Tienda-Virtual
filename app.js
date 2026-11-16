@@ -202,7 +202,7 @@
   let cart = [];
   let pendingCheckoutRequest = null;
   let toastTimer;
-  const checkoutSessionKey = "mieje:checkout-pending:v1";
+  const checkoutSessionKey = "mieje:checkout-pending:v2";
 
   async function getCheckoutFingerprint(payload) {
     const bytes = new TextEncoder().encode(JSON.stringify(payload));
@@ -211,7 +211,7 @@
   }
 
   function readPendingCheckout() {
-    const raw = window.sessionStorage.getItem(checkoutSessionKey);
+    const raw = window.localStorage.getItem(checkoutSessionKey);
     if (!raw) return null;
 
     let saved;
@@ -219,14 +219,14 @@
       saved = JSON.parse(raw);
     } catch (error) {
       console.warn("La clave temporal del checkout estaba dañada y se descartó.", error);
-      window.sessionStorage.removeItem(checkoutSessionKey);
+      window.localStorage.removeItem(checkoutSessionKey);
       return null;
     }
 
     if (typeof saved?.fingerprint !== "string"
         || !/^[0-9a-f]{64}$/i.test(saved.fingerprint)
         || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(saved.idempotencyKey || "")) {
-      window.sessionStorage.removeItem(checkoutSessionKey);
+      window.localStorage.removeItem(checkoutSessionKey);
       return null;
     }
     return { fingerprint: saved.fingerprint, idempotencyKey: saved.idempotencyKey };
@@ -239,7 +239,7 @@
 
   function savePendingCheckout(request) {
     try {
-      window.sessionStorage.setItem(checkoutSessionKey, JSON.stringify(request));
+      window.localStorage.setItem(checkoutSessionKey, JSON.stringify(request));
       return true;
     } catch (error) {
       console.warn("No se pudo guardar la clave temporal del checkout.", error);
@@ -250,7 +250,7 @@
   function clearPendingCheckout() {
     pendingCheckoutRequest = null;
     try {
-      window.sessionStorage.removeItem(checkoutSessionKey);
+      window.localStorage.removeItem(checkoutSessionKey);
     } catch (error) {
       console.warn("No se pudo limpiar la clave temporal del checkout.", error);
     }
@@ -1101,7 +1101,13 @@
         payment_method_id: paymentMethodId,
         items: cart.map(item => ({ product_id: item.productId, quantity: item.quantity }))
       };
-      const requestFingerprint = await getCheckoutFingerprint(checkoutPayload);
+      const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
+      const { data: sessionData, error: sessionError } = await client.auth.getSession();
+      if (sessionError) throw new Error("No fue posible verificar la sesión del cliente. Vuelve a intentarlo.");
+      const requestFingerprint = await getCheckoutFingerprint({
+        ...checkoutPayload,
+        customer_user_id: sessionData.session?.user?.id || null
+      });
       const savedPendingCheckout = readPendingCheckout();
       const unresolvedRequest = pendingCheckoutRequest || savedPendingCheckout;
       if (unresolvedRequest && unresolvedRequest.fingerprint !== requestFingerprint) {
@@ -1117,7 +1123,6 @@
           throw new Error("No se pudo guardar de forma segura el intento de compra en este navegador. No se envió el pedido. Revisa el almacenamiento del navegador e inténtalo nuevamente.");
         }
       }
-      const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
       const { data, error } = await client.functions.invoke("create-public-order", {
         body: { ...checkoutPayload, idempotency_key: pendingCheckoutRequest.idempotencyKey }
       });
