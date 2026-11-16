@@ -37,6 +37,13 @@ CREATE INDEX IF NOT EXISTS customer_favorites_product_idx
 
 ALTER TABLE public.customer_favorites ENABLE ROW LEVEL SECURITY;
 
+-- IMPORTANTE: los GRANT de abajo habilitan permisos PostgreSQL, pero no
+-- agregan por sí solos esta tabla nueva a los esquemas expuestos por Data API.
+-- Antes de usar client.from('customer_favorites'), confirmar en Dashboard >
+-- Integrations > Data API que public esté expuesto y que la tabla sea accesible.
+-- Desde el cambio aplicado a todos los proyectos el 30-Oct-2026, las tablas
+-- nuevas no se exponen automáticamente por defecto.
+
 DROP POLICY IF EXISTS customer_favorites_select_own ON public.customer_favorites;
 CREATE POLICY customer_favorites_select_own
 ON public.customer_favorites
