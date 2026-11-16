@@ -561,5 +561,8 @@ GRANT EXECUTE ON FUNCTION public.create_public_order_idempotent(
 -- 1) Misma clave + mismo contenido => devuelve el mismo pedido y no descuenta stock otra vez.
 -- 2) Dos llamadas simultáneas con misma clave => solo un pedido.
 -- 3) Misma clave + contenido distinto => conflicto, sin crear otro pedido.
--- 4) Clave nueva => consume exactamente una vez el límite IP dentro de la transacción.
--- 5) Error de inventario => transacción revertida y clave disponible para corregir/reintentar.
+-- 4) Clave nueva => reserve_checkout_rate_limit registra el intento en una transacción
+--    independiente; create_public_order_idempotent exige esa reserva antes de crear el pedido.
+-- 5) Error de inventario => se revierte la transacción del pedido/idempotencia, pero la
+--    reserva IP permanece para que el intento fallido cuente en el límite. La misma clave
+--    y contenido puede reintentarse sin consumir otra reserva.
