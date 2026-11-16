@@ -535,14 +535,6 @@ Deno.serve(async (req: Request) => {
         }
         targetUser = inviteData?.user ?? null;
         invitationSent = true;
-      } else if (!targetUser.email_confirmed_at) {
-        // No usar resend(type: "signup") para una cuenta que pudo nacer de
-        // una invitación: ese endpoint documenta el reenvío de confirmación
-        // de signup, no la repetición del flujo de invitación.
-        return reply(409, {
-          error: "La cuenta ya existe, pero su correo todavía no está confirmado. No se asignó acceso. Primero debe completarse la verificación pendiente o revisarse el envío de la invitación original.",
-          invitation_sent: false,
-        });
       }
 
       if (!targetUser?.id) {
@@ -583,6 +575,7 @@ Deno.serve(async (req: Request) => {
 
       const result = data as Record<string, any> | null;
       if (!result?.membership) throw new Error("La RPC de asignación no devolvió la membresía.");
+      const requiresEmailConfirmation = !targetUser.email_confirmed_at;
       if (result.already_assigned) {
         return reply(409, {
           error: result.membership.status === "active"
@@ -590,6 +583,7 @@ Deno.serve(async (req: Request) => {
             : "Ese usuario ya tiene una asignación suspendida. Reactiva su acceso desde la gestión de usuarios.",
           membership: result.membership,
           invitation_sent: invitationSent,
+          requires_email_confirmation: requiresEmailConfirmation,
         });
       }
 
@@ -597,9 +591,12 @@ Deno.serve(async (req: Request) => {
         ok: true,
         membership: result.membership,
         invitation_sent: invitationSent,
+        requires_email_confirmation: requiresEmailConfirmation,
         message: invitationSent
-          ? "Correo de invitación o verificación enviado y acceso asignado."
-          : "Cuenta existente asignada al negocio.",
+          ? "Correo de invitación enviado y acceso asignado."
+          : requiresEmailConfirmation
+            ? "Asignación creada. La cuenta todavía debe confirmar su correo antes de poder iniciar sesión; no se envió otro mensaje."
+            : "Cuenta existente asignada al negocio.",
       });
     }
 
