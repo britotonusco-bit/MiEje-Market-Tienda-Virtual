@@ -58,6 +58,7 @@ Deno.serve(async (req: Request) => {
   const rateLimitCutoff = new Date(now.getTime() - RATE_LIMIT_WINDOW_MS).toISOString();
   let sessionsRemoved = 0;
   let objectsRemoved = 0;
+  let sessionsWithApplication = 0;
   let sessionsSkipped = 0;
   let sessionErrors = 0;
 
@@ -98,7 +99,7 @@ Deno.serve(async (req: Request) => {
             .select("id");
           if (deleteSessionError) throw deleteSessionError;
           if ((deletedSession ?? []).length > 0) sessionsRemoved++;
-          sessionsSkipped++;
+          sessionsWithApplication++;
           continue;
         }
 
@@ -159,10 +160,11 @@ Deno.serve(async (req: Request) => {
       rateLimitRowsRemoved = (deletedLimits ?? []).length;
     }
 
-    return reply(200, {
-      ok: true,
+    return reply(sessionErrors > 0 ? 500 : 200, {
+      ok: sessionErrors === 0,
       sessionsRemoved,
       objectsRemoved,
+      sessionsWithApplication,
       sessionsSkipped,
       sessionErrors,
       rateLimitRowsRemoved,
