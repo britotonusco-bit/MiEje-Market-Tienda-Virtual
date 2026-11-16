@@ -205,9 +205,12 @@ BEGIN
     RAISE EXCEPTION 'Debes iniciar sesión para consultar tu historial.' USING ERRCODE = '42501';
   END IF;
 
-  IF EXISTS (
+  -- Fallar de forma cerrada: una cuenta sin perfil o bloqueada no debe
+  -- consultar historial mediante esta función privilegiada.
+  IF NOT EXISTS (
     SELECT 1 FROM public.profiles p
-    WHERE p.id = v_actor AND p.is_blocked = true
+    WHERE p.id = v_actor
+      AND p.is_blocked = false
   ) THEN
     RAISE EXCEPTION 'La cuenta no tiene acceso al historial.' USING ERRCODE = '42501';
   END IF;
@@ -342,6 +345,11 @@ GRANT SELECT (
 REVOKE INSERT, UPDATE, DELETE ON TABLE public.order_items FROM PUBLIC, anon, authenticated;
 
 
+
+-- Pruebas adicionales de historial:
+-- 7) Una cuenta sin fila en public.profiles no puede consultar el historial.
+-- 8) Una cuenta con profiles.is_blocked = true no puede consultar el historial.
+-- 9) Una cuenta con perfil válido y no bloqueado solo recibe sus propios pedidos.
 
 -- Índices parciales para reportes por fecha real de movimiento (no created_at).
 CREATE INDEX IF NOT EXISTS idx_financial_completed_business_type_date
