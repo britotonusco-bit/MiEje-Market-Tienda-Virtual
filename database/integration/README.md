@@ -244,3 +244,9 @@ Hallazgos principales:
 - El esquema activo contiene las columnas y relaciones base, pero todavía no tiene esos índices nuevos ni las RPC candidatas.
 
 La revisión estática fue favorable y no requirió modificar las migraciones. Concurrencia, rollback, aislamiento A/B y movimientos de inventario siguen pendientes de pruebas en staging. No se ejecutó SQL ni se desplegó nada.
+
+
+## Auditoría de llamadas del panel para operaciones de pedidos (16 nov 2026)
+Informe: [docs/order-panel-callsite-integration-audit.md](../../docs/order-panel-callsite-integration-audit.md).
+
+Las llamadas de la interfaz para confirmar pagos, solicitar/decidir cancelaciones, registrar reembolsos y consultar finanzas coinciden estáticamente con las firmas SQL candidatas. No obstante, la consulta de solo lectura del proyecto activo no encontró las cinco RPC financieras/de cancelación; por eso esos controles no pueden considerarse operativos todavía. El checkout público tiene validación e idempotencia en el código de la Edge Function, pero requiere pruebas reales de cabeceras, concurrencia y reintentos. No se ejecutó SQL ni se desplegó nada.
