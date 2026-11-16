@@ -40,8 +40,10 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return reply(405, { error: "Método no permitido." });
 
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const cleanupSecret = Deno.env.get("JOB_APPLICATION_CLEANUP_SECRET") ?? "";
   const suppliedSecret = req.headers.get("x-cleanup-secret") ?? "";
-  if (!serviceKey || !suppliedSecret || !constantTimeEqual(serviceKey, suppliedSecret)) {
+  if (!serviceKey || !cleanupSecret || !suppliedSecret
+      || !constantTimeEqual(cleanupSecret, suppliedSecret)) {
     return reply(401, { error: "No autorizado." });
   }
 
