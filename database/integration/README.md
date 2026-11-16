@@ -205,3 +205,15 @@ Hallazgos principales:
 - La rama restringe esos permisos mediante políticas por membresía, grants de columnas, triggers y RPC. La migración 13 separa las columnas operativas de las financieras y conserva el historial propio del cliente mediante RPC.
 
 Pruebas de dos negocios, empleados, administradores y clientes siguen pendientes en staging. No se ejecutó SQL ni se modificó el proyecto activo.
+
+
+## Auditoría estática de funciones SQL y dependencias (16 nov 2026)
+
+Informe: [docs/sql-function-security-static-audit.md](../../docs/sql-function-security-static-audit.md).
+
+Correcciones incorporadas en la rama:
+- La normalización de estados históricos y la función de transición quedan centralizadas en `business-admin-boundaries.sql`; el trigger se desactiva solo durante la conversión y se reactiva dentro de una transacción.
+- `checkout-inventory-lock-order-draft.sql` ya no repite la normalización ni reemplaza por segunda vez el trigger de estados.
+- `business-expense-audit-draft.sql` ahora apunta al nombre real `expense-receipts-storage-draft.sql`.
+
+La revisión estática de las RPC confirmó el uso de `search_path` vacío en las funciones privilegiadas examinadas, validación de sesión/rol en las funciones que admiten usuarios autenticados y ejecución restringida a `service_role` para las operaciones técnicas. La Edge Function obtiene el actor desde `auth.getUser(token)` y exige AAL2 al propietario técnico. Todo sigue pendiente de compilación y pruebas integrales en staging; no se ejecutó SQL ni se desplegó nada.
