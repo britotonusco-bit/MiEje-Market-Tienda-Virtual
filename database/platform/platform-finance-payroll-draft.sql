@@ -96,7 +96,7 @@ BEGIN
     RAISE EXCEPTION 'Actor técnico no autorizado.' USING ERRCODE = '42501';
   END IF;
 
-  IF p_decision NOT IN ('paid','cancelled') THEN
+  IF p_decision IS NULL OR p_decision NOT IN ('paid','cancelled') THEN
     RAISE EXCEPTION 'Decisión de nómina no válida.';
   END IF;
   IF p_payment_reference IS NOT NULL AND pg_catalog.char_length(p_payment_reference) > 160 THEN
@@ -225,9 +225,10 @@ DECLARE
   v_reference text := NULLIF(pg_catalog.btrim(p_reference), '');
 BEGIN
   IF p_actor_id IS NULL
-     OR p_record_type NOT IN ('income','expense','refund','adjustment')
+     OR p_record_type IS NULL OR p_record_type NOT IN ('income','expense','refund','adjustment')
      OR v_description IS NULL OR pg_catalog.char_length(v_description) NOT BETWEEN 3 AND 500
      OR p_amount IS NULL OR p_amount <= 0 OR p_amount >= 1000000000000
+     OR p_amount <> pg_catalog.round(p_amount, 2)
      OR v_currency !~ '^[A-Z]{3}$'
      OR pg_catalog.char_length(COALESCE(v_reference, '')) > 160 THEN
     RAISE EXCEPTION 'Datos del movimiento financiero no válidos.'
