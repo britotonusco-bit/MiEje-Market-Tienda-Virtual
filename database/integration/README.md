@@ -42,7 +42,9 @@ Cada archivo es una unidad independiente. Ejecutar uno a uno, revisar el resulta
 | 17 | `database/finance/business-expense-audit-draft.sql` | Después del paso 16 y de los límites de negocio; sustituye escrituras directas por RPC auditadas. |
 | 18 | `database/maintenance/job-application-cleanup-draft.sql` | Depende de las tablas activas de postulaciones y sesiones de carga; coordinar con la Edge Function de limpieza. |
 
-El orden 2/11 contiene actualmente una duplicación: ambos archivos normalizan estados y reemplazan `private.enforce_order_status_transition()`. Antes de ejecutar, consolidar esa parte en una sola migración sin dejar una ventana con el trigger deshabilitado. El paso 11 debe conservar la sustitución del checkout y ejecutarse después de instalar el trigger de movimientos.
+La normalización histórica de estados y la función `private.enforce_order_status_transition()` quedan centralizadas en el paso 2 (`business-admin-boundaries.sql`). El paso 11 solo sustituye el checkout y registra movimientos de venta; no vuelve a definir el trigger ni repite la conversión. La normalización se ejecuta en una transacción y desactiva el trigger anterior únicamente durante esa conversión.
+
+El paso 8 (`customer-account-migration.sql`) es la única fuente de verdad para `orders.customer_user_id`, su índice y la tabla `customer_favorites`. El paso 12 solo configura las políticas de favoritos y las políticas de lectura necesarias para el historial; ya no vuelve a crear columnas, índices ni la tabla.
 
 Los pasos 1, 3, 4, 5, 6, 7 y 18 son módulos independientes en cuanto a tablas, pero se ordenan aquí para que los helpers y contratos de permisos estén disponibles antes de conectar sus Edge Functions/paneles. El paso 10 debe preceder a la habilitación del flujo de checkout definitivo.
 
