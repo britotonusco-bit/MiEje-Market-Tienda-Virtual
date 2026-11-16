@@ -110,6 +110,11 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "request_upload") {
+      // No emitir un token de carga ni recibir una hoja de vida antes de que
+      // la persona acepte el aviso de tratamiento en el servidor.
+      if (body.privacy_consent !== true) {
+        return reply(400, { error: "Autoriza el tratamiento de datos antes de adjuntar tu hoja de vida." });
+      }
       const fileName = value(body.file_name, 180);
       const contentType = value(body.content_type, 120).toLowerCase();
       const fileSize = Number(body.file_size);
@@ -158,11 +163,20 @@ Deno.serve(async (req: Request) => {
       const privacyConsent = body.privacy_consent === true;
       const formResponses = body.form_responses && typeof body.form_responses === "object"
         && !Array.isArray(body.form_responses) ? body.form_responses : {};
+      const responseEntries = Object.entries(formResponses);
+      const responseBytes = new TextEncoder().encode(JSON.stringify(formResponses)).byteLength;
+      const validResponses = responseEntries.length <= 20
+        && responseEntries.every(([key, item]) =>
+          key.length <= 80 && typeof item === "string" && item.length <= 500
+        );
       const applicationIdInput = value(body.application_id, 80);
       const resumePath = value(body.resume_path, 500) || null;
 
       if (!applicantName || !applicantContact || !privacyConsent) {
         return reply(400, { error: "Completa tus datos y autoriza el tratamiento de datos." });
+      }
+      if (!validResponses || responseBytes > 16 * 1024) {
+        return reply(400, { error: "Las respuestas del formulario superan los límites permitidos." });
       }
 
       const applicationId = resumePath
@@ -190,8 +204,28 @@ Deno.serve(async (req: Request) => {
         const { data: files, error: listError } = await admin.storage.from(BUCKET).list(folder, { search: fileName });
         if (listError) throw listError;
         const uploaded = (files ?? []).find((file: any) => file.name === fileName);
-        if (!uploaded || Number(uploaded.metadata?.size ?? 0) > MAX_FILE_SIZE) {
-          return reply(400, { error: "No encontramos el archivo adjunto. Vuelve a cargarlo." });
+        if (!uploaded || Number(uploaded.metadata?.size ?? 0) < 1
+            || Number(uploaded.metadata?.size ?? 0) > MAX_FILE_SIZE) {
+          return reply(400, { error: "No encontramos el archivo adjunto o supera el límite permitido." });
+        }
+
+        // La extensión y el MIME del navegador no prueban el formato real.
+        // Comprobar la firma binaria básica antes de guardar la postulación.
+        const { data: resumeBlob, error: downloadError } = await admin.storage.from(BUCKET).download(resumePath);
+        if (downloadError || !resumeBlob) throw downloadError ?? new Error("No se pudo verificar el archivo.");
+        const header = new Uint8Array(await resumeBlob.slice(0, 8).arrayBuffer());
+        const isPdf = fileName.toLowerCase().endsWith(".pdf")
+          && header.length >= 5 && String.fromCharCode(...header.slice(0, 5)) === "%PDF-";
+        const isDoc = fileName.toLowerCase().endsWith(".doc")
+          && header.length >= 8
+          && [0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1].every((byte, index) => header[index] === byte);
+        const isDocx = fileName.toLowerCase().endsWith(".docx")
+          && header.length >= 4 && header[0] === 0x50 && header[1] === 0x4b
+          && header[2] === 0x03 && header[3] === 0x04;
+        if (!(isPdf || isDoc || isDocx)) {
+          await admin.storage.from(BUCKET).remove([resumePath]);
+          await admin.from("job_application_upload_sessions").delete().eq("id", applicationId);
+          return reply(400, { error: "El archivo no coincide con un PDF, DOC o DOCX válido." });
         }
       }
 
