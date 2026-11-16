@@ -596,39 +596,30 @@ Deno.serve(async (req: Request) => {
       if (!membershipId || !["business_admin", "employee"].includes(role) || jobTitle.length < 2) {
         return reply(400, { error: "Selecciona una membresía, un rol válido y un cargo de al menos dos caracteres." });
       }
-      const { data: before, error: readError } = await admin.from("business_memberships")
-        .select("id,business_id,user_id,role,status,job_title")
-        .eq("id", membershipId).maybeSingle();
-      if (readError) throw readError;
-      if (!before) return reply(404, { error: "No se encontró la membresía." });
-      if (before.role === "business_admin" && role !== "business_admin" && before.status === "active") {
-        const { count, error: countError } = await admin.from("business_memberships")
-          .select("id", { count: "exact", head: true })
-          .eq("business_id", before.business_id).eq("role", "business_admin").eq("status", "active");
-        if (countError) throw countError;
-        if ((count ?? 0) <= 1) return reply(409, { error: "No se puede retirar el rol del último administrador activo del negocio." });
-      }
-      const { data: membership, error: updateError } = await admin.from("business_memberships")
-        .update({ role, job_title: jobTitle })
-        .eq("id", membershipId)
-        .eq("business_id", before.business_id)
-        .eq("role", before.role)
-        .eq("status", before.status)
-        .select("id,business_id,user_id,role,status,job_title").maybeSingle();
-      if (updateError) throw updateError;
-      if (!membership) return reply(409, { error: "La membresía cambió durante la operación. Actualiza la lista." });
-      const { error: auditError } = await admin.from("audit_logs").insert({
-        business_id: membership.business_id, actor_id: user.id,
-        action: "business.member_assignment_updated", entity_type: "business_membership",
-        entity_id: membership.id,
-        details: { target_user_id: membership.user_id, previous_role: before.role, role, previous_job_title: before.job_title, job_title: jobTitle }
+
+      const { data, error } = await admin.rpc("update_business_membership_assignment", {
+        p_membership_id: membershipId,
+        p_role: role,
+        p_job_title: jobTitle,
+        p_actor_id: user.id,
       });
-      if (auditError) console.error("Membership assignment updated but audit insert failed:", auditError);
+      if (error) {
+        if (error.code === "P0002") return reply(404, { error: "No se encontró la membresía." });
+        if (error.code === "42501") return reply(403, { error: "La operación no está autorizada para esta cuenta o el usuario de destino está bloqueado." });
+        if (error.code === "23514" || error.code === "40001") return reply(409, { error: error.message });
+        if (error.code === "22023") return reply(400, { error: "Los datos del rol o cargo no son válidos." });
+        console.error("Membership assignment RPC failed:", error);
+        throw error;
+      }
+
+      const result = data as Record<string, any> | null;
+      if (!result?.membership) throw new Error("La RPC de asignación no devolvió la membresía actualizada.");
       return reply(200, {
         ok: true,
-        membership,
-        audit_warning: auditError ? "El rol y el cargo se actualizaron, pero no se pudo guardar el evento de auditoría." : null,
-        message: auditError ? "El rol y el cargo se actualizaron." : "Rol y cargo actualizados y registrados en auditoría.",
+        membership: result.membership,
+        message: result.unchanged
+          ? "El rol y el cargo ya tenían esos valores."
+          : "Rol y cargo actualizados y registrados en auditoría.",
       });
     }
 
@@ -668,51 +659,28 @@ Deno.serve(async (req: Request) => {
       const reason = textValue(body.reason, 2000);
       if (!membershipId || !reason) return reply(400, { error: "La membresía y el motivo son obligatorios." });
 
-      const { data: before, error: readError } = await admin.from("business_memberships")
-        .select("id,business_id,user_id,role,status")
-        .eq("id", membershipId)
-        .maybeSingle();
-      if (readError) throw readError;
-      if (!before) return reply(404, { error: "No se encontró esa asignación de usuario." });
-      if (before.status === "suspended") {
-        return reply(200, { ok: true, membership: before, message: "La cuenta ya estaba suspendida en este negocio." });
-      }
-
-      if (before.role === "business_admin") {
-        const { count, error: adminsError } = await admin.from("business_memberships")
-          .select("id", { count: "exact", head: true })
-          .eq("business_id", before.business_id)
-          .eq("role", "business_admin")
-          .eq("status", "active");
-        if (adminsError) throw adminsError;
-        if ((count ?? 0) <= 1) {
-          return reply(409, { error: "No se puede suspender al último administrador activo del negocio. Asigna primero otro administrador." });
-        }
-      }
-
-      const { data: membership, error: updateError } = await admin.from("business_memberships").update({
-        status: "suspended",
-        blocked_reason: reason,
-      }).eq("id", membershipId).eq("status", "active")
-        .select("id, business_id, user_id, role, status").maybeSingle();
-
-      if (updateError) throw updateError;
-      if (!membership) return reply(409, { error: "El acceso cambió mientras se procesaba la solicitud. Actualiza la lista e inténtalo de nuevo." });
-
-      const { error: auditError } = await admin.from("audit_logs").insert({
-        business_id: membership.business_id,
-        actor_id: user.id,
-        action: "business.member_suspended",
-        entity_type: "business_membership",
-        entity_id: membership.id,
-        details: { target_user_id: membership.user_id, role: membership.role, reason },
+      const { data, error } = await admin.rpc("suspend_business_membership", {
+        p_membership_id: membershipId,
+        p_reason: reason,
+        p_actor_id: user.id,
       });
-      if (auditError) console.error("Membership suspended but audit insert failed:", auditError);
+      if (error) {
+        if (error.code === "P0002") return reply(404, { error: "No se encontró la membresía o su negocio." });
+        if (error.code === "42501") return reply(403, { error: "La operación no está autorizada para esta cuenta." });
+        if (error.code === "23514" || error.code === "40001") return reply(409, { error: error.message });
+        if (error.code === "22023") return reply(400, { error: "La membresía y un motivo válido son obligatorios." });
+        console.error("Membership suspension RPC failed:", error);
+        throw error;
+      }
+
+      const result = data as Record<string, any> | null;
+      if (!result?.membership) throw new Error("La RPC de suspensión no devolvió la membresía.");
       return reply(200, {
         ok: true,
-        membership,
-        audit_warning: auditError ? "El acceso se suspendió, pero no se pudo guardar el evento de auditoría." : null,
-        message: auditError ? "El acceso se suspendió." : "Acceso suspendido y registrado en auditoría.",
+        membership: result.membership,
+        message: result.already_suspended
+          ? "La cuenta ya estaba suspendida en este negocio."
+          : "Acceso suspendido y registrado en auditoría.",
       });
     }
 
@@ -723,44 +691,28 @@ Deno.serve(async (req: Request) => {
         return reply(400, { error: "La membresía y un motivo de reactivación son obligatorios." });
       }
 
-      const { data: before, error: readError } = await admin.from("business_memberships")
-        .select("id,business_id,user_id,role,status,businesses(status)")
-        .eq("id", membershipId)
-        .maybeSingle();
-      if (readError) throw readError;
-      if (!before) return reply(404, { error: "No se encontró esa asignación de usuario." });
-      const business = Array.isArray(before.businesses) ? before.businesses[0] : before.businesses;
-      if (business?.status !== "active") {
-        return reply(409, { error: "Primero debes reactivar el negocio. La cuenta no puede acceder a un negocio suspendido o cerrado." });
-      }
-      if (before.status === "active") {
-        return reply(200, { ok: true, membership: before, message: "La cuenta ya tenía acceso activo." });
-      }
-
-      const { data: membership, error: updateError } = await admin.from("business_memberships").update({
-        status: "active",
-        blocked_reason: null,
-      }).eq("id", membershipId).eq("status", "suspended")
-        .select("id,business_id,user_id,role,status").maybeSingle();
-      if (updateError) throw updateError;
-      if (!membership) {
-        return reply(409, { error: "El acceso cambió mientras se procesaba la reactivación. Actualiza la lista antes de continuar." });
-      }
-
-      const { error: auditError } = await admin.from("audit_logs").insert({
-        business_id: membership.business_id,
-        actor_id: user.id,
-        action: "business.member_reactivated",
-        entity_type: "business_membership",
-        entity_id: membership.id,
-        details: { target_user_id: membership.user_id, role: membership.role, reason },
+      const { data, error } = await admin.rpc("reactivate_business_membership", {
+        p_membership_id: membershipId,
+        p_reason: reason,
+        p_actor_id: user.id,
       });
-      if (auditError) console.error("Membership reactivated but audit insert failed:", auditError);
+      if (error) {
+        if (error.code === "P0002") return reply(404, { error: "No se encontró la membresía o su negocio." });
+        if (error.code === "42501") return reply(403, { error: "La cuenta no está autorizada para esta operación o el usuario de destino está bloqueado." });
+        if (error.code === "23514" || error.code === "40001") return reply(409, { error: error.message });
+        if (error.code === "22023") return reply(400, { error: "El motivo de reactivación debe tener al menos cinco caracteres." });
+        console.error("Membership reactivation RPC failed:", error);
+        throw error;
+      }
+
+      const result = data as Record<string, any> | null;
+      if (!result?.membership) throw new Error("La RPC de reactivación no devolvió la membresía.");
       return reply(200, {
         ok: true,
-        membership,
-        audit_warning: auditError ? "El acceso se reactivó, pero no se pudo guardar el evento de auditoría." : null,
-        message: auditError ? "El acceso se reactivó." : "Acceso reactivado y registrado en auditoría.",
+        membership: result.membership,
+        message: result.already_active
+          ? "La cuenta ya tenía acceso activo."
+          : "Acceso reactivado y registrado en auditoría.",
       });
     }
 
