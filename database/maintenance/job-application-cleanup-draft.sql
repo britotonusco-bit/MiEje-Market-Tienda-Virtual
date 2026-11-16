@@ -1,3 +1,40 @@
+-- Devuelve solo sesiones vencidas cuyo path coincide exactamente con el
+-- negocio, la sesión y un nombre de archivo UUID permitido. Las rutas
+-- malformadas quedan fuera de la limpieza automática para revisión manual.
+CREATE OR REPLACE FUNCTION public.list_expired_job_application_upload_sessions(
+  p_limit integer DEFAULT 100
+)
+RETURNS TABLE (
+  id uuid,
+  business_id uuid,
+  content_page_id uuid,
+  resume_path text
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path TO ''
+AS $function$
+  SELECT
+    s.id,
+    s.business_id,
+    s.content_page_id,
+    s.resume_path
+  FROM public.job_application_upload_sessions s
+  WHERE s.consumed_at IS NULL
+    AND s.expires_at <= now()
+    AND s.resume_path ~* (
+      '^' || s.business_id::text || '/' || s.id::text ||
+      '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[.](pdf|doc|docx)$'
+    )
+  ORDER BY s.expires_at ASC, s.id ASC
+  LIMIT greatest(1, least(coalesce(p_limit, 100), 100));
+$function$;
+
+REVOKE ALL ON FUNCTION public.list_expired_job_application_upload_sessions(integer)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.list_expired_job_application_upload_sessions(integer)
+  TO service_role;
+
 -- PROPUESTA: limpieza segura de sesiones de postulación.
 -- No ejecutar en producción hasta revisar y aprobar el paquete completo.
 --
