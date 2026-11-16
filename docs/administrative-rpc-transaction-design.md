@@ -209,3 +209,40 @@ Esta protección está únicamente en el archivo de la rama: la consulta de meta
 El trigger es una defensa adicional, no sustituye las RPC transaccionales: no escribe `audit_logs`, no valida el actor técnico, no gestiona la transición de estado del negocio y no resuelve la carrera de reactivación contra una suspensión/cierre del negocio. Las RPC de membresía deben adquirir explícitamente el bloqueo del negocio antes de actualizar la membresía y escribir auditoría en la misma transacción. Mantener el mismo orden de bloqueo en todas las operaciones administrativas reduce el riesgo de interbloqueos.
 
 El trigger está declarado como `SECURITY INVOKER` (sin cláusula `SECURITY DEFINER`) y revoca EXECUTE a `PUBLIC`, `anon` y `authenticated`; el disparador se invoca por la operación de tabla, pero su cuerpo depende de los permisos de lectura del rol que ejecuta la actualización. Antes de habilitarlo, hay que verificar esos permisos con el rol servidor en un entorno aislado.
+
+
+## Primer borrador de RPC de membresías — revisión de esquema y permisos
+
+Consulta de solo lectura al proyecto independiente, 16 nov 2026:
+
+- La columna public.business_memberships.job_title **no existe todavía en Supabase**. La Edge Function de la rama ya selecciona e inserta esa columna en list_business_members, invite_member y update_member_assignment. Por tanto, desplegar esa Edge Function antes de incorporar la columna produciría errores de esquema en esas acciones.
+- La migración de rama database/security/business-admin-boundaries.sql añade job_title, establece su validación de longitud y prepara permisos de lectura. El borrador de RPC también contiene un ADD COLUMN IF NOT EXISTS defensivo; la secuencia debe mantenerse documentada para no tratar el campo como disponible antes de aplicar el cambio de esquema.
+- Se verificó que service_role tiene USAGE en public, SELECT/UPDATE sobre businesses y business_memberships, SELECT sobre profiles e INSERT sobre audit_logs. Esto respalda el patrón SECURITY INVOKER para las RPC servidoras, sin conceder ejecución a los roles cliente.
+
+### Borrador preparado
+
+Archivo: database/security/administrative-membership-rpcs-draft.sql.
+
+Incluye tres RPC servidoras:
+
+1. update_business_membership_assignment: cambio de rol/cargo, validación del último administrador, bloqueo de negocio antes de membresía y auditoría atómica.
+2. suspend_business_membership: suspensión con motivo, comprobación de último administrador y auditoría atómica.
+3. reactivate_business_membership: reactivación solo si el negocio está activo y el perfil de destino no está bloqueado, con auditoría atómica.
+
+Las funciones vuelven a validar que el actor sea platform_owner y no esté bloqueado. El borrador restringe EXECUTE a service_role, usa SECURITY INVOKER y search_path vacío. Se añadió bloqueo FOR SHARE al leer los perfiles del actor y del usuario reactivado/asignado para evitar que un bloqueo global concurrente pase inadvertido durante la operación. El cambio de rol/cargo devuelve sin mutación cuando los valores ya coinciden, evitando auditorías duplicadas por reintentos idénticos.
+
+### Límites pendientes antes de integrar
+
+- El borrador SQL no se ha ejecutado ni probado contra PostgreSQL; la verificación de sintaxis y concurrencia requiere staging.
+- La Edge Function aún no invoca estas RPC: sigue usando las operaciones separadas que se identificaron en la auditoría. No se debe considerar corregido el comportamiento hasta adaptar la función y probarla.
+- La protección del último administrador del trigger sigue sin estar instalada en Supabase. El borrador de business-admin-boundaries.sql debe revisarse y probarse junto con estas RPC.
+- set_business_status también actualiza la fila del negocio. Su futura RPC deberá conservar el mismo orden de bloqueo para que las transiciones de negocio y las operaciones de membresía se serialicen de forma predecible.
+
+### Estado actualizado
+
+- Primer borrador SQL de membresías: guardado en rama.
+- Revisión de permisos service_role: verificada por consulta de solo lectura.
+- job_title en Supabase: ausente; dependencia confirmada.
+- SQL aplicado: no.
+- Edge Function adaptada/desplegada: no.
+- Pruebas: pendientes de entorno aislado.
