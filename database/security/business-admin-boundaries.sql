@@ -647,6 +647,13 @@ WITH CHECK (
   )
 );
 
+-- Los productos no se eliminan físicamente desde el panel ni desde la API.
+-- Se desactivan con is_active=false para conservar pedidos, costos e historial.
+-- La eliminación física podría dejar referencias históricas incompletas o
+-- provocar SET NULL en order_items.product_id; por eso queda bloqueada.
+DROP POLICY IF EXISTS products_admin_delete ON public.products;
+REVOKE DELETE ON TABLE public.products FROM PUBLIC, anon, authenticated;
+
 -- Evitar que un UPDATE genérico cambie identificadores o la tienda propietaria.
 -- La interfaz actual solo necesita modificar estos campos del producto.
 REVOKE UPDATE ON TABLE public.products FROM PUBLIC, anon, authenticated;
