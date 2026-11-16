@@ -70,18 +70,32 @@ CREATE OR REPLACE FUNCTION public.resolve_platform_payroll_record(
 )
 RETURNS jsonb
 LANGUAGE plpgsql
-SECURITY DEFINER
+SECURITY INVOKER
 SET search_path = ''
 AS $function$
 DECLARE
+  v_actor_role text;
+  v_actor_blocked boolean;
   v_payroll public.payroll_records%ROWTYPE;
   v_updated public.payroll_records%ROWTYPE;
   v_financial_id uuid := NULL;
   v_now timestamptz := pg_catalog.clock_timestamp();
 BEGIN
   IF p_actor_id IS NULL THEN
-    RAISE EXCEPTION 'Actor requerido.';
+    RAISE EXCEPTION 'Actor requerido.' USING ERRCODE = '22023';
   END IF;
+
+  SELECT p.platform_role, p.is_blocked
+    INTO v_actor_role, v_actor_blocked
+  FROM public.profiles AS p
+  WHERE p.id = p_actor_id
+  FOR SHARE;
+
+  IF NOT FOUND OR v_actor_role IS DISTINCT FROM 'platform_owner'
+     OR v_actor_blocked IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'Actor técnico no autorizado.' USING ERRCODE = '42501';
+  END IF;
+
   IF p_decision NOT IN ('paid','cancelled') THEN
     RAISE EXCEPTION 'Decisión de nómina no válida.';
   END IF;
@@ -184,3 +198,182 @@ GRANT EXECUTE ON FUNCTION public.resolve_platform_payroll_record(uuid,text,text,
 -- 5) marcar pagado requiere referencia opcional y fija paid_at; no se registran datos bancarios.
 -- 6) todos los cambios generan audit_logs; un fallo de auditoría se informa sin ocultar el resultado guardado.
 -- 7) importes deben ser positivos y moneda ISO de tres letras.
+
+
+-- Crear un movimiento financiero de plataforma y su auditoría atómicamente.
+CREATE OR REPLACE FUNCTION public.create_platform_financial_record_transactional(
+  p_business_id uuid,
+  p_record_type text,
+  p_description text,
+  p_amount numeric,
+  p_currency text,
+  p_occurred_at timestamptz,
+  p_reference text,
+  p_actor_id uuid
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_actor_role text;
+  v_actor_blocked boolean;
+  v_record public.platform_financial_records%ROWTYPE;
+  v_description text := NULLIF(pg_catalog.btrim(p_description), '');
+  v_currency text := pg_catalog.upper(pg_catalog.btrim(COALESCE(p_currency, 'COP')));
+  v_reference text := NULLIF(pg_catalog.btrim(p_reference), '');
+BEGIN
+  IF p_actor_id IS NULL
+     OR p_record_type NOT IN ('income','expense','refund','adjustment')
+     OR v_description IS NULL OR pg_catalog.char_length(v_description) NOT BETWEEN 3 AND 500
+     OR p_amount IS NULL OR p_amount <= 0 OR p_amount >= 1000000000000
+     OR v_currency !~ '^[A-Z]{3}$'
+     OR pg_catalog.char_length(COALESCE(v_reference, '')) > 160 THEN
+    RAISE EXCEPTION 'Datos del movimiento financiero no válidos.'
+      USING ERRCODE = '22023';
+  END IF;
+
+  SELECT p.platform_role, p.is_blocked
+    INTO v_actor_role, v_actor_blocked
+  FROM public.profiles AS p
+  WHERE p.id = p_actor_id
+  FOR SHARE;
+
+  IF NOT FOUND OR v_actor_role IS DISTINCT FROM 'platform_owner'
+     OR v_actor_blocked IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'Actor técnico no autorizado.' USING ERRCODE = '42501';
+  END IF;
+
+  IF p_business_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM public.businesses AS b WHERE b.id = p_business_id
+  ) THEN
+    RAISE EXCEPTION 'El negocio indicado no existe.' USING ERRCODE = '23503';
+  END IF;
+
+  INSERT INTO public.platform_financial_records (
+    business_id, record_type, description, amount, currency,
+    occurred_at, reference, created_by
+  ) VALUES (
+    p_business_id, p_record_type, v_description, p_amount, v_currency,
+    COALESCE(p_occurred_at, pg_catalog.clock_timestamp()), v_reference, p_actor_id
+  )
+  RETURNING * INTO v_record;
+
+  INSERT INTO public.audit_logs (
+    business_id, actor_id, action, entity_type, entity_id, details
+  ) VALUES (
+    p_business_id,
+    p_actor_id,
+    'platform.finance_record_created',
+    'platform_financial_record',
+    v_record.id::text,
+    pg_catalog.jsonb_build_object(
+      'record_type', v_record.record_type,
+      'amount', v_record.amount,
+      'currency', v_record.currency,
+      'description', v_record.description,
+      'reference', v_record.reference
+    )
+  );
+
+  RETURN pg_catalog.jsonb_build_object(
+    'ok', true,
+    'record', pg_catalog.to_jsonb(v_record)
+  );
+END;
+$function$;
+
+
+-- Crear una obligación de nómina pendiente y auditarla en la misma transacción.
+CREATE OR REPLACE FUNCTION public.create_platform_payroll_record_transactional(
+  p_business_id uuid,
+  p_payee_name text,
+  p_description text,
+  p_amount numeric,
+  p_currency text,
+  p_due_date date,
+  p_actor_id uuid
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_actor_role text;
+  v_actor_blocked boolean;
+  v_record public.payroll_records%ROWTYPE;
+  v_payee_name text := NULLIF(pg_catalog.btrim(p_payee_name), '');
+  v_description text := NULLIF(pg_catalog.btrim(p_description), '');
+  v_currency text := pg_catalog.upper(pg_catalog.btrim(COALESCE(p_currency, 'COP')));
+BEGIN
+  IF p_actor_id IS NULL
+     OR v_payee_name IS NULL OR pg_catalog.char_length(v_payee_name) NOT BETWEEN 2 AND 160
+     OR v_description IS NULL OR pg_catalog.char_length(v_description) NOT BETWEEN 3 AND 500
+     OR p_amount IS NULL OR p_amount <= 0 OR p_amount >= 1000000000000
+     OR v_currency !~ '^[A-Z]{3}$' THEN
+    RAISE EXCEPTION 'Datos del registro de nómina no válidos.'
+      USING ERRCODE = '22023';
+  END IF;
+
+  SELECT p.platform_role, p.is_blocked
+    INTO v_actor_role, v_actor_blocked
+  FROM public.profiles AS p
+  WHERE p.id = p_actor_id
+  FOR SHARE;
+
+  IF NOT FOUND OR v_actor_role IS DISTINCT FROM 'platform_owner'
+     OR v_actor_blocked IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'Actor técnico no autorizado.' USING ERRCODE = '42501';
+  END IF;
+
+  IF p_business_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM public.businesses AS b WHERE b.id = p_business_id
+  ) THEN
+    RAISE EXCEPTION 'El negocio indicado no existe.' USING ERRCODE = '23503';
+  END IF;
+
+  INSERT INTO public.payroll_records (
+    business_id, payee_name, description, amount, currency,
+    status, due_date, created_by, updated_by
+  ) VALUES (
+    p_business_id, v_payee_name, v_description, p_amount, v_currency,
+    'pending', p_due_date, p_actor_id, p_actor_id
+  )
+  RETURNING * INTO v_record;
+
+  INSERT INTO public.audit_logs (
+    business_id, actor_id, action, entity_type, entity_id, details
+  ) VALUES (
+    p_business_id,
+    p_actor_id,
+    'platform.payroll_created',
+    'payroll_record',
+    v_record.id::text,
+    pg_catalog.jsonb_build_object(
+      'payee_name', v_record.payee_name,
+      'description', v_record.description,
+      'amount', v_record.amount,
+      'currency', v_record.currency,
+      'due_date', v_record.due_date
+    )
+  );
+
+  RETURN pg_catalog.jsonb_build_object(
+    'ok', true,
+    'record', pg_catalog.to_jsonb(v_record)
+  );
+END;
+$function$;
+
+
+REVOKE ALL ON FUNCTION public.create_platform_financial_record_transactional(uuid,text,text,numeric,text,timestamptz,text,uuid)
+  FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.create_platform_payroll_record_transactional(uuid,text,text,numeric,text,date,uuid)
+  FROM PUBLIC, anon, authenticated;
+
+GRANT EXECUTE ON FUNCTION public.create_platform_financial_record_transactional(uuid,text,text,numeric,text,timestamptz,text,uuid)
+  TO service_role;
+GRANT EXECUTE ON FUNCTION public.create_platform_payroll_record_transactional(uuid,text,text,numeric,text,date,uuid)
+  TO service_role;
