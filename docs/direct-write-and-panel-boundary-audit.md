@@ -267,3 +267,86 @@ El borrador `database/finance/business-expense-audit-draft.sql` reemplaza la fir
 La revisión también confirmó que el trigger activo `business_expenses_guard_update` ya está enlazado a `private.guard_business_expense_update()`, función que el borrador reemplaza. El borrador no necesita crear un segundo trigger, pero la prueba de staging debe comprobar que el trigger sigue instalado después de la migración.
 
 No se ejecutó la RPC ni se modificó la base activa.
+
+
+## 10. Auditoría complementaria: inventario, costos y checkout (16 nov 2026)
+
+### H-08 — La RPC de ajuste de inventario todavía no existe en la base activa
+
+**Severidad: alta.**
+
+El panel de administrador llama a `adjust_business_inventory` al modificar las existencias de un producto existente. La consulta de catálogo del proyecto activo no encontró esa función ni la tabla `inventory_movements`. Por tanto, el ajuste desde el panel no puede considerarse operativo contra la base actual.
+
+El borrador `database/inventory/inventory-movements-draft.sql` sí define la RPC y utiliza `SELECT ... FOR UPDATE`, además de comparar `p_expected_inventory` con la cantidad actual. Ese control evita que un formulario desactualizado sobrescriba un cambio concurrente. El borrador también exige que el actor sea administrador del negocio activo y que el producto pertenezca al negocio indicado.
+
+**Verificación estática:** la clave compuesta `products(business_id,id)` requerida por la FK del historial existe en la base activa. El panel no incluye `inventory` en el UPDATE general del producto; cuando edita un producto existente, intenta cambiar existencias por la RPC separada.
+
+### H-09 — La base activa permite UPDATE directo de existencias
+
+**Severidad: alta para la integridad del inventario.**
+
+En el proyecto activo, `authenticated` conserva privilegio UPDATE sobre `products.inventory`. El panel evita usarlo y llama a la RPC de ajuste, pero un cliente autenticado puede intentar una actualización directa a través de Data API, sujeta a RLS. Esto permite eludir la validación de cantidad esperada y el motivo obligatorio.
+
+**Corrección preparada:** `database/security/business-admin-boundaries.sql` revoca el UPDATE general de productos y vuelve a conceder únicamente columnas comerciales editables, excluyendo `inventory`, `id` y `business_id`. La creación inicial de productos conserva el valor inicial de inventario. Los cambios posteriores deben pasar por la RPC.
+
+**Pendiente:** validar en staging que checkout y devoluciones puedan seguir descontando o restituyendo inventario mediante funciones de servidor, aunque el rol `authenticated` no tenga UPDATE directo sobre esa columna.
+
+### H-10 — El checkout desplegado no coincide con el contrato de la Edge Function
+
+**Severidad: crítica.**
+
+La Edge Function `create-public-order` invoca estas RPC:
+- `get_public_order_idempotent`;
+- `reserve_checkout_rate_limit`;
+- `create_public_order_idempotent`.
+
+La consulta de catálogo del proyecto activo no encontró ninguna de las tres. Solo encontró la función antigua `public.create_public_order(...)`. La función antigua sí bloquea filas de producto con `FOR UPDATE`, valida inventario y crea pedidos, pero no implementa las RPC de idempotencia que la Edge Function actual necesita.
+
+La función antigua también crea el pedido con estado `pending`, mientras el flujo actual del proyecto usa `received`. Esto se suma al desfase de estados ya descrito en H-01.
+
+**Impacto:** no debe considerarse que el checkout esté integrado solo porque exista una función antigua con nombre parecido. La Edge Function actual no tiene las dependencias RPC que invoca en el proyecto activo.
+
+**Corrección prevista:** desplegar el conjunto completo de funciones de checkout como una unidad en staging, validar firma y permisos, y probar clave idempotente repetida, misma clave con contenido distinto, límite de solicitudes, inventario insuficiente, dos compras concurrentes y pedido creado una sola vez. No ejecutar el checkout real durante esta auditoría.
+
+### H-11 — Los movimientos de inventario necesitan contexto de origen
+
+**Severidad: media-alta para la trazabilidad.**
+
+El trigger del borrador `inventory-movements-draft.sql` registra los cambios de existencias. Si el proceso que descuenta inventario no establece `app.inventory_movement_type` y `app.inventory_movement_reason`, el trigger clasifica el cambio como `adjustment` y usa el motivo genérico. La función antigua `create_public_order` inspeccionada no establece esos valores antes de actualizar `products.inventory`.
+
+**Corrección prevista:** la RPC de checkout debe marcar el contexto como `sale` y la RPC de devolución/cancelación aprobada como `cancellation_return`, con un motivo identificable. El contexto debe establecerse localmente a la transacción y limpiarse o reemplazarse antes de otra operación de inventario en la misma transacción. En staging se debe verificar que cada pedido y devolución genere el tipo correcto y que un reintento no duplique movimientos.
+
+El borrador omite deliberadamente un movimiento inicial cuando el producto se crea con inventario cero, porque la tabla exige `quantity_delta <> 0`. Eso es coherente si se documenta como ausencia de cambio; la prueba de “un movimiento por cada INSERT” debe limitarse a productos cuyo inventario inicial sea mayor que cero.
+
+### H-12 — Guard de confirmación de gastos corregido en el borrador
+
+**Severidad: alta para la confirmación de pagos de gastos.**
+
+La función `private.guard_business_expense_update()` comparaba el JSON de OLD y NEW con listas distintas de campos excluidos: en NEW excluía `transaction_reference`, pero en OLD no. Como resultado, el cambio de estado de pago podía ser rechazado por el trigger incluso cuando la RPC enviaba datos válidos.
+
+**Corrección preparada:** en `database/finance/business-expense-audit-draft.sql` se igualaron las listas de campos excluidos en ambos lados de la comparación. La referencia de transacción queda fuera de la comparación estructural tanto en OLD como en NEW; la RPC sigue siendo responsable de validarla y registrarla.
+
+**Verificación realizada:** se comprobó estáticamente que ambas listas contienen ahora `payment_status`, `payment_method`, `transaction_reference`, `paid_at` y `updated_at`. No se ejecutó el trigger ni la RPC en la base activa.
+
+### H-13 — Guardado de producto y costo no es una sola operación
+
+**Severidad: media.**
+
+El formulario guarda primero el producto y después inserta o actualiza `product_costs` mediante una segunda solicitud. Si falla el segundo paso, el producto ya puede haber quedado guardado, aunque la interfaz muestre un error general de guardado. En la creación, esto puede dejar un producto sin costo registrado; en la edición, puede dejar el costo anterior.
+
+**Corrección prevista:** mostrar explícitamente el resultado parcial y permitir reintentar el guardado del costo sin duplicar el producto. Como mejora de integridad, diseñar una RPC transaccional para guardar producto y costo juntos; la carga de imagen debe seguir tratándose como operación separada con compensación si falla la escritura de base de datos.
+
+### Costos y conservación histórica
+
+La función antigua `create_public_order` guarda el costo unitario de cada línea en `order_item_costs` al crear el pedido. Esa tabla tiene FK compuestas que relacionan el costo histórico con el negocio, pedido y línea correspondiente. Por tanto, la estructura existente está diseñada para conservar el costo histórico aunque el administrador cambie después el costo actual del producto.
+
+La tabla `product_costs` activa permite actualmente UPDATE de `product_id` y `business_id`, además del importe. La migración de límites revoca esos campos y deja UPDATE únicamente sobre `cost_price` y `updated_at`; también elimina el bypass del propietario técnico en las políticas de costos.
+
+### Alcance y límites de esta ronda
+
+- Se consultaron únicamente catálogos, definiciones y privilegios de la base independiente.
+- Se revisaron los callsites de `panel-live.js`, la Edge Function de checkout y los borradores SQL de inventario, costos y gastos.
+- Se corrigió un borrador SQL; no se aplicó a Supabase.
+- No se hicieron compras, ajustes de inventario, cambios de costos, pagos, reembolsos ni cancelaciones.
+- No se ejecutaron migraciones, no se desplegaron Edge Functions y no se modificó `main` ni GitHub Pages.
+- Las pruebas de concurrencia, autorización por rol y regresión siguen pendientes de staging aislado.
