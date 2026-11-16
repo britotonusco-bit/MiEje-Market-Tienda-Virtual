@@ -1098,7 +1098,19 @@
       const { data, error } = await client.functions.invoke("create-public-order", {
         body: { ...checkoutPayload, idempotency_key: pendingCheckoutRequest.idempotencyKey }
       });
-      if (error) throw new Error(error.message || "No se pudo registrar el pedido.");
+      if (error) {
+        let serverMessage = "";
+        try {
+          const response = error.context;
+          if (response && typeof response.clone === "function") {
+            const payload = await response.clone().json();
+            if (typeof payload?.error === "string") serverMessage = payload.error;
+          }
+        } catch (parseError) {
+          console.warn("No se pudo leer el detalle del error del checkout.", parseError);
+        }
+        throw new Error(serverMessage || error.message || "No se pudo registrar el pedido.");
+      }
       if (!data?.ok || !data.order) throw new Error(data?.error || "El servidor no confirmó el registro del pedido.");
       const order = data.order;
       clearPendingCheckout();
