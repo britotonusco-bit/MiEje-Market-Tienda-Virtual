@@ -136,3 +136,23 @@ La invitación a un usuario existente debe ser un flujo de asignación distinto 
 - Supabase: sin cambios.
 - Pruebas: pendientes.
 - Despliegue/fusión: no realizados.
+
+
+## Verificación de esquema en Supabase independiente — solo lectura
+
+Consulta realizada el 16 nov 2026 sobre el proyecto independiente. No se modificaron datos.
+
+- `audit_logs`: `id` es `bigint GENERATED ALWAYS AS IDENTITY`; `entity_id` es `text`; `details` es `jsonb NOT NULL DEFAULT '{}'`; `business_id` y `actor_id` admiten NULL. La inserción normal puede omitir `id`.
+- `business_memberships`: identificadores UUID; restricción única `(business_id, user_id)); roles permitidos `business_admin` y `employee`; estados `active` y `suspended`; índice por `(business_id, role, status)).
+- `businesses`: identificador UUID; slug único; estados permitidos `active`, `suspended`, `closed`.
+- `profiles`: `id` enlaza con `auth.users`; `platform_role` solo admite `user` y `platform_owner`; existe `is_blocked`.
+- `business_content_pages`: UUID; estados de moderación `pending`, `approved`, `rejected`; existen `moderated_by` y `moderated_at`.
+- En `business_memberships` solo se observó el trigger de `updated_at`; el trigger de protección del último administrador del borrador **no está instalado** en el proyecto consultado.
+- En `businesses` y `business_content_pages` también se observó únicamente el trigger de `updated_at`.
+- Los helpers `private.has_business_role` y `private.business_is_active` existen como `SECURITY DEFINER`, con `search_path` vacío. En la comprobación de permisos, `authenticated` puede ejecutarlos y `anon` no; `service_role` no tiene permiso efectivo de ejecución. Las nuevas funciones servidoras no deben depender de esos helpers sin resolver primero su modelo de permisos.
+
+### Consecuencia para la implementación
+
+El esquema actual sí permite diseñar RPC transaccionales para las operaciones administrativas descritas, pero primero hay que incorporar y revisar el trigger del último administrador en una migración de ensayo. La Edge Function con `service_role` debe ejecutar funciones que usen permisos compatibles con ese rol; no se debe dar acceso global a los helpers privados ni cambiar sus privilegios sin necesidad.
+
+La verificación fue de metadatos, restricciones, índices, triggers y definiciones de funciones. No demuestra que las operaciones se comporten correctamente bajo concurrencia; eso requiere un entorno de ensayo con datos de prueba.
