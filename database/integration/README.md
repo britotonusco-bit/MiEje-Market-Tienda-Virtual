@@ -97,6 +97,17 @@ Usar `docs/security-role-test-matrix.md` como matriz principal. Prioridad mínim
 
 No se considera aprobado si solo pasan consultas SQL. Cada prueba debe registrar rol, negocio, acción, resultado esperado, resultado real y evidencia sin datos personales.
 
+## Auditoría de Storage (16 nov 2026)
+
+El informe completo está en [docs/storage-buckets-and-file-access-audit.md](../../docs/storage-buckets-and-file-access-audit.md).
+
+La inspección de solo lectura del proyecto activo encontró:
+- `business-assets`: bucket público de 5 MB con PNG/JPEG/WEBP. Las políticas activas de carga/lectura/actualización/eliminación construyen mal el UUID desde `businesses.name`; el borrador `database/security/storage-policy-fix.sql` corrige la ruta usando `storage.objects.name`.
+- `job-applications-private`: bucket privado de 5 MB para PDF/DOC/DOCX. La carga usa token firmado temporal desde Edge Function; la lectura usa URL firmada. Falta probar aislamiento A/B y definir validación del contenido real/antimalware.
+- `business-expense-receipts`: no existe en el proyecto activo. El panel ya intenta usarlo; debe aplicarse en staging `database/finance/expense-receipts-storage-draft.sql` antes de habilitar la función de comprobantes.
+
+No se encontraron objetos en los dos buckets existentes, así que no hubo pruebas de descarga o reemplazo con archivos reales. No cambiar los buckets activos ni aplicar políticas hasta disponer de staging y completar la matriz de pruebas del informe.
+
 ## 6. Criterios de salida para integrar
 
 - Todos los SQL aplicados sin errores en staging.
