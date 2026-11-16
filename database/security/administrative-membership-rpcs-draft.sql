@@ -42,10 +42,10 @@ DECLARE
   v_before public.business_memberships%ROWTYPE;
   v_after public.business_memberships%ROWTYPE;
   v_remaining_admins integer;
-  v_job_title text := pg_catalog.nullif(pg_catalog.btrim(p_job_title), '');
+  v_job_title text := NULLIF(pg_catalog.btrim(p_job_title), '');
 BEGIN
   IF p_membership_id IS NULL OR p_actor_id IS NULL
-     OR p_role NOT IN ('business_admin', 'employee')
+     OR p_role IS NULL OR p_role NOT IN ('business_admin', 'employee')
      OR v_job_title IS NULL OR pg_catalog.char_length(v_job_title) < 2
      OR pg_catalog.char_length(v_job_title) > 100 THEN
     RAISE EXCEPTION 'Datos de asignación no válidos.' USING ERRCODE = '22023';
@@ -172,7 +172,7 @@ DECLARE
   v_before public.business_memberships%ROWTYPE;
   v_after public.business_memberships%ROWTYPE;
   v_remaining_admins integer;
-  v_reason text := pg_catalog.nullif(pg_catalog.btrim(p_reason), '');
+  v_reason text := NULLIF(pg_catalog.btrim(p_reason), '');
 BEGIN
   IF p_membership_id IS NULL OR p_actor_id IS NULL
      OR v_reason IS NULL OR pg_catalog.char_length(v_reason) > 2000 THEN
@@ -297,7 +297,7 @@ DECLARE
   v_target_blocked boolean;
   v_before public.business_memberships%ROWTYPE;
   v_after public.business_memberships%ROWTYPE;
-  v_reason text := pg_catalog.nullif(pg_catalog.btrim(p_reason), '');
+  v_reason text := NULLIF(pg_catalog.btrim(p_reason), '');
 BEGIN
   IF p_membership_id IS NULL OR p_actor_id IS NULL
      OR v_reason IS NULL OR pg_catalog.char_length(v_reason) < 5
