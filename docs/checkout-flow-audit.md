@@ -79,21 +79,21 @@ Antes de implementar se debe añadir una recuperación clara: informar el motivo
 
 ### 6. Reintentos después de perder la respuesta
 
-El navegador guarda temporalmente la clave de idempotencia en `sessionStorage` y la reutiliza cuando el mismo contenido se vuelve a enviar en la misma sesión. Esto ayuda si el servidor creó el pedido, pero la respuesta no llegó al navegador.
+El navegador guarda la clave de idempotencia y la huella del pedido en `localStorage`, sin guardar nombre, teléfono, dirección ni datos de pago. La conserva aunque se cierre la pestaña o se recargue la página.
 
-La revisión adicional encontró dos riesgos: si el cliente cambiaba algún dato después de perder la respuesta, la página podía generar una clave nueva; y si `sessionStorage` no estaba disponible, continuaba con una clave que no podría recuperar tras una recarga.
+La revisión adicional encontró dos riesgos: si el cliente cambiaba algún dato después de perder la respuesta, la página podía generar una clave nueva; y si el almacenamiento local del navegador no estaba disponible, continuaba con una clave que no podría recuperar tras cerrar la pestaña o recargar.
 
 Se corrigió `app.js` en la rama:
 
 - Lee la clave pendiente sin borrarla cuando cambia el contenido del pedido.
 - Bloquea un segundo checkout con datos distintos mientras el intento anterior siga sin resolverse.
-- Exige guardar la clave en `sessionStorage` antes de enviar el pedido; si no puede guardarla, no envía la solicitud.
+- Exige guardar la clave en `localStorage` antes de enviar el pedido; si no puede guardarla, no envía la solicitud.
 - Conserva la clave ante errores del servidor cuya respuesta sea incierta.
 - Limpia la clave ante rechazos HTTP 400, 409 o 429 que confirman que la operación no se creó, excepto si el mensaje indica conflicto de reutilización de la clave.
 
 También se ajustó el borrador SQL de límite por IP: ahora permite que el mismo intento y contenido se reintenten desde una IP distinta, por ejemplo al cambiar de red, creando una reserva para esa IP sin borrar la reserva anterior. Una misma clave con contenido diferente sigue siendo rechazada. Las reservas se identifican por la combinación de clave e IP, y la función de creación exige la reserva correspondiente a la IP del intento actual.
 
-El carrito sigue sin persistirse: después de recargar, el cliente debe reconstruir exactamente los mismos datos y productos para recuperar el intento. Esta corrección reduce el riesgo de duplicados, pero debe validarse con pruebas de navegador y respuestas reales.
+El carrito sigue sin persistirse: después de recargar o cerrar la pestaña, el cliente debe reconstruir exactamente los mismos datos, productos y cuenta para recuperar el intento. La huella incluye el identificador de la cuenta autenticada (o NULL para invitados), de modo que un cambio de cuenta no se confunda con el mismo intento. Esta corrección reduce el riesgo de duplicados, pero debe validarse con pruebas de navegador y respuestas reales.
 
 ### 7. Reglas del carrito y del método de pago
 
