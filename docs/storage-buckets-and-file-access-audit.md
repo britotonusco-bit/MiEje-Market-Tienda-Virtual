@@ -75,6 +75,7 @@ Las cuatro políticas activas `business_assets_admin_upload/read/update/delete` 
 - La Edge Function verifica extensión, MIME declarado y tamaño, pero no inspecciona la firma binaria real del archivo ni ejecuta análisis antimalware. Un MIME/extensión enviados por el navegador no demuestran que el documento sea seguro.
 - El objeto puede quedar huérfano si se genera la URL de carga, se sube el archivo y la persona no termina la postulación. El borrador de limpieza contempla sesiones vencidas; debe verificarse que el proceso programado también elimine el objeto del bucket, no solo la fila temporal.
 - El token de carga puede seguir siendo válido después del vencimiento de la sesión SQL, dependiendo de su vigencia propia. El envío se rechaza al vencer la sesión, pero puede quedar un archivo no asociado hasta la limpieza.
+- La Edge Function de limpieza inicialmente reutilizaba el valor de `SUPABASE_SERVICE_ROLE_KEY` como secreto HTTP de autenticación. Se corrigió en la rama para exigir el secreto separado `JOB_APPLICATION_CLEANUP_SECRET`; el service role permanece solo como credencial interna del cliente servidor. Antes de desplegar, configurar ambos secretos en el entorno de ensayo y enviar el secreto de limpieza solo desde el programador autorizado.
 - No se probó la descarga firmada con administrador A/B ni la denegación al empleado, visitante y administrador de otro negocio.
 
 **Recomendación**
