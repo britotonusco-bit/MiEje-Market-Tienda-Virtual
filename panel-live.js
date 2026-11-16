@@ -949,7 +949,9 @@
       const result = await callTechnicalFunction({ action: 'list_business_members', business_id: id });
       const rows = result.members || [];
       target.innerHTML = '<option value="">Selecciona una cuenta</option>' + rows.map(m => `<option value="${esc(m.id)}" data-role="${esc(m.role)}" data-job-title="${esc(m.job_title || '')}">${esc(m.profiles?.display_name || shortId(m.user_id))} · ${esc(m.email || 'sin correo')} · ${m.role === 'business_admin' ? 'Administrador' : 'Empleado'} · ${esc(m.job_title || 'Cargo no registrado')}${m.status !== 'active' ? ' · Suspendido' : ''}</option>`).join('');
-    } catch (error) { target.innerHTML = '<option value="">No se pudieron cargar las cuentas</option>'; }
+    } catch (error) {
+      target.innerHTML = `<option value="">Error al cargar las cuentas: ${esc(error.message || 'Error de consulta')}</option>`;
+    }
   }
 
   function fillMemberAssignment() {
