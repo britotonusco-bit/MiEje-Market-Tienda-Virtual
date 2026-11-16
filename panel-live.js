@@ -562,17 +562,49 @@
         }
       }
       if (costPrice !== null) {
-        const costResult = await db.from('product_costs').upsert({
-          product_id: result.data.id,
-          business_id: businessId,
-          cost_price: costPrice,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'product_id' });
-        if (costResult.error) {
-          message.textContent = 'El producto se guardó, pero no se pudo guardar su costo: ' + costResult.error.message;
-          message.className = 'message error';
-          await loadProducts();
-          return;
+        const costTimestamp = new Date().toISOString();
+        const costLookup = await db.from('product_costs')
+          .select('product_id')
+          .eq('product_id', result.data.id)
+          .eq('business_id', businessId)
+          .maybeSingle();
+        if (costLookup.error) throw costLookup.error;
+
+        let costResult;
+        if (costLookup.data) {
+          // La migración de límites de negocio solo permite actualizar costo y fecha.
+          // No enviar product_id/business_id en un UPSERT, porque son campos inmutables.
+          costResult = await db.from('product_costs')
+            .update({ cost_price: costPrice, updated_at: costTimestamp })
+            .eq('product_id', result.data.id)
+            .eq('business_id', businessId)
+            .select('product_id')
+            .maybeSingle();
+        } else {
+          costResult = await db.from('product_costs')
+            .insert({
+              product_id: result.data.id,
+              business_id: businessId,
+              cost_price: costPrice,
+              updated_at: costTimestamp
+            })
+            .select('product_id')
+            .maybeSingle();
+
+          // Si otra sesión insertó el costo al mismo tiempo, actualizar solo
+          // las columnas autorizadas en vez de repetir un UPSERT con campos protegidos.
+          if (costResult.error?.code === '23505') {
+            costResult = await db.from('product_costs')
+              .update({ cost_price: costPrice, updated_at: costTimestamp })
+              .eq('product_id', result.data.id)
+              .eq('business_id', businessId)
+              .select('product_id')
+              .maybeSingle();
+          }
+        }
+
+        if (costResult.error || !costResult.data) {
+          throw costResult.error || new Error('No se encontró el costo del producto después de guardarlo.');
         }
       }
       form.reset();
