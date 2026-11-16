@@ -3,7 +3,7 @@
 **Proyecto:** MiEje Market Independiente  
 **Rama revisada:** `correcciones-funcionales`  
 **Fecha de revisión:** 16 de noviembre de 2026  
-**Alcance:** 17 archivos SQL de preparación, historial de migraciones activas, tablas, funciones y triggers del proyecto Supabase independiente.  
+**Alcance:** 19 borradores SQL de implementación, 3 scripts SQL de verificación/preflight, README del paquete, historial de migraciones activas, tablas, funciones y triggers del proyecto Supabase independiente.  
 **Estado:** auditoría de solo lectura. Ninguna migración fue ejecutada y ninguna Edge Function fue desplegada.
 
 ## 1. Resultado general
@@ -18,27 +18,32 @@ La base ya contiene las tablas principales de negocios, membresías, productos, 
 
 ## 2. Orden recomendado por dependencias
 
-Este orden es una propuesta de empaquetado. No significa que se deban ejecutar hoy. Algunas tareas deben consolidarse para evitar repetir cambios sobre pedidos y permisos.
+El repositorio ya contiene `database/integration/README.md` con una secuencia preliminar. Esa secuencia estaba incompleta: omitía inventario, métodos de pago atómicos, gastos, RPC de membresías y limpieza de postulaciones. Se corrigió en la rama para incluir los 18 módulos de primera pasada. El endurecimiento MFA queda como etapa separada.
 
 | Orden | Archivo | Requiere / depende de | Motivo |
 |---:|---|---|---|
-| 1 | `database/security/business-admin-boundaries.sql` | Esquema base: negocios, membresías, productos, pedidos, costos, gastos, pagos, páginas y postulaciones; helpers `private.business_is_active` y `private.has_business_role` | Establece los límites entre técnico, administrador y empleado, permisos de lectura/escritura y reglas del flujo de pedidos. Debe revisarse primero porque cambia políticas y privilegios usados por otros módulos. |
-| 2 | `database/security/storage-policy-fix.sql` | Buckets existentes, tablas de negocio y helpers privados | Corrige políticas de Storage para recursos de cada negocio y documentos de postulaciones. Se puede preparar junto al paso 1, pero validar después de los límites de negocio. |
-| 3 | `database/customers/customer-account-migration.sql` | `public.orders`, `auth.users`, `public.products` | Añade `orders.customer_user_id` y crea favoritos. Debe preceder al checkout idempotente y al historial financiero del cliente. |
-| 4 | `database/inventory/inventory-movements-draft.sql` | `products`, `order_items`, negocios, helpers y membresías | Crea el historial de inventario, triggers y RPC de ajuste. Cambia la FK de producto en líneas de pedido a `ON DELETE RESTRICT`; exige comprobar referencias antes de aplicarlo. |
-| 5 | `database/inventory/checkout-inventory-lock-order-draft.sql` | Paso 1 y paso 4; `product_costs`, `order_item_costs`, `audit_logs` | Reemplaza el checkout para bloquear productos en orden estable y etiquetar movimientos de venta. Debe ir después del trigger de movimientos, porque configura los datos que ese trigger registra. |
-| 6 | `database/security/business-payment-methods-atomic-draft.sql` | Paso 1 y `business_payment_methods` | Revoca escrituras directas y obliga al panel administrador a guardar métodos mediante `save_business_payment_methods`. Debe estar listo antes de habilitar el checkout final y el panel comercial. |
-| 7 | `database/orders/checkout-idempotency-draft.sql` | Paso 3, tabla `business_payment_methods`, `create_public_order` del paso 5 y extensión `pgcrypto` | Añade método de pago histórico, idempotencia, reserva de límite por IP y funciones de checkout para clientes. El proyecto ya tiene `pgcrypto` instalado en el esquema `extensions`, que satisface el uso de `extensions.digest`. |
-| 8 | `database/orders/order-financial-access-draft.sql` | Pasos 3 y 7; tablas `financial_transactions`, `business_expenses`, `order_item_costs`, `order_cancellation_requests` | Usa `customer_user_id` y `payment_method_name`; restringe columnas sensibles de pedidos y líneas, y crea RPC financieras e historial de cliente. Su propio encabezado exige ejecutarlo después del checkout idempotente. |
-| 9 | `database/orders/cancellation-flow-draft.sql` | Paso 1, estados canónicos de pedidos, tabla `order_cancellation_requests` y paso 4 para registrar devoluciones de inventario | Registra solicitudes y decisiones de cancelación; la aprobación cambia el pedido y devuelve existencias en una transacción. |
-| 10 | `database/orders/refund-flow-draft.sql` | Paso 9 y paso 8; `financial_transactions`, `refund_details` | El reembolso requiere una cancelación aprobada y un pago registrado. Solo registra un reembolso externo; no transfiere dinero ni conecta una pasarela. |
-| 11 | `database/finance/expense-receipts-storage-draft.sql` | Storage y `business_expenses` | Crea el bucket privado de comprobantes. Debe ejecutarse antes de asociar rutas de comprobantes desde una RPC. |
-| 12 | `database/finance/business-expense-audit-draft.sql` | Paso 1, paso 11, tabla `business_expenses`, `audit_logs` y helpers privados | Revoca escrituras directas de gastos y las sustituye por RPC auditadas. Requiere que el bucket exista antes de habilitar `attach_business_expense_receipt`. |
-| 13 | `database/ai/ai-settings-draft.sql` | Tabla de negocios, helpers de membresía, perfiles y `audit_logs` | Crea configuración IA por negocio y configuración global. La parte de negocio usa RLS y la global queda reservada al servicio técnico. |
-| 14 | `database/security/access-block-requests-draft.sql` | Negocios, perfiles, membresías, helpers y trigger de último administrador del paso 1 | Crea solicitudes de bloqueo que el técnico resuelve. La resolución depende de la protección contra retirar al último administrador activo. |
-| 15 | `database/platform/platform-public-settings-draft.sql` | `profiles` y `audit_logs` | Configuración pública global, administrada por Edge Function técnica. Es independiente de los módulos de tienda, pero requiere definir también cómo la web pública leerá esos valores. |
-| 16 | `database/platform/platform-finance-payroll-draft.sql` | Negocios, perfiles y `audit_logs` | Crea libro financiero y nómina de plataforma, accesibles mediante la Edge Function técnica. |
-| 17 | `database/maintenance/job-application-cleanup-draft.sql` | `job_applications`, `job_application_upload_sessions`, páginas comerciales y Storage privado | Añade consulta de sesiones vencidas y reemplaza la RPC de postulación para retirar la sesión temporal al registrar la solicitud. Debe coordinarse con la Edge Function de limpieza y probarse con archivos reales de ensayo. |
+| 1 | `database/platform/platform-public-settings-draft.sql` | `profiles` y `audit_logs` | Crea la configuración global; su lectura pública la realiza la Edge Function `get-platform-public-settings`, que devuelve solo campos permitidos. |
+| 2 | `database/security/business-admin-boundaries.sql` | Esquema base de negocios, membresías, productos, pedidos, costos, gastos, pagos, páginas y postulaciones; helpers de negocio | Establece los límites RLS, grants, columnas y estados canónicos que usan otros módulos. |
+| 3 | `database/security/administrative-membership-rpcs-draft.sql` | Paso 2, perfiles, negocios, membresías y auditoría | Añade `business_memberships.job_title` y siete RPC transaccionales invocadas por la Edge Function técnica. |
+| 4 | `database/platform/platform-finance-payroll-draft.sql` | Negocios, perfiles y `audit_logs` | Crea el libro financiero de plataforma, nómina y RPCs reservadas a `service_role`. |
+| 5 | `database/ai/ai-settings-draft.sql` | Helpers de membresía, perfiles y `audit_logs` | Crea configuración IA por negocio y configuración global privada. |
+| 6 | `database/security/access-block-requests-draft.sql` | Helpers, membresías, negocios y protección de último administrador del paso 2 | Crea solicitudes de bloqueo y RPC de resolución técnica. |
+| 7 | `database/security/storage-policy-fix.sql` | Buckets existentes y helpers del paso 2 | Repara las políticas de Storage de activos y documentos privados. |
+| 8 | `database/customers/customer-account-migration.sql` | `orders`, `auth.users`, `products` | Añade `orders.customer_user_id` y favoritos; debe preceder al checkout idempotente y al historial. |
+| 9 | `database/inventory/inventory-movements-draft.sql` | `products`, `order_items`, negocios y helpers | Crea el historial de movimientos, trigger y RPC de ajuste; cambia la FK de producto a `ON DELETE RESTRICT`. |
+| 10 | `database/security/business-payment-methods-atomic-draft.sql` | Paso 2 y `business_payment_methods` | Revoca escrituras directas y obliga a guardar métodos mediante la RPC transaccional. |
+| 11 | `database/inventory/checkout-inventory-lock-order-draft.sql` | Pasos 2 y 9; costos de producto/pedido y auditoría | Reemplaza el checkout base con bloqueo determinista de inventario y etiqueta movimientos de venta. |
+| 12 | `database/orders/checkout-idempotency-draft.sql` | Pasos 8, 10 y 11; tabla de métodos de pago; `extensions.digest` | Añade claves idempotentes, reservas de límite por IP y checkout de clientes. |
+| 13 | `database/orders/order-financial-access-draft.sql` | Pasos 8 y 12; tablas financieras existentes | Usa `customer_user_id` y `payment_method_name`; restringe columnas financieras y crea RPCs de historial/finanzas. |
+| 14 | `database/orders/cancellation-flow-draft.sql` | Paso 2, estados canónicos, solicitudes y paso 9 | Aprueba/rechaza cancelaciones y devuelve inventario con movimientos registrados. |
+| 15 | `database/orders/refund-flow-draft.sql` | Pasos 13 y 14; `financial_transactions`, `refund_details` | Registra un reembolso total que el negocio ya ejecutó externamente; no transfiere dinero. |
+| 16 | `database/finance/expense-receipts-storage-draft.sql` | Storage y `business_expenses` | Crea el bucket privado requerido por la RPC de comprobantes. |
+| 17 | `database/finance/business-expense-audit-draft.sql` | Pasos 2 y 16; gastos, auditoría y helpers | Revoca escrituras directas y las sustituye por RPC auditadas. |
+| 18 | `database/maintenance/job-application-cleanup-draft.sql` | Tablas activas de postulaciones y sesiones de carga | Añade listado de sesiones vencidas y ajusta el registro de postulaciones; coordinar con la Edge Function de limpieza. |
+
+**Etapa separada:** `database/security/owner-mfa-rls.sql` debe aplicarse solo después de publicar y probar en staging la interfaz MFA y la Edge Function técnica con AAL2. Aplicarla antes puede bloquear el acceso del propietario.
+
+Este orden debe transformarse después en migraciones versionadas, cada una con nombre/timestamp y prueba propia. Los archivos actuales bajo `database/` son borradores, no un historial de migraciones listo para ejecutar.
 
 ## 3. Dependencias que deben corregirse o consolidarse
 
@@ -79,9 +84,7 @@ Referencia: https://supabase.com/changelog/45329-breaking-change-tables-not-expo
 
 ### 3.5 Lectura pública de la configuración global
 
-`platform-public-settings-draft.sql` deja la tabla sin permisos directos para `anon` y `authenticated`, y solo crea la función de actualización técnica. Eso es adecuado para evitar escrituras públicas, pero el paquete no incluye una función de lectura pública segura.
-
-Antes de implementarlo, identificar cómo la portada obtendrá nombre, descripción, logo, imagen principal y WhatsApp. La solución debe ser una lectura pública limitada (por ejemplo, Edge Function o RPC de solo lectura con campos permitidos), sin conceder acceso general a la tabla privada de configuración.
+El borrador deja `platform_public_settings` sin permisos directos para `anon` y `authenticated`, lo cual evita escrituras públicas. La rama sí incluye `supabase/functions/get-platform-public-settings/index.ts`: usa credenciales de servidor y devuelve solo nombre, descripción, logo, imagen principal y WhatsApp. Por tanto, la lectura pública está contemplada; la prueba pendiente es verificar que la tabla esté disponible para el Data API que usa el cliente de servicio, sin conceder acceso directo a visitantes.
 
 ### 3.6 Integridad de datos antes de crear índices y cambiar claves
 
@@ -100,6 +103,16 @@ La ausencia actual de algunos objetos nuevos no demuestra por sí sola que todas
 `job-application-cleanup-draft.sql` no solo añade una función para listar sesiones vencidas: también reemplaza `submit_public_job_application` y elimina la fila de sesión temporal después de insertar la postulación.
 
 La Edge Function de limpieza debe desplegarse solo cuando esta RPC y su contrato estén probados. La limpieza de objetos Storage debe comprobar ruta, bucket, vencimiento y vínculo con la postulación. No borrar documentos asociados a solicitudes válidas.
+
+### 3.8 Preflight y documentación de integración corregidos
+
+La primera versión de `database/integration/00-preflight.sql` trataba `platform_financial_records`, `payroll_records` y `access_block_requests` como dependencias preexistentes, aunque los propios borradores las crean. También comprobaba columnas de esas tablas nuevas y una RPC que aún no existía. Eso producía falsos avisos antes de migrar. Se corrigió el archivo para comprobar solo objetos base y dejar la verificación de objetos nuevos a `verify-integration-package.sql`.
+
+El orden de `database/integration/README.md` también estaba incompleto: omitía módulos de inventario, métodos de pago atómicos, gastos, RPC administrativas de membresías y limpieza de postulaciones. Se actualizó para incluirlos y separar MFA como etapa condicionada.
+
+### 3.9 Cobertura incompleta del verificador posterior
+
+`verify-integration-package.sql` comprueba buena parte de las tablas, RPCs, permisos, costos, gastos, Storage y flujos de pedidos. Sin embargo, no contiene aserciones específicas para `inventory_movements` y sus triggers, ni para `save_business_payment_methods`, ni para las siete RPC del archivo `administrative-membership-rpcs-draft.sql`. Esas partes requieren añadir comprobaciones al verificador antes de considerarlo una aprobación integral. `verify-order-financial-access.sql` sí cubre un subconjunto separado de grants financieros.
 
 ## 4. Permisos previstos por tipo de usuario
 
@@ -123,14 +136,15 @@ La Edge Function de limpieza debe desplegarse solo cuando esta RPC y su contrato
 La consulta de solo lectura confirmó:
 - Existen las tablas base: `profiles`, `businesses`, `business_memberships`, `products`, `orders`, `order_items`, `business_payment_methods`, `audit_logs`, `business_expenses`, `financial_transactions`, `order_cancellation_requests`, `refund_details`, `product_costs`, `order_item_costs`, `business_content_pages`, `job_applications` y `job_application_upload_sessions`.
 - No existen todavía: `customer_favorites`, `inventory_movements`, `private.checkout_idempotency`, `private.checkout_rate_limit_reservations`, `business_ai_settings`, `platform_ai_settings`, `platform_public_settings`, `platform_financial_records`, `payroll_records` ni `access_block_requests`.
-- No existen todavía las RPC nuevas de inventario, finanzas de pedidos, historial de clientes, cancelaciones, reembolsos, métodos de pago atómicos y configuración pública global.
+- La columna `business_memberships.job_title` tampoco existe en la base activa; la añade `administrative-membership-rpcs-draft.sql`.
+- No existen todavía las RPC nuevas de inventario, finanzas de pedidos, historial de clientes, cancelaciones, reembolsos, métodos de pago atómicos, configuración global y asignación/administración transaccional de membresías.
 - Sí existen los helpers `private.business_is_active(uuid)`, `private.has_business_role(uuid,text[])`, `private.is_platform_owner()` y el checkout base `public.create_public_order(...)`.
 - El trigger de pedidos está activo y apunta a `private.enforce_order_status_transition()`.
 - La extensión `pgcrypto` está instalada en `extensions`; el borrador de idempotencia usa `extensions.digest`.
 
 ## 6. Plan de validación antes de cualquier despliegue
 
-1. Separar los borradores en migraciones versionadas, con nombres y orden definitivos. No editar el historial de migraciones ya aplicadas.
+1. Separar los 19 borradores de implementación en migraciones versionadas, con nombres y orden definitivos. No editar el historial de migraciones ya aplicadas.
 2. Consolidar la normalización de estados y retirar duplicación entre los dos archivos que la modifican.
 3. Corregir el nombre de dependencia del bucket de comprobantes.
 4. Añadir consultas de prevalidación para índices únicos, claves foráneas y estados históricos.
