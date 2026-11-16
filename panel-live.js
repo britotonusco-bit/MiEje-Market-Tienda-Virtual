@@ -542,6 +542,7 @@
     }
     const button = form.querySelector('button[type="submit"]');
     let uploadedImage = null;
+    let productSaved = false;
     button.disabled = true;
     message.textContent = imageFile ? 'Subiendo imagen y guardando producto…' : 'Guardando producto…';
     message.className = 'message';
@@ -563,6 +564,7 @@
         await removeUploadedBusinessImage(uploadedImage?.path);
         throw new Error(result.error?.message || 'No se guardó ningún producto. Comprueba que tienes permisos sobre este negocio.');
       }
+      productSaved = true;
       if (id && existingProduct.image_url !== payload.image_url) {
         await removeUploadedBusinessImage(businessAssetPathFromPublicUrl(existingProduct.image_url, 'products'));
       }
@@ -630,13 +632,18 @@
       form.reset();
       form.elements.id.value = '';
       message.textContent = costPrice === null
-        ? (id ? 'Producto actualizado. El costo sigue pendiente de registrar.' : 'Producto creado. Registra su costo para calcular el margen.')
+        ? (id && existingProduct.cost_price !== null
+          ? 'Producto actualizado. Se conservó el costo anterior.'
+          : (id ? 'Producto actualizado. El costo sigue pendiente de registrar.' : 'Producto creado. Registra su costo para calcular el margen.'))
         : (id ? 'Producto y costo actualizados.' : 'Producto y costo guardados.');
       message.className = 'message success';
       await loadProducts();
     } catch (error) {
-      message.textContent = 'No se pudo guardar el producto: ' + (error.message || 'Error desconocido');
+      message.textContent = productSaved
+        ? 'El producto se guardó, pero hubo un problema al completar el proceso: ' + (error.message || 'Error desconocido')
+        : 'No se pudo guardar el producto: ' + (error.message || 'Error desconocido');
       message.className = 'message error';
+      if (productSaved) await loadProducts();
     } finally {
       button.disabled = false;
     }
