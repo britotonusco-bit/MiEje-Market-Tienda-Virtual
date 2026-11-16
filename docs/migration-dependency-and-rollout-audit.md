@@ -110,9 +110,11 @@ La primera versión de `database/integration/00-preflight.sql` trataba `platform
 
 El orden de `database/integration/README.md` también estaba incompleto: omitía módulos de inventario, métodos de pago atómicos, gastos, RPC administrativas de membresías y limpieza de postulaciones. Se actualizó para incluirlos y separar MFA como etapa condicionada.
 
-### 3.9 Cobertura incompleta del verificador posterior
+### 3.9 Cobertura del verificador posterior ampliada
 
-`verify-integration-package.sql` comprueba buena parte de las tablas, RPCs, permisos, costos, gastos, Storage y flujos de pedidos. Sin embargo, no contiene aserciones específicas para `inventory_movements` y sus triggers, ni para `save_business_payment_methods`, ni para las siete RPC del archivo `administrative-membership-rpcs-draft.sql`. Esas partes requieren añadir comprobaciones al verificador antes de considerarlo una aprobación integral. `verify-order-financial-access.sql` sí cubre un subconjunto separado de grants financieros.
+La versión inicial de `verify-integration-package.sql` no comprobaba `inventory_movements`, sus triggers, `save_business_payment_methods` ni las siete RPC de `administrative-membership-rpcs-draft.sql`. Se añadieron aserciones de existencia, RLS, triggers y permisos, incluyendo grants por columna para métodos de pago y ejecución exclusiva de las RPC técnicas por `service_role`.
+
+El verificador ampliado sigue pendiente de ejecución en staging: la revisión estática confirma que las comprobaciones apuntan a las firmas presentes en los borradores, pero no demuestra que todas las migraciones compilen ni que los permisos funcionen en runtime. `verify-order-financial-access.sql` continúa cubriendo por separado un subconjunto de grants financieros.
 
 ## 4. Permisos previstos por tipo de usuario
 
