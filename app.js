@@ -7,6 +7,24 @@
 
   const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
 
+  // Mantiene la tienda utilizable cuando una imagen pública ya no existe o no responde.
+  document.addEventListener("error", event => {
+    const image = event.target;
+    if (!(image instanceof HTMLImageElement)) return;
+    const container = image.closest(".business-image, .product-card, .store-hero");
+    if (!container) return;
+    image.hidden = true;
+    container.classList.add("image-unavailable");
+    if (!container.querySelector(".image-fallback")) {
+      const fallback = document.createElement("span");
+      fallback.className = "image-fallback";
+      fallback.setAttribute("role", "img");
+      fallback.setAttribute("aria-label", "Imagen no disponible");
+      fallback.textContent = "Imagen no disponible";
+      container.append(fallback);
+    }
+  }, true);
+
   const money = value => new Intl.NumberFormat("es-CO", {
     style: "currency",
     currency: "COP",
