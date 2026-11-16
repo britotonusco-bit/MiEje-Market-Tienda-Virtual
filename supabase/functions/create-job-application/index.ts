@@ -214,12 +214,12 @@ Deno.serve(async (req: Request) => {
         const { data: resumeBlob, error: downloadError } = await admin.storage.from(BUCKET).download(resumePath);
         if (downloadError || !resumeBlob) throw downloadError ?? new Error("No se pudo verificar el archivo.");
         const header = new Uint8Array(await resumeBlob.slice(0, 8).arrayBuffer());
-        const isPdf = fileName.toLowerCase().endsWith(".pdf")
+        const isPdf = resumePath.toLowerCase().endsWith(".pdf")
           && header.length >= 5 && String.fromCharCode(...header.slice(0, 5)) === "%PDF-";
-        const isDoc = fileName.toLowerCase().endsWith(".doc")
+        const isDoc = resumePath.toLowerCase().endsWith(".doc")
           && header.length >= 8
           && [0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1].every((byte, index) => header[index] === byte);
-        const isDocx = fileName.toLowerCase().endsWith(".docx")
+        const isDocx = resumePath.toLowerCase().endsWith(".docx")
           && header.length >= 4 && header[0] === 0x50 && header[1] === 0x4b
           && header[2] === 0x03 && header[3] === 0x04;
         if (!(isPdf || isDoc || isDocx)) {
