@@ -91,6 +91,8 @@ Se corrigió `app.js` en la rama:
 - Conserva la clave ante errores del servidor cuya respuesta sea incierta.
 - Limpia la clave ante rechazos HTTP 400, 409 o 429 que confirman que la operación no se creó, excepto si el mensaje indica conflicto de reutilización de la clave.
 
+También se ajustó el borrador SQL de límite por IP: ahora permite que el mismo intento y contenido se reintenten desde una IP distinta, por ejemplo al cambiar de red, creando una reserva para esa IP sin borrar la reserva anterior. Una misma clave con contenido diferente sigue siendo rechazada. Las reservas se identifican por la combinación de clave e IP, y la función de creación exige la reserva correspondiente a la IP del intento actual.
+
 El carrito sigue sin persistirse: después de recargar, el cliente debe reconstruir exactamente los mismos datos y productos para recuperar el intento. Esta corrección reduce el riesgo de duplicados, pero debe validarse con pruebas de navegador y respuestas reales.
 
 ### 7. Reglas del carrito y del método de pago
