@@ -250,3 +250,18 @@ La revisión estática fue favorable y no requirió modificar las migraciones. C
 Informe: [docs/order-panel-callsite-integration-audit.md](../../docs/order-panel-callsite-integration-audit.md).
 
 Las llamadas de la interfaz para confirmar pagos, solicitar/decidir cancelaciones, registrar reembolsos y consultar finanzas coinciden estáticamente con las firmas SQL candidatas. No obstante, la consulta de solo lectura del proyecto activo no encontró las cinco RPC financieras/de cancelación; por eso esos controles no pueden considerarse operativos todavía. El checkout público tiene validación e idempotencia en el código de la Edge Function, pero requiere pruebas reales de cabeceras, concurrencia y reintentos. No se ejecutó SQL ni se desplegó nada.
+
+
+## Auditoría de escrituras directas y límites entre paneles (16 nov 2026)
+
+El informe completo está en [docs/direct-write-and-panel-boundary-audit.md](../../docs/direct-write-and-panel-boundary-audit.md).
+
+La revisión de solo lectura encontró:
+- El panel técnico canaliza las operaciones privilegiadas mediante `technical-business-management`; falta probar cada rama de esa Edge Function en staging.
+- La interfaz y el esquema activo no coinciden en los estados de pedidos: el frontend usa `received/on_the_way`, pero el constraint y trigger activos todavía usan `pending/out_for_delivery`.
+- El proyecto activo no contiene las tablas `customer_favorites`, `business_ai_settings`, `inventory_movements` ni `access_block_requests`, aunque los callsites las consumen.
+- Faltan varias RPC que invocan los paneles, entre ellas reportes financieros, métodos de pago, ajuste de inventario, comprobantes, pagos de pedidos y cancelaciones/reembolsos. Las RPC de gastos para registrar, pagar y anular sí aparecen.
+- Las políticas activas conceden al propietario técnico escrituras generales sobre datos comerciales en algunas tablas; además, varias tablas permiten actualizar identificadores o columnas `business_id`.
+- Los privilegios de UPDATE de `orders` están limitados a `status` y `delivery_tracking`, y las postulaciones quedan limitadas al administrador según RLS.
+
+No se ejecutaron migraciones, RPC de negocio, cambios de datos ni despliegues. Las correcciones propuestas deben probarse primero en un entorno de ensayo independiente.
