@@ -218,6 +218,34 @@ USING (
 
 -- El trigger también bloquea cambios de estado cuando el negocio está suspendido
 -- y elimina el bypass del propietario técnico.
+-- Normalizar los estados históricos de pedidos al flujo que utiliza la interfaz.
+-- La restricción anterior se retira temporalmente para permitir la conversión.
+ALTER TABLE public.orders
+  DROP CONSTRAINT IF EXISTS orders_status_check;
+
+UPDATE public.orders
+SET status = CASE status
+  WHEN 'pending' THEN 'received'
+  WHEN 'out_for_delivery' THEN 'on_the_way'
+  ELSE status
+END
+WHERE status IN ('pending', 'out_for_delivery');
+
+ALTER TABLE public.orders
+  ADD CONSTRAINT orders_status_check
+  CHECK (status = ANY (ARRAY[
+    'received'::text,
+    'confirmed'::text,
+    'preparing'::text,
+    'ready'::text,
+    'on_the_way'::text,
+    'delivered'::text,
+    'cancelled'::text
+  ]));
+
+ALTER TABLE public.orders
+  ALTER COLUMN status SET DEFAULT 'received';
+
 CREATE OR REPLACE FUNCTION private.enforce_order_status_transition()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -269,11 +297,11 @@ BEGIN
   END IF;
 
   IF NOT (
-    (OLD.status = 'pending' AND NEW.status = 'confirmed') OR
+    (OLD.status = 'received' AND NEW.status = 'confirmed') OR
     (OLD.status = 'confirmed' AND NEW.status = 'preparing') OR
     (OLD.status = 'preparing' AND NEW.status = 'ready') OR
-    (OLD.status = 'ready' AND NEW.status = 'out_for_delivery') OR
-    (OLD.status = 'out_for_delivery' AND NEW.status = 'delivered')
+    (OLD.status = 'ready' AND NEW.status = 'on_the_way') OR
+    (OLD.status = 'on_the_way' AND NEW.status = 'delivered')
   ) THEN
     RAISE EXCEPTION 'Cambio de estado no permitido: % -> %.', OLD.status, NEW.status
       USING ERRCODE = '23514';
