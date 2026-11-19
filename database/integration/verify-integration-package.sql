@@ -1142,8 +1142,37 @@ BEGIN
   END IF;
   IF NOT has_function_privilege('authenticated','public.adjust_business_inventory(uuid,uuid,integer,integer,text)','EXECUTE')
      OR has_function_privilege('anon','public.adjust_business_inventory(uuid,uuid,integer,integer,text)','EXECUTE')
-     OR NOT has_table_privilege('authenticated','public.inventory_movements','SELECT') THEN
-    RAISE EXCEPTION 'FALLO: permisos incorrectos para inventario.';
+     OR NOT has_table_privilege('authenticated','public.inventory_movements','SELECT')
+     OR has_table_privilege('authenticated','public.inventory_movements','INSERT')
+     OR has_table_privilege('authenticated','public.inventory_movements','UPDATE')
+     OR has_table_privilege('authenticated','public.inventory_movements','DELETE')
+     OR has_table_privilege('anon','public.inventory_movements','SELECT')
+     OR has_table_privilege('anon','public.inventory_movements','INSERT')
+     OR has_table_privilege('anon','public.inventory_movements','UPDATE')
+     OR has_table_privilege('anon','public.inventory_movements','DELETE')
+     OR has_column_privilege('authenticated','public.products','inventory','UPDATE')
+     OR has_column_privilege('anon','public.products','inventory','UPDATE') THEN
+    RAISE EXCEPTION 'FALLO: los permisos directos de inventario permiten alterar existencias o el historial.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    WHERE p.oid='public.adjust_business_inventory(uuid,uuid,integer,integer,text)'::regprocedure
+      AND p.prosecdef
+      AND p.proconfig @> ARRAY['search_path=""']::text[]
+  ) THEN
+    RAISE EXCEPTION 'FALLO: la RPC de ajuste de inventario debe ser SECURITY DEFINER con search_path vacío.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='inventory_movements'
+      AND policyname='inventory_movements_admin_read'
+      AND cmd='SELECT'
+      AND qual ILIKE '%business_admin%'
+      AND qual ILIKE '%business_is_active%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: el historial de inventario no está limitado a administradores de negocios activos.';
   END IF;
 
   -- Métodos de pago: la escritura directa queda cerrada y se usa la RPC atómica.
