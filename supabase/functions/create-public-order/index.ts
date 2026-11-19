@@ -1,6 +1,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.75.0";
 
+const REQUIRED_PRIVACY_CONSENT_VERSION = "privacy-2026-11-19-v1";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -45,7 +47,13 @@ Deno.serve(async (req: Request) => {
   const deliveryNotes = textValue(body.delivery_notes, 1000);
   const paymentMethodId = textValue(body.payment_method_id, 80);
   const idempotencyKey = textValue(body.idempotency_key, 80);
+  const privacyConsent = body.privacy_consent === true;
+  const privacyConsentVersion = textValue(body.privacy_consent_version, 80);
   const items = body.items;
+
+  if (!privacyConsent || privacyConsentVersion !== REQUIRED_PRIVACY_CONSENT_VERSION) {
+    return reply(400, { error: "Debes aceptar la versión vigente de la política de privacidad para registrar el pedido." });
+  }
 
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(businessId)
       || !customerName || !customerPhone || !deliveryAddress
@@ -108,6 +116,8 @@ Deno.serve(async (req: Request) => {
       p_business_id: businessId,
       p_payment_method_id: paymentMethodId,
       p_customer_user_id: null as string | null,
+      p_privacy_consent: privacyConsent,
+      p_privacy_consent_version: privacyConsentVersion,
       p_customer_name: customerName,
       p_customer_phone: customerPhone,
       p_customer_email: customerEmail || null,
