@@ -369,3 +369,18 @@ Se conectó en la rama el primer tramo de aplicación:
 - El dominio de GitHub Pages debe estar permitido en Supabase Auth Redirect URLs para el retorno con parámetros de invitación; debe comprobarse en staging.
 - La Edge Function de aceptación, la función técnica y el SQL no se han ejecutado con Deno/SQL parser ni probado en navegador.
 - El SQL continúa siendo un borrador. No se aplicó en Supabase activo, no se desplegó ninguna Edge Function y no se enviaron correos reales.
+
+
+### ACC-08 — Estado posterior: acciones del panel técnico y expiración
+
+Se completó la conexión de la bandeja de invitaciones en `panel-tecnico.html` y `panel-live.js`:
+
+- El técnico puede seleccionar un negocio y consultar sus invitaciones pendientes.
+- La lista muestra correo, rol, cargo y vencimiento, con paginación.
+- La acción de revocar exige motivo y confirma que solo se retira la asignación de esa invitación.
+- El servidor verifica nuevamente la identidad técnica y MFA antes de listar o revocar.
+- Las invitaciones vencidas se marcan como `expired` al consultar la bandeja o al intentar aceptarlas. La creación de una invitación nueva también marca vencidas las anteriores del mismo correo y negocio antes de insertar la nueva.
+
+La revocación conserva la fila histórica de membresía en estado suspendido con motivo `Invitación revocada`; no elimina la cuenta Auth ni otras membresías.
+
+**Estado del código en la rama:** el flujo de preparación, envío, vinculación, aceptación, listado, expiración y revocación ya tiene componentes SQL/Edge/UI coordinados. Sigue siendo una implementación no desplegada. La verificación 19/19 es estática; no equivale a ejecutar SQL ni probar el correo real.
