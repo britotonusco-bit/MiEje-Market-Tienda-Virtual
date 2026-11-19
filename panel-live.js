@@ -30,6 +30,8 @@
   let refundPageIndex = 0;
   const auditCursorStacks = new Map();
   const auditPageIndexes = new Map();
+  const accessCursorStacks = new Map();
+  const accessPageIndexes = new Map();
   let employeeOrderPageIndex = 0;
   let productCursorStack = [null];
   let productPageIndex = 0;
@@ -2065,27 +2067,33 @@
     }
   }
 
-  async function loadAccessEvents(id, selector) {
+  async function loadAccessEvents(id, selector, reset = true) {
     const target = document.querySelector(selector);
     if (!target) return;
+    const key = selector + ':' + (id || 'all');
+    if (reset) { accessCursorStacks.set(key, [null]); accessPageIndexes.set(key, 0); }
+    if (!accessCursorStacks.has(key)) accessCursorStacks.set(key, [null]);
+    if (!accessPageIndexes.has(key)) accessPageIndexes.set(key, 0);
+    const pageIndex = accessPageIndexes.get(key);
+    const cursor = accessCursorStacks.get(key)[pageIndex];
     target.innerHTML = '<div class="empty">Consultando registros de acceso…</div>';
     let rows = [];
     let names = new Map();
+    let hasMore = false;
 
     if (panel === 'technical') {
       try {
-        // El propietario consulta los accesos mediante la función privilegiada,
-        // sin depender de una lectura directa de audit_logs desde el navegador.
         const result = await callTechnicalFunction({
           action: 'list_audit_logs',
+          action_filter: 'panel_access',
           business_id: id || undefined,
-          limit: 100
+          limit: PANEL_PAGE_SIZE + 1,
+          before_created_at: cursor?.created_at || undefined,
+          before_id: cursor?.id || undefined
         });
-        rows = (result.audit_logs || []).filter(entry =>
-          entry.action === 'panel.login' ||
-          entry.action === 'log_login' ||
-          entry.action === 'panel_open'
-        );
+        const fetched = result.audit_logs || [];
+        hasMore = fetched.length > PANEL_PAGE_SIZE;
+        rows = fetched.slice(0, PANEL_PAGE_SIZE);
         names = new Map(rows.filter(entry => entry.actor_name)
           .map(entry => [entry.actor_id, entry.actor_name]));
       } catch (error) {
@@ -2095,28 +2103,45 @@
       let query = db.from('audit_logs')
         .select('id,business_id,actor_id,action,details,created_at')
         .eq('action', 'panel.login')
-        .order('created_at', { ascending: false })
-        .limit(100);
+        .order('created_at', { ascending: false }).order('id', { ascending: false })
+        .limit(PANEL_PAGE_SIZE + 1);
       if (id) query = query.eq('business_id', id);
+      if (cursor) query = query.or('created_at.lt.' + cursor.created_at + ',and(created_at.eq.' + cursor.created_at + ',id.lt.' + cursor.id + ')');
       const { data, error } = await query;
       if (error) return showError(target, error);
-      rows = data || [];
+      const fetched = data || [];
+      hasMore = fetched.length > PANEL_PAGE_SIZE;
+      rows = fetched.slice(0, PANEL_PAGE_SIZE);
       names = await getUserNames(rows.map(entry => entry.actor_id));
     }
 
-    if (!rows.length) {
+    if (!rows.length && pageIndex === 0) {
       target.innerHTML = '<div class="empty">No hay registros de acceso para este filtro todavía.</div>';
       return;
     }
-    target.innerHTML = tableHtml(
-      ['Fecha y hora', 'Usuario', 'Panel', 'Evento'],
-      rows.map(entry => [
-        dateTime(entry.created_at),
-        names.get(entry.actor_id) || shortId(entry.actor_id),
-        esc(entry.details?.panel || entry.panel || '—'),
-        'Inicio de sesión'
-      ])
-    );
+    if (!rows.length) target.innerHTML = '<div class="empty">No hay más registros de acceso en esta página.</div>';
+    if (rows.length) {
+      target.innerHTML = tableHtml(
+        ['Fecha y hora', 'Usuario', 'Panel', 'Evento'],
+        rows.map(entry => [
+          dateTime(entry.created_at),
+          names.get(entry.actor_id) || shortId(entry.actor_id),
+          esc(entry.details?.panel || entry.panel || '—'),
+          'Inicio de sesión'
+        ])
+      );
+    }
+    appendCursorPager(target, {
+      page: pageIndex + 1, canPrevious: pageIndex > 0, hasMore,
+      previous: () => { accessPageIndexes.set(key, pageIndex - 1); void loadAccessEvents(id, selector, false); },
+      next: () => {
+        const last = rows[rows.length - 1];
+        if (!last) return;
+        accessCursorStacks.get(key)[pageIndex + 1] = { created_at: last.created_at, id: last.id };
+        accessPageIndexes.set(key, pageIndex + 1);
+        void loadAccessEvents(id, selector, false);
+      }
+    });
   }
 
   async function loadAuditEvents(id, selector, reset = true) {
