@@ -123,7 +123,8 @@ GRANT SELECT (id, name, slug, business_type, category, description, tagline,
 ON TABLE public.businesses TO anon, authenticated;
 
 DROP POLICY IF EXISTS memberships_select_self_admin_owner ON public.business_memberships;
-CREATE POLICY memberships_select_self_admin_owner
+DROP POLICY IF EXISTS memberships_select_self_or_admin ON public.business_memberships;
+CREATE POLICY memberships_select_self_or_admin
 ON public.business_memberships
 FOR SELECT
 TO authenticated
@@ -134,6 +135,21 @@ USING (
     AND private.has_business_role(business_id, ARRAY['business_admin']::text[])
   )
 );
+
+-- El perfil contiene datos personales y atributos de autorización.
+-- El propietario técnico consulta/gestiona cuentas mediante Edge Functions
+-- con permisos de servidor, no mediante lectura global directa del Data API.
+DROP POLICY IF EXISTS profiles_select_self_or_owner ON public.profiles;
+DROP POLICY IF EXISTS profiles_select_self ON public.profiles;
+CREATE POLICY profiles_select_self
+ON public.profiles
+FOR SELECT
+TO authenticated
+USING (id = (SELECT auth.uid()));
+
+-- La política de actualización propia existente se conserva. Los GRANT por
+-- columna deben seguir excluyendo platform_role, is_blocked y blocked_reason.
+
 
 -- Los visitantes anónimos no pueden ejecutar helpers privados de membresía.
 -- La política pública valida directamente que el producto esté activo y que
