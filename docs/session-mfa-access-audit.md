@@ -49,9 +49,9 @@ En el proyecto Supabase activo, la Edge Function `technical-business-management`
 
 ## SES-02 — Eventos de sesión
 
-Actualmente, si Supabase cierra la sesión o la renovación falla entre dos comprobaciones, el panel puede permanecer visible hasta el siguiente intervalo o hasta que el usuario vuelva a la pestaña. Las operaciones del servidor siguen sujetas a validación de JWT, permisos y RLS, pero la interfaz puede tardar hasta aproximadamente 30 segundos en retirarse.
+Se añadió escucha a `SIGNED_OUT`, `TOKEN_REFRESHED` y `USER_UPDATED`. El cierre de sesión redirige inmediatamente al login; la renovación del token o una actualización del usuario dispara una revalidación diferida fuera del callback. Se conservan el chequeo periódico y el evento de visibilidad como defensas adicionales.
 
-Se recomienda añadir escucha a `SIGNED_OUT`, `TOKEN_REFRESHED` y `USER_UPDATED`, difiriendo cualquier consulta de Auth fuera del callback. El intento de modificación automática de `panel-live.js` no se guardó porque GitHub devolvió un conflicto de actualización; por tanto, el código actual conserva el intervalo y el evento de visibilidad sin esa mejora adicional.
+La revalidación de permisos tras un cambio de membresía o estado del negocio sigue teniendo una ventana máxima aproximada de 30 segundos si no se produce antes otro evento o cambio de visibilidad. Las operaciones del servidor siguen sujetas a validación de JWT, permisos y RLS.
 
 ## SES-03 — Ajustes de Auth que deben comprobarse en Dashboard
 
