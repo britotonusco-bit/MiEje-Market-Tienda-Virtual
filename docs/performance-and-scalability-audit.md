@@ -291,3 +291,19 @@ En la revisión posterior de la paginación se detectó que la Edge Function tod
 La autorización de las acciones sigue validándose en la Edge Function y en las RPC correspondientes. El cambio minimiza los datos entregados al panel; no sustituye las pruebas de RLS ni las pruebas reales de staging.
 
 **Validación estática:** 10/10 comprobaciones de la revisión de minimización aprobadas. No se ejecutó Deno check, navegador, staging ni despliegue.
+
+
+## 20. Directorio de negocios del panel técnico
+
+Se sustituyó la descarga completa del directorio de negocios por paginación real desde la Edge Function:
+
+- La tabla solicita una página de hasta 50 negocios y usa cursor compuesto `created_at + id`.
+- La fila centinela se utiliza para calcular `has_more` y no se muestra.
+- Los contadores total, activos y suspendidos se obtienen con consultas `count exact, head`, sin descargar todos los registros.
+- El panel mantiene únicamente la página visible en `cachedBusinesses`.
+- La búsqueda local se limita a la página actual; cuando no encuentra coincidencias lo indica para evitar dar a entender que se buscó en todo el directorio.
+- Las estadísticas se vuelven a renderizar sin duplicar tarjetas al actualizar el panel.
+
+**Limitación pendiente:** los selectores de negocio usados por filtros, invitaciones, asignaciones y suspensiones todavía se rellenan con la página inicial disponible. Deben convertirse en selectores con búsqueda/paginación propia antes de considerar completo el acceso a negocios fuera de esa primera página. También debe probarse el comportamiento con más de 50 negocios, cambios de estado y refresco.
+
+No se desplegó la Edge Function ni se ejecutaron consultas de escritura en Supabase.
