@@ -36,11 +36,18 @@
         { auth: { detectSessionInUrl: true, persistSession: true, autoRefreshToken: true } }
       );
 
-      if (queryType === 'invite' && tokenHash) {
+      if (queryType !== 'invite' && hashType !== 'invite') {
+        throw new Error('Este enlace no corresponde a una invitación de MiEje Market.');
+      }
+
+      // Si el enlace ya se verificó en esta sesión, no se vuelve a consumir
+      // el OTP de un solo uso. El servidor comprobará después que la sesión
+      // pertenece al usuario destinatario de esta invitación.
+      const existingSession = await client.auth.getSession();
+      if (existingSession.error) throw existingSession.error;
+      if (!existingSession.data.session && queryType === 'invite' && tokenHash) {
         const { error } = await client.auth.verifyOtp({ token_hash: tokenHash, type: 'invite' });
         if (error) throw error;
-      } else if (queryType !== 'invite' && hashType !== 'invite') {
-        throw new Error('Este enlace no corresponde a una invitación de MiEje Market.');
       }
 
       const { data, error } = await client.auth.getSession();
