@@ -204,3 +204,21 @@ La Edge Function modificada está en la rama y todavía no está desplegada. No 
 El panel administrativo cambió el listado de pedidos cancelados y pagados pendientes de registrar como reembolso para usar `get_business_admin_order_financials_page`. Conserva el filtro de cancelación aprobada y pago confirmado dentro del RPC, y pagina 50 resultados mediante `created_at + order_id`. No se trasladó la decisión financiera al navegador.
 
 El cambio requiere que el RPC nuevo esté aplicado en staging junto con el resto del paquete de finanzas. La función antigua permanece para compatibilidad con otras llamadas.
+
+
+## 18. Historial del cliente y catálogo público sin topes fijos
+
+### Historial del cliente
+- Se añadió `get_customer_order_history_page(integer,timestamptz,uuid)`, con páginas de hasta 50 pedidos.
+- El cursor usa `created_at + id`, evita ambigüedades cuando dos pedidos comparten fecha y hora, y pide una fila adicional para calcular `has_more`.
+- La RPC valida sesión, perfil no bloqueado y propiedad mediante `orders.customer_user_id = auth.uid()`; mantiene `SECURITY DEFINER`, `search_path = ''` y EXECUTE solo para `authenticated`.
+- `cuenta.js` presenta controles Anterior/Siguiente y conserva la consulta de artículos de cada pedido. La RPC antigua se mantiene por compatibilidad, pero la interfaz nueva usa la paginada.
+
+### Catálogo público
+- `app.js` ahora consulta negocios, productos y publicaciones públicas en bloques de 500 filas con `range()` y `count: exact`.
+- Se mantienen los filtros actuales: productos de negocios activos y activos comercialmente; publicaciones publicadas y aprobadas.
+- Se añade orden estable con ID como segundo criterio.
+- Esto elimina los topes arbitrarios de 200/1.000/500 filas, aunque el navegador todavía acumula los resultados para alimentar los filtros, tarjetas, carrito y búsqueda existentes. No es todavía una carga progresiva bajo demanda.
+
+### Validación pendiente
+No se ha ejecutado la nueva RPC en Supabase, no se ha desplegado ni probado en navegador. Se requiere staging con más de 50 pedidos por cliente, más de 500 productos/publicaciones y pruebas de aislamiento entre dos cuentas y varios negocios. La consulta exacta de conteo y la carga total deben medirse con volumen real antes de producción.
