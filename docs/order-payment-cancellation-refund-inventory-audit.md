@@ -211,3 +211,18 @@ La revisión confirmó que el checkout ya conserva `product_name` y `unit_price`
 **Pendiente:** ejecutar las migraciones y pruebas en staging, incluyendo cambio de nombre/precio posterior a una venta, intento de borrar producto vendido, inserción de línea con producto de otro negocio, intento de editar/borrar una línea histórica y cancelación de un pedido antiguo con referencia NULL. No se ejecutó SQL en la base activa.
 
 **Contraste de solo lectura con la base activa:** en el proyecto independiente consultado, `public.order_items` existe con 0 filas, `null_product_references = 0` y `cross_business_references = 0`. La FK activa se confirmó como `FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL`; aún no es restrictiva. Esto significa que hoy no hay líneas históricas afectadas en esa tabla, pero el riesgo de perder la referencia sigue presente hasta aplicar la migración revisada. La consulta fue estrictamente de lectura; no se modificó Supabase.
+
+
+### 18. Integridad completa del pedido y coherencia del flujo de estados
+
+La revisión estática encontró una diferencia entre los estados que usa el panel y los estados normalizados por la base de datos. El panel todavía interpretaba `pending` y `out_for_delivery`, mientras que el flujo vigente utiliza `received` y `on_the_way`. Se alinearon las etiquetas, los botones de avance y la captura de referencia de entrega con los estados actuales:
+
+`received → confirmed → preparing → ready → on_the_way → delivered`
+
+La cancelación sigue siendo una ruta separada y solo puede completarse después de la aprobación de una solicitud por el administrador del negocio. Un pedido entregado o cancelado no debe volver a avanzar.
+
+También se amplió el verificador de integración para comprobar que los roles autenticados puedan actualizar únicamente los campos operativos autorizados y no tengan permiso de modificar importes, método/estado de pago, datos originales del cliente ni líneas históricas. Se añadió una comprobación de la restricción de estados normalizados y del trigger que valida las transiciones.
+
+**Resultado de esta pasada:** se corrigió la discrepancia de estados en el panel y se fortaleció el verificador para importes y datos históricos. La revisión del código confirma que el cambio de estado usa comparación con el estado anterior (`.eq('status', currentStatus)`), mientras el trigger del servidor valida la transición permitida. Los importes se entregan al administrador mediante RPC y no mediante escritura directa desde el panel.
+
+**Pendiente de ejecución:** ejecutar el verificador SQL en staging y probar con dos sesiones concurrentes, estados terminales, empleado y administrador de negocios distintos, y cambios de precio/nombre del producto después de una compra. No se ejecutó SQL ni se modificó la base activa en esta revisión.
