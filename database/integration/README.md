@@ -442,3 +442,8 @@ El reporte de ganancias filtra pagos y reembolsos completados por `currency='COP
 ### Conservación de gastos pagados — 19 nov 2026
 
 El flujo de anulación de gastos ahora solo admite registros pendientes. Los gastos pagados no se pueden anular porque el informe de ganancias los excluye cuando pasan a `voided`, lo que alteraría resultados históricos sin una reversión financiera. La condición se aplica tanto en `void_business_expense` como en `private.guard_business_expense_update`, y queda cubierta por el verificador de integración. No se incorpora todavía una RPC para revertir pagos ya efectuados.
+
+
+### Costos históricos incompletos en reportes
+
+El RPC `get_business_admin_profit_report` ahora devuelve `NULL` en las estimaciones de ganancia bruta y neta si falta el costo histórico de una o más líneas de pedido. Se mantienen `missing_cost_lines` y `complete_cost_data` para identificar la causa. Los componentes de interfaz deben mostrar “Costos incompletos: no se puede calcular la ganancia” cuando esos campos sean nulos, en vez de convertirlos a cero.
