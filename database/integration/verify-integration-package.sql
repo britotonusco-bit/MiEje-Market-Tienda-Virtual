@@ -285,9 +285,13 @@ BEGIN
     )
       AND policyname IN (
         'financial_admin_select','business_expenses_select','refund_admin_select',
-        'product_costs_admin_select','order_item_costs_admin_select'
+        'product_costs_admin_select','product_costs_admin_insert',
+        'product_costs_admin_update','order_item_costs_admin_select'
       )
-      AND coalesce(qual,'') ILIKE '%is_platform_owner%'
+      AND (
+        coalesce(qual,'') ILIKE '%is_platform_owner%'
+        OR coalesce(with_check,'') ILIKE '%is_platform_owner%'
+      )
   ) THEN
     RAISE EXCEPTION 'FALLO: el propietario técnico conserva lectura directa global de finanzas o costos de negocios.';
   END IF;
