@@ -424,3 +424,70 @@ No crear todavía un borrado automático de cuentas ni una exportación que prom
 - Cambios funcionales de derechos de titulares: no implementados.
 - Documento de auditoría: ampliado con exposición efectiva de columnas y procedimiento de consultas/reclamos.
 - Pendiente: validar la política de datos con asesoría jurídica, decidir la asignación de responsabilidades por negocio, aplicar migraciones en staging y probar acceso con cuentas de distintos roles.
+
+
+## Auditoría de los textos legales visibles en la interfaz — 19 nov 2026
+
+Se inspeccionaron los textos que `app.js` presenta en las vistas legales `privacidad`, `datos` y `terminos`, además de los consentimientos del checkout y del formulario de vacantes en `index.html` y `app.js`.
+
+### Hallazgo crítico: los textos todavía describen un prototipo sin transmisión de datos
+
+Los tres textos contienen afirmaciones incompatibles con el flujo de la rama:
+
+1. **Política de privacidad:** afirma que el formulario de pedido solo muestra una vista previa y no envía datos.
+2. **Tratamiento de datos personales:** afirma que el pedido es una demostración, que solo muestra una alerta y que no almacena ni envía información.
+3. **Términos y condiciones:** afirma que el carrito/formulario son demostrativos, que no se recibe una compra y que “Revisar pedido” solo muestra una vista previa local.
+4. **Checkout real de la rama:** `app.js` envía nombre, teléfono, dirección, notas de entrega, método de pago, artículos y evidencia de consentimiento a la Edge Function `create-public-order`. La función procesa la creación del pedido en el backend.
+5. **Vacantes:** `app.js` envía nombre, contacto, mensaje, respuestas personalizadas y, si se adjunta, una hoja de vida al flujo `create-job-application`; el archivo se carga al bucket privado `job-applications-private`.
+
+Por tanto, si esta rama se despliega con esos textos sin corregirlos, la información que se presenta a las personas no describirá el tratamiento real. Es un bloqueo previo a cualquier lanzamiento comercial.
+
+### Identidad y canales sin completar
+
+Los textos de privacidad, tratamiento y términos todavía contienen marcadores como `[COMPLETAR]` para razón social, identificación, domicilio, correo de privacidad y contacto. El canal para consultas y reclamos no está definido. No se debe inventar esa información ni publicar los textos como versión definitiva mientras falte.
+
+### Consentimiento del checkout
+
+- La casilla obligatoria está enlazada a la vista de Política de privacidad.
+- La casilla lleva la versión `privacy-2026-11-19-v1`.
+- `app.js` envía `privacy_consent` y `privacy_consent_version` a `create-public-order`.
+- La Edge Function de la rama valida esa versión.
+- Los borradores SQL de la rama prevén persistir la evidencia de consentimiento, pero la migración no está instalada en la base activa.
+- El texto de la casilla debe identificar con claridad quién trata los datos, las finalidades necesarias para gestionar el pedido y el vínculo entre la plataforma y el negocio que recibe el pedido. La versión actual no resuelve esa distribución de responsabilidades.
+
+### Consentimiento de vacantes
+
+- La casilla se genera en `app.js` y usa `job-application-2026-11-19-v1`.
+- El servidor valida consentimiento y versión tanto al solicitar carga del CV como al enviar la postulación.
+- El formulario no enlaza de forma visible el consentimiento con una política específica de tratamiento; el texto solo dice “Autorizo el tratamiento de mis datos para gestionar esta postulación”.
+- Se recogen datos de identificación/contacto, mensaje, respuestas personalizadas y potencialmente CV. La política visible debe explicar quién recibe la postulación, para qué se utiliza, quién puede consultarla, cuánto tiempo se conserva y cómo ejercer derechos.
+- El bucket CV de la base activa es privado, pero el flujo de rama no está desplegado y el diseño de retención/antimalware sigue pendiente.
+
+### Requisitos mínimos antes de reescribir/publicar los textos
+
+No se modificaron los textos visibles en esta revisión porque faltan datos esenciales del responsable y la definición jurídica del modelo de plataforma/negocios. Antes de redactar una versión final se debe confirmar:
+
+1. Razón social o nombre del responsable, identificación y domicilio.
+2. Correo/canal formal de privacidad y atención de consultas/reclamos.
+3. En cada finalidad (cuenta, pedido, vacante, soporte, seguridad), qué entidad decide la finalidad y cuál actúa por cuenta de otra.
+4. Proveedores y destinatarios reales que reciben datos, incluyendo alojamiento, base de datos, almacenamiento de CV, mensajería y pagos cuando se activen.
+5. Datos exactos recolectados en cada formulario y campos opcionales.
+6. Plazos o criterios de conservación por categoría, y excepciones por obligaciones legales o controversias.
+7. Si se enviarán comunicaciones promocionales; deben mantenerse separadas de la autorización necesaria para tramitar pedidos o postulaciones.
+8. Procedimiento y canal para consultas, reclamos, corrección, supresión y revocatoria, con registro de términos y responsables.
+
+### Criterio normativo usado para esta revisión
+
+La Ley 1581 de 2012 exige informar finalidades, derechos y datos de contacto del responsable al solicitar autorización y conservar prueba de la autorización cuando corresponda. El Decreto 1074 de 2015 y sus reglas sobre políticas y avisos precisan el contenido mínimo. La SIC distingue política de tratamiento y aviso de privacidad; aceptar una política genérica no sustituye por sí solo la autorización expresa, previa e informada cuando sea exigible. Fuentes consultadas:
+
+- Ley 1581 de 2012, artículos 4, 8, 12, 14 a 18: https://www.cancilleria.gov.co/normograma/compilacion/docs/ley_1581_2012.htm
+- SIC, concepto sobre políticas de tratamiento: https://sedeelectronica.sic.gov.co/publicaciones/boletin-juridico/concepto/politicas-de-tratamiento-de-datos-personales
+- SIC, criterio sobre consentimiento y diferencia entre política y autorización: https://sedeelectronica.sic.gov.co/sites/default/files/estados/072022/RE74924-2021.pdf
+- Decreto 1074 de 2015, contenido mínimo de políticas y avisos, según material normativo publicado por SIC: https://sedeelectronica.sic.gov.co/sites/default/files/normativa/Resolucion-72126-2023.pdf
+
+### Estado
+
+- Textos y formularios inspeccionados: sí.
+- Contradicción entre texto legal y flujo real de la rama: confirmada.
+- Cambios en la interfaz legal: no realizados; faltan datos de identidad y decisiones sobre responsables/encargados.
+- Recomendación: bloquear el lanzamiento comercial de checkout y postulaciones hasta corregir los textos, confirmar evidencia persistente en staging y validar el aviso con asesoría jurídica colombiana.
