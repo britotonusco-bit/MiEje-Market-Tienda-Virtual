@@ -141,3 +141,18 @@ El verificador de integración ahora exige las tres fechas efectivas y la zona h
 El historial del panel ahora diferencia la fecha en que ocurrió o se registró el gasto (`expense_date`) de la fecha efectiva de pago (`paid_at`). La fecha de pago se presenta en hora de Colombia y aparece como pendiente cuando el gasto todavía no ha sido pagado.
 
 Esto alinea la lectura del historial con el reporte financiero, que incorpora los gastos en el periodo de `paid_at`, no en el periodo de `expense_date`. No cambia importes ni registros almacenados.
+
+## 13. Conciliación de subtotales y acumulados por periodo
+
+Se revisó la función única `get_business_admin_profit_report(p_business_id, p_start_date, p_end_date)`: admite periodos de hasta 367 días inclusivos, por lo que puede consultar un año calendario completo, incluidos los años bisiestos. No hay un cálculo anual separado; el panel debe solicitar el rango anual completo.
+
+Las identidades revisadas son:
+- Cobros netos = cobros completados - reembolsos completados.
+- Costo neto = costo reconocido en pagos del periodo - costo revertido por cancelaciones aprobadas en el periodo.
+- Ganancia bruta estimada = cobros - reembolsos - costo neto.
+- Resultado neto estimado = ganancia bruta - gastos pagados del periodo.
+- Domicilios cobrados es un dato informativo incluido dentro de los cobros; no debe sumarse nuevamente.
+
+Se amplió el verificador SQL para exigir estas identidades, la inclusión de un año bisiesto y la separación del domicilio como dato informativo. Esto no sustituye una prueba con transacciones de ensayo: la aditividad día→mes→año debe verificarse con movimientos reales controlados, incluyendo pagos, cancelaciones, reembolsos y gastos que crucen límites de mes y año.
+
+No se ejecutó SQL ni se modificó Supabase.
