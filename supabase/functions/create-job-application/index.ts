@@ -61,9 +61,10 @@ Deno.serve(async (req: Request) => {
     return reply(400, { error: "No fue posible procesar la solicitud." });
   }
 
-  const ip = (req.headers.get("cf-connecting-ip")
-    ?? req.headers.get("x-forwarded-for")?.split(",")[0]
-    ?? "").trim();
+  // Confiar solo en la IP que el proxy de borde establece. El valor
+  // izquierdo de X-Forwarded-For puede ser controlado por el solicitante y
+  // permitiría evadir el límite por IP si se usa como fallback.
+  const ip = (req.headers.get("cf-connecting-ip") ?? "").trim();
   if (!ip) return reply(400, { error: "No fue posible validar la solicitud." });
 
   const action = value(body.action, 30);
