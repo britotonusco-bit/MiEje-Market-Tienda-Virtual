@@ -1728,6 +1728,73 @@ BEGIN
     RAISE EXCEPTION 'FALLO: las RPC técnicas no están restringidas a service_role.';
   END IF;
 
+  -- Las RPC de administración deben ser SECURITY INVOKER con search_path vacío.
+  -- La autorización procede del actor validado por la Edge Function y del
+  -- service_role; no deben añadir un segundo bypass SECURITY DEFINER.
+  IF EXISTS (
+    SELECT 1
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public'
+      AND p.proname IN (
+        'create_business_membership_assignment',
+        'update_business_membership_assignment',
+        'suspend_business_membership',
+        'reactivate_business_membership',
+        'set_technical_business_status',
+        'moderate_business_content_transactionally',
+        'create_technical_business_transactional'
+      )
+      AND (
+        p.prosecdef
+        OR NOT (COALESCE(p.proconfig, ARRAY[]::text[]) @> ARRAY['search_path=""']::text[])
+      )
+  ) THEN
+    RAISE EXCEPTION 'FALLO: una RPC técnica usa SECURITY DEFINER o no fija search_path vacío.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public'
+      AND p.proname IN (
+        'create_business_membership_assignment',
+        'update_business_membership_assignment',
+        'suspend_business_membership',
+        'reactivate_business_membership',
+        'set_technical_business_status',
+        'moderate_business_content_transactionally',
+        'create_technical_business_transactional'
+      )
+      AND (
+        has_function_privilege('anon', p.oid, 'EXECUTE')
+        OR has_function_privilege('authenticated', p.oid, 'EXECUTE')
+        OR NOT has_function_privilege('service_role', p.oid, 'EXECUTE')
+      )
+  ) THEN
+    RAISE EXCEPTION 'FALLO: una RPC técnica tiene EXECUTE público/autenticado o falta service_role.';
+  END IF;
+
+  -- Impedir que operaciones concurrentes retiren al último administrador activo.
+  IF to_regprocedure('private.guard_last_active_business_admin()') IS NULL
+     OR NOT EXISTS (
+       SELECT 1
+       FROM pg_trigger t
+       JOIN pg_class c ON c.oid = t.tgrelid
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       JOIN pg_proc p ON p.oid = t.tgfoid
+       WHERE n.nspname = 'public'
+         AND c.relname = 'business_memberships'
+         AND NOT t.tgisinternal
+         AND p.proname = 'guard_last_active_business_admin'
+         AND (t.tgtype::integer & 16) = 16
+     )
+     OR position('FOR UPDATE' IN upper(pg_get_functiondef(to_regprocedure('private.guard_last_active_business_admin()')))) = 0
+     OR position('business_admin' IN pg_get_functiondef(to_regprocedure('private.guard_last_active_business_admin()'))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: falta la protección transaccional contra retirar al último administrador activo.';
+  END IF;
+
   -- Los perfiles son privados: cada usuario autenticado solo lee su fila.
   IF NOT EXISTS (
     SELECT 1 FROM pg_policies
