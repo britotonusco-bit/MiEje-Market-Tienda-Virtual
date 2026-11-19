@@ -496,3 +496,12 @@ Informe: `docs/account-recovery-invitations-audit.md`.
 La función técnica de la rama ahora bloquea con HTTP 409 la asignación a una cuenta de Auth preexistente cuyo correo no está confirmado; no crea una membresía nueva ni reenvía automáticamente el correo. Las cuentas nuevas continúan por `inviteUserByEmail`. La página `aceptar-invitacion.js` también exige que la sesión resultante indique `email_confirmed_at` antes de permitir establecer la contraseña.
 
 Siguen pendientes un registro propio del ciclo de invitación, reenvío con límite de frecuencia, expiración/revocación coordinada y reconciliación cuando Auth envía el correo pero falla la RPC de membresía. No se han probado entregas SMTP ni enlaces reales. No enviar invitaciones reales ni modificar Auth en el proyecto activo durante la auditoría.
+
+
+## Sesiones, MFA y revocación — 19 nov 2026
+
+Informe: `docs/session-mfa-access-audit.md`.
+
+La rama revalida acceso de panel cada 30 segundos y al volver a primer plano. El panel técnico y la Edge Function de rama exigen AAL2. Atención: la función `technical-business-management` desplegada en Supabase activo sigue en versión 6 y no contiene comprobación AAL2 de servidor. La UI por sí sola no reemplaza esa protección. No desplegar sin staging y autorización.
+
+La duración máxima de sesión, timeout de inactividad y sesión única no se pudieron verificar desde las herramientas disponibles. Deben revisarse manualmente en Authentication → Settings → Sessions. Las políticas activas de perfiles, membresías y negocios siguen mostrando bypass del propietario técnico; ver la sección RLS-01 del informe. No se aplicó SQL ni se alteraron ajustes de Auth.
