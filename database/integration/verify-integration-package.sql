@@ -277,6 +277,30 @@ BEGIN
     RAISE EXCEPTION 'FALLO: falta business_memberships.job_title.';
   END IF;
 
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE n.nspname = 'public'
+      AND t.relname = 'business_memberships'
+      AND c.conname = 'business_memberships_business_id_user_id_key'
+      AND c.contype = 'u'
+      AND pg_get_constraintdef(c.oid) = 'UNIQUE (business_id, user_id)'
+      AND c.convalidated
+  ) THEN
+    RAISE EXCEPTION 'FALLO: una cuenta no puede tener más de una membresía por negocio.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'profiles'
+      AND column_name = 'is_blocked'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: falta profiles.is_blocked para distinguir bloqueos globales de membresías suspendidas.';
+  END IF;
+
   IF to_regprocedure('public.get_public_order_idempotent(uuid,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)') IS NULL
      OR to_regprocedure('public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)') IS NULL
      OR to_regprocedure('public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)') IS NULL THEN
