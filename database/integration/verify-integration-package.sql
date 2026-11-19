@@ -1903,6 +1903,56 @@ BEGIN
     RAISE EXCEPTION 'FALLO: audit_logs debe impedir UPDATE/DELETE/TRUNCATE y conservar INSERT de servidor.';
   END IF;
 
+  -- Los eventos nuevos deben tener metadatos acotados y hora de servidor.
+  IF to_regprocedure('private.guard_audit_log_insert()') IS NULL
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_trigger t
+       JOIN pg_class c ON c.oid=t.tgrelid
+       JOIN pg_namespace n ON n.oid=c.relnamespace
+       JOIN pg_proc p ON p.oid=t.tgfoid
+       WHERE n.nspname='public'
+         AND c.relname='audit_logs'
+         AND NOT t.tgisinternal
+         AND p.proname='guard_audit_log_insert'
+         AND (t.tgtype::integer & 4)=4
+         AND (t.tgtype::integer & 2)=2
+         AND (t.tgtype::integer & 1)=1
+     )
+     OR EXISTS (
+       SELECT 1 FROM pg_proc p
+       JOIN pg_namespace n ON n.oid=p.pronamespace
+       WHERE n.nspname='private'
+         AND p.proname='guard_audit_log_insert'
+         AND (
+           p.prosecdef
+           OR NOT (COALESCE(p.proconfig,ARRAY[]::text[]) @> ARRAY['search_path=""']::text[])
+         )
+     ) THEN
+    RAISE EXCEPTION 'FALLO: falta validación de metadatos y timestamp de servidor en INSERT de auditoría.';
+  END IF;
+
+  -- La lectura directa no debe dar acceso global al propietario técnico.
+  -- El panel técnico consulta mediante la Edge Function privilegiada.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public'
+      AND tablename='audit_logs'
+      AND policyname='audit_logs_business_admin_or_actor_select'
+      AND cmd='SELECT'
+      AND qual ILIKE '%business_admin%'
+      AND qual ILIKE '%actor_id%'
+      AND qual ILIKE '%business_is_active%'
+      AND qual NOT ILIKE '%is_platform_owner%'
+  ) OR EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public'
+      AND tablename='audit_logs'
+      AND cmd='SELECT'
+      AND qual ILIKE '%is_platform_owner%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: la lectura directa de audit_logs conserva un bypass técnico global o carece de límites por negocio.';
+  END IF;
+
   -- Los perfiles son privados: cada usuario autenticado solo lee su fila.
   IF NOT EXISTS (
     SELECT 1 FROM pg_policies
