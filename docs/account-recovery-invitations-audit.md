@@ -364,7 +364,7 @@ Se conectó en la rama el primer tramo de aplicación:
 
 ### Limitaciones y pruebas aún pendientes
 
-- La interfaz técnica todavía no muestra la lista de invitaciones ni el control para revocarlas; por ahora existen las acciones de servidor.
+- En la primera integración solo existían las acciones de servidor. La bandeja y el control de revocación se añadieron posteriormente en ACC-08, descrito más abajo.
 - No se ha implementado un flujo de reenvío de invitaciones antiguas que ya existían antes de este esquema. Esas cuentas se rechazan de forma segura y requieren terminar el enlace anterior o una renovación controlada.
 - El dominio de GitHub Pages debe estar permitido en Supabase Auth Redirect URLs para el retorno con parámetros de invitación; debe comprobarse en staging.
 - La Edge Function de aceptación, la función técnica y el SQL no se han ejecutado con Deno/SQL parser ni probado en navegador.
