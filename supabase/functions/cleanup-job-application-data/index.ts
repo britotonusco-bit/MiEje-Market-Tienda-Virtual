@@ -11,7 +11,12 @@ const EXTENSIONS = new Set(["pdf", "doc", "docx"]);
 function reply(status: number, payload: Record<string, unknown>) {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store, private, max-age=0",
+      "Pragma": "no-cache",
+      "X-Content-Type-Options": "nosniff",
+    },
   });
 }
 
