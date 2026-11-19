@@ -341,3 +341,31 @@ Se comprobó que el panel técnico puede suspender o reactivar una membresía in
 - Se cambió el aviso para decir expresamente que no existe todavía un flujo de desbloqueo global en el panel. Reactivar una membresía no debe presentarse como solución a un bloqueo global.
 
 Esto es una brecha funcional pendiente, no una operación que deba resolverse modificando directamente la tabla `profiles`. Antes de implementar el flujo global se requiere definir alcance, motivo obligatorio, auditoría transaccional, control de último propietario técnico y revocación/renovación de sesiones. No se modificó la base activa.
+
+
+## Revisión de validación de motivos y consistencia de auditoría — 19 nov 2026
+
+La revisión estática de la rama encontró una diferencia entre la validación de la interfaz/Edge Function y la RPC de suspensión: el servidor HTTP exigía un motivo de al menos cinco caracteres, pero la función SQL solo rechazaba motivos vacíos y superiores a 2.000 caracteres.
+
+Se corrigió `suspend_business_membership` para exigir también un mínimo de cinco caracteres en PostgreSQL. De esta manera, la regla se aplica en la capa transaccional y no depende únicamente de que la solicitud pase por la validación de la Edge Function.
+
+También se amplió `verify-integration-package.sql` para comprobar expresamente esa condición en la definición instalada de la RPC.
+
+### Resultado de la revisión de operaciones
+
+- Cambio de rol/cargo: Edge Function invoca `update_business_membership_assignment`; la RPC bloquea el negocio y la membresía, protege al último administrador y registra el cambio en `audit_logs` dentro de la transacción.
+- Suspensión de membresía: Edge Function invoca `suspend_business_membership`; la RPC protege al último administrador, valida el motivo y audita el cambio en la misma transacción.
+- Reactivación: Edge Function invoca `reactivate_business_membership`; la RPC exige negocio activo, perfil no bloqueado, motivo y auditoría transaccional.
+- Estado del negocio: Edge Function invoca `set_technical_business_status`; la RPC bloquea el negocio, exige motivo en cambios reales y registra el antes/después.
+- Moderación: Edge Function invoca `moderate_business_content_transactionally`; la RPC bloquea la publicación y registra la decisión en la misma transacción. Repetir la misma decisión y nota no genera un evento adicional.
+- Todas estas RPC se declaran `SECURITY INVOKER`, usan `search_path` vacío y reservan `EXECUTE` a `service_role`; la Edge Function valida el JWT y exige AAL2 al propietario técnico.
+- La tabla `audit_logs` tiene un borrador append-only que bloquea UPDATE/DELETE/TRUNCATE incluso para `service_role`, conserva INSERT de servidor y valida los metadatos de cada evento.
+
+### Límites que siguen abiertos
+
+- El envío de invitación por Auth y la creación de membresía siguen siendo dos pasos separados; no pueden considerarse una sola transacción. Hace falta reconciliación y reenvío controlado.
+- El evento de inicio de sesión (`log_login`) se inserta directamente desde la Edge Function. Es un evento aislado de acceso, no una mutación de rol/estado/moderación; su inserción falla si falla la auditoría.
+- La protección append-only y las RPC siguen siendo borradores de la rama. En Supabase activo no están instaladas; la función desplegada continúa siendo una versión anterior con escrituras directas y auditoría separada.
+- No se ejecutaron migraciones, escrituras SQL, despliegues, pruebas Deno ni pruebas concurrentes en staging.
+
+La corrección del motivo mínimo se guardó únicamente en `correcciones-funcionales`.
