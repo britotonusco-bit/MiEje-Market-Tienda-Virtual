@@ -807,6 +807,71 @@ Deno.serve(async (req: Request) => {
         message: "Cuenta existente confirmada asignada al negocio.",
       });
     }
+    if (action === "list_business_invitations") {
+      const businessId = textValue(body.business_id, 80);
+      const status = textValue(body.status, 20) || "pending";
+      const limitValue = Number(body.limit ?? 50);
+      const limit = Number.isInteger(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 50;
+      const cursorCreatedAt = textValue(body.before_created_at, 50);
+      const cursorId = textValue(body.before_id, 80);
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
+      if (!uuidPattern.test(businessId) || !["pending", "accepted", "revoked", "expired", "failed"].includes(status)
+          || Boolean(cursorCreatedAt) !== Boolean(cursorId)
+          || (cursorCreatedAt && (!timestampPattern.test(cursorCreatedAt) || !Number.isFinite(Date.parse(cursorCreatedAt))))
+          || (cursorId && !uuidPattern.test(cursorId))) {
+        return reply(400, { error: "Negocio, estado o cursor de invitaciones no válido." });
+      }
+      let query = admin.from("business_invitations")
+        .select("id,business_id,email_normalized,user_id,membership_id,role,job_title,status,created_at,expires_at,accepted_at,revoked_at")
+        .eq("business_id", businessId)
+        .eq("status", status)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(limit + 1);
+      if (cursorCreatedAt && cursorId) {
+        query = query.or(`created_at.lt.${cursorCreatedAt},and(created_at.eq.${cursorCreatedAt},id.lt.${cursorId})`);
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      const rows = data ?? [];
+      const hasMore = rows.length > limit;
+      const invitations = rows.slice(0, limit);
+      const last = invitations[invitations.length - 1] ?? null;
+      return reply(200, {
+        ok: true,
+        invitations,
+        has_more: hasMore,
+        next_cursor: hasMore && last ? { created_at: last.created_at, id: last.id } : null,
+      });
+    }
+
+    if (action === "revoke_invitation") {
+      const invitationId = textValue(body.invitation_id, 80);
+      const reason = textValue(body.reason, 1000);
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidPattern.test(invitationId) || reason.length < 5) {
+        return reply(400, { error: "Selecciona una invitación pendiente e indica un motivo de al menos cinco caracteres." });
+      }
+      const { data, error } = await admin.rpc("revoke_business_invitation", {
+        p_invitation_id: invitationId,
+        p_actor_id: user.id,
+        p_reason: reason,
+      });
+      if (error) {
+        if (error.code === "P0002") return reply(404, { error: "No se encontró la invitación." });
+        if (error.code === "42501") return reply(403, { error: "No estás autorizado para revocar esta invitación." });
+        if (error.code === "23514" || error.code === "40001") return reply(409, { error: error.message });
+        if (error.code === "22023") return reply(400, { error: "El motivo de revocación no es válido." });
+        throw error;
+      }
+      return reply(200, {
+        ok: true,
+        invitation: data,
+        message: "Invitación revocada. La cuenta Auth y sus otras membresías se conservaron.",
+      });
+    }
+
     if (action === "update_member_assignment") {
       const membershipId = textValue(body.membership_id, 80);
       const role = textValue(body.role, 40);
