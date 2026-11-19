@@ -411,7 +411,7 @@ Deno.serve(async (req: Request) => {
       const limitValue = Number(body.limit ?? 51);
       const limit = Number.isInteger(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 51;
       const searchTerm = typeof body.search === "string" ? body.search.trim().slice(0, 80) : "";
-      if (searchTerm && !/^[\\p{L}\\p{N} _.-]+$/u.test(searchTerm)) {
+      if (searchTerm && !/^[\p{L}\p{N} _.-]+$/u.test(searchTerm)) {
         return reply(400, { error: "La búsqueda contiene caracteres no permitidos." });
       }
       const activeOnly = body.active_only === true;
