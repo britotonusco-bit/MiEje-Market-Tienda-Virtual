@@ -79,6 +79,8 @@ DECLARE
   v_invitation public.business_invitations%ROWTYPE;
 BEGIN
   IF p_business_id IS NULL OR p_actor_id IS NULL
+     OR p_email IS NULL OR p_role IS NULL OR p_job_title IS NULL
+     OR p_token_hash IS NULL OR p_expires_at IS NULL
      OR v_email !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'
      OR p_role NOT IN ('business_admin','employee')
      OR pg_catalog.char_length(v_job_title) NOT BETWEEN 2 AND 100
@@ -290,7 +292,7 @@ DECLARE
   v_invitation public.business_invitations%ROWTYPE;
   v_membership public.business_memberships%ROWTYPE;
 BEGIN
-  IF p_invitation_id IS NULL OR p_user_id IS NULL
+  IF p_invitation_id IS NULL OR p_user_id IS NULL OR p_token_hash IS NULL
      OR p_token_hash !~ '^[0-9a-f]{64}$' THEN
     RAISE EXCEPTION 'Datos de aceptación no válidos.' USING ERRCODE = '22023';
   END IF;
@@ -397,7 +399,7 @@ DECLARE
   v_membership public.business_memberships%ROWTYPE;
   v_reason text := pg_catalog.btrim(p_reason);
 BEGIN
-  IF p_invitation_id IS NULL OR p_actor_id IS NULL
+  IF p_invitation_id IS NULL OR p_actor_id IS NULL OR p_reason IS NULL
      OR pg_catalog.char_length(v_reason) NOT BETWEEN 5 AND 1000 THEN
     RAISE EXCEPTION 'Invitación, técnico y motivo válido son obligatorios.'
       USING ERRCODE = '22023';
