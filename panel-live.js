@@ -119,7 +119,27 @@
       document.querySelector('#assignmentBusinessSelect')?.addEventListener('change', event => loadTechnicalMembers(event.currentTarget.value, '#assignmentMemberSelect'));
       document.querySelector('#assignmentMemberSelect')?.addEventListener('change', fillMemberAssignment);
       document.querySelector('#memberAssignmentForm')?.addEventListener('submit', saveMemberAssignment);
-      document.querySelector('#memberBusinessSelect')?.addEventListener('change', event => loadTechnicalMembers(event.currentTarget.value, '#memberTargetSelect'));
+      document.querySelector('#memberBusinessSelect')?.addEventListener('change', event => {
+        const target = document.querySelector('#memberTargetSelect');
+        if (target) target.value = '';
+        const note = document.querySelector('#memberTargetStatusNote');
+        if (note) note.textContent = '';
+        loadTechnicalMembers(event.currentTarget.value, '#memberTargetSelect');
+      });
+      document.querySelector('#memberTargetSelect')?.addEventListener('change', event => {
+        const selected = event.currentTarget.selectedOptions[0];
+        const action = document.querySelector('#memberStatusForm [name="is_blocked"]');
+        const note = document.querySelector('#memberTargetStatusNote');
+        if (!selected?.value) { if (note) note.textContent = ''; return; }
+        const globallyBlocked = selected.dataset.globalBlocked === 'true';
+        const suspended = selected.dataset.status !== 'active';
+        if (action) action.value = suspended ? 'false' : 'true';
+        if (note) note.textContent = globallyBlocked
+          ? 'Esta cuenta también está bloqueada globalmente. Reactivar la membresía no habilitará el acceso hasta retirar ese bloqueo global desde el procedimiento autorizado.'
+          : suspended
+            ? 'La membresía está suspendida en este negocio. Puedes reactivarla si el negocio está activo.'
+            : 'La membresía está activa en este negocio.';
+      });
       document.querySelector('#platformAiForm')?.addEventListener('submit', savePlatformAi);
       document.querySelector('#platformFinanceForm')?.addEventListener('submit', createPlatformFinancialRecord);
       document.querySelector('#payrollForm')?.addEventListener('submit', createPayrollRecord);
@@ -1308,13 +1328,15 @@
   async function loadTechnicalMembers(id, targetSelector = '#memberTargetSelect', reset = true) {
     const target = document.querySelector(targetSelector);
     if (!target) return;
-    const state = memberSelectStates.get(targetSelector) || { businessId: null, cursors: [null], page: 0 };
+    const state = memberSelectStates.get(targetSelector) || { businessId: null, cursors: [null], page: 0, requestId: 0 };
+    const requestId = ++state.requestId;
     if (reset || state.businessId !== id) {
       state.businessId = id;
       state.cursors = [null];
       state.page = 0;
     }
     memberSelectStates.set(targetSelector, state);
+    target.disabled = true;
     target.innerHTML = '<option value="">Cargando cuentas…</option>';
     if (!id) {
       target.innerHTML = '<option value="">Selecciona primero un negocio</option>';
@@ -1328,9 +1350,15 @@
         before_created_at: cursor?.created_at || undefined,
         before_id: cursor?.id || undefined
       });
+      if (requestId !== state.requestId) return;
       const fetched = result.members || [];
       const rows = fetched.slice(0, PANEL_PAGE_SIZE);
-      target.innerHTML = '<option value="">Selecciona una cuenta</option>' + rows.map(m => `<option value="${esc(m.id)}" data-role="${esc(m.role)}" data-job-title="${esc(m.job_title || '')}">${esc(m.profiles?.display_name || shortId(m.user_id))} · ${m.role === 'business_admin' ? 'Administrador' : 'Empleado'} · ${esc(m.job_title || 'Cargo no registrado')}${m.status !== 'active' ? ' · Suspendido' : ''}</option>`).join('');
+      target.innerHTML = '<option value="">Selecciona una cuenta</option>' + rows.map(m => {
+        const globallyBlocked = m.profiles?.is_blocked === true;
+        const localStatus = m.status === 'active' ? 'Activa' : 'Suspendida';
+        const globalStatus = globallyBlocked ? ' · Bloqueada globalmente' : '';
+        return `<option value="${esc(m.id)}" data-role="${esc(m.role)}" data-job-title="${esc(m.job_title || '')}" data-status="${esc(m.status)}" data-global-blocked="${globallyBlocked ? 'true' : 'false'}">${esc(m.profiles?.display_name || shortId(m.user_id))} · ${m.role === 'business_admin' ? 'Administrador' : 'Empleado'} · ${esc(m.job_title || 'Cargo no registrado')} · ${localStatus}${globalStatus}</option>`;
+      }).join('');
       state.hasMore = Boolean(result.has_more);
       state.last = rows[rows.length - 1] || null;
       renderMemberSelectPager(target, state, direction => {
@@ -1342,8 +1370,11 @@
       });
       if (!rows.length) target.innerHTML = '<option value="">No hay cuentas en esta página</option>';
     } catch (error) {
+      if (requestId !== state.requestId) return;
       target.innerHTML = `<option value="">Error al cargar las cuentas: ${esc(error.message || 'Error de consulta')}</option>`;
       renderMemberSelectPager(target, state, () => {});
+    } finally {
+      if (requestId === state.requestId) target.disabled = false;
     }
   }
 
