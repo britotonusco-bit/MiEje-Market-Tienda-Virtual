@@ -226,3 +226,17 @@ No se ha ejecutado la nueva RPC en Supabase, no se ha desplegado ni probado en n
 
 ### Ajuste adicional: lotes de negocios
 Las consultas de productos y publicaciones dividen los IDs de negocios en lotes de 100 para evitar filtros `IN` excesivamente grandes. La Edge Function de métodos de pago acepta como máximo 200 IDs por solicitud; el cliente respeta ese contrato y procesa los negocios en grupos de 200. Los errores en publicaciones o métodos de pago se registran sin cancelar la carga de negocios y productos, manteniendo el comportamiento tolerante a fallos anterior.
+
+
+## 19. Paginación de listados técnicos
+
+Se incorporó cursor compuesto `created_at + id` a los listados técnicos:
+- Negocios: la Edge Function entrega páginas de hasta 51 filas; el panel recupera los bloques para conservar el conjunto completo usado por estadísticas y selectores, y la tabla muestra 50 negocios por página con búsqueda local.
+- Miembros de un negocio: el endpoint limita cada consulta a 51; el panel recorre los bloques para completar los selectores de administración y asignación.
+- Moderación de publicaciones: 50 visibles por página, con navegación Anterior/Siguiente y consulta privilegiada desde la Edge Function.
+- Solicitudes de bloqueo: 50 visibles por página, cursor estable y autorización exclusiva del propietario técnico.
+
+El servidor valida que fecha e ID del cursor lleguen juntos, que la fecha sea ISO parseable y que el ID sea UUID. Los endpoints ordenan por fecha e ID descendentes. La UI usa la fila 51 para determinar si hay página siguiente y conserva la fila 50 como cursor.
+
+### Validación pendiente
+Cambios solo en la rama. No se ha desplegado la Edge Function ni probado con grandes volúmenes en staging. Los listados de negocios y miembros se consultan en bloques pero se acumulan en memoria para alimentar selectores y estadísticas; el render de negocios sí se pagina localmente. Una siguiente optimización sería convertir esos selectores en búsquedas remotas/autocompletado para no cargar todas las cuentas.
