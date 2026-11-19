@@ -1865,7 +1865,7 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'FALLO: falta business_memberships.job_title.';
   END IF;
-  IF to_regprocedure('public.create_business_membership_assignment(uuid,uuid,text,text,text,uuid,boolean)') IS NULL
+  IF to_regprocedure('public.create_business_membership_assignment(uuid,uuid,text,text,text,uuid,boolean,boolean)') IS NULL
      OR to_regprocedure('public.update_business_membership_assignment(uuid,text,text,uuid)') IS NULL
      OR to_regprocedure('public.suspend_business_membership(uuid,text,uuid)') IS NULL
      OR to_regprocedure('public.reactivate_business_membership(uuid,text,uuid)') IS NULL
@@ -1874,15 +1874,15 @@ BEGIN
      OR to_regprocedure('public.create_technical_business_transactional(text,text,text,uuid)') IS NULL THEN
     RAISE EXCEPTION 'FALLO: faltan RPC transaccionales de membresías o administración técnica.';
   END IF;
-  IF NOT has_function_privilege('service_role','public.create_business_membership_assignment(uuid,uuid,text,text,text,uuid,boolean)','EXECUTE')
+  IF NOT has_function_privilege('service_role','public.create_business_membership_assignment(uuid,uuid,text,text,text,uuid,boolean,boolean)','EXECUTE')
      OR NOT has_function_privilege('service_role','public.update_business_membership_assignment(uuid,text,text,uuid)','EXECUTE')
      OR NOT has_function_privilege('service_role','public.suspend_business_membership(uuid,text,uuid)','EXECUTE')
      OR NOT has_function_privilege('service_role','public.reactivate_business_membership(uuid,text,uuid)','EXECUTE')
      OR NOT has_function_privilege('service_role','public.set_technical_business_status(uuid,text,text,text,uuid)','EXECUTE')
      OR NOT has_function_privilege('service_role','public.moderate_business_content_transactionally(uuid,text,text,uuid)','EXECUTE')
      OR NOT has_function_privilege('service_role','public.create_technical_business_transactional(text,text,text,uuid)','EXECUTE')
-     OR has_function_privilege('anon','public.create_business_membership_assignment(uuid,uuid,text,text,text,uuid,boolean)','EXECUTE')
-     OR has_function_privilege('authenticated','public.create_business_membership_assignment(uuid,uuid,text,text,text,uuid,boolean)','EXECUTE')
+     OR has_function_privilege('anon','public.create_business_membership_assignment(uuid,uuid,text,text,text,uuid,boolean,boolean)','EXECUTE')
+     OR has_function_privilege('authenticated','public.create_business_membership_assignment(uuid,uuid,text,text,text,uuid,boolean,boolean)','EXECUTE')
      OR has_function_privilege('anon','public.set_technical_business_status(uuid,text,text,text,uuid)','EXECUTE')
      OR has_function_privilege('authenticated','public.set_technical_business_status(uuid,text,text,text,uuid)','EXECUTE') THEN
     RAISE EXCEPTION 'FALLO: las RPC técnicas no están restringidas a service_role.';
@@ -1895,6 +1895,15 @@ BEGIN
        'public.set_technical_business_status(uuid,text,text,text,uuid)'::regprocedure
      )) = 0 THEN
     RAISE EXCEPTION 'FALLO: el cambio de estado no conserva en auditoría el motivo de la decisión, incluida la reactivación.';
+  END IF;
+
+  IF position('business.member_invitation_reconciled' IN pg_get_functiondef(
+       'public.create_business_membership_assignment(uuid,uuid,text,text,text,uuid,boolean,boolean)'::regprocedure
+     )) = 0
+     OR position('existing_invitation_reconciled' IN pg_get_functiondef(
+       'public.create_business_membership_assignment(uuid,uuid,text,text,text,uuid,boolean,boolean)'::regprocedure
+     )) = 0 THEN
+    RAISE EXCEPTION 'FALLO: la recuperación de una invitación existente debe distinguirse en auditoría.';
   END IF;
 
   -- Los cambios de rol y estado deben serializarse por negocio y proteger
