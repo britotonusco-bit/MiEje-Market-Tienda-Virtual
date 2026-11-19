@@ -24,7 +24,14 @@ CREATE TABLE IF NOT EXISTS public.inventory_movements (
     REFERENCES public.products (business_id, id)
     ON DELETE RESTRICT,
   CONSTRAINT inventory_movements_delta_check
-    CHECK (quantity_delta = quantity_after - quantity_before)
+    CHECK (quantity_delta = quantity_after - quantity_before),
+  CONSTRAINT inventory_movements_direction_check
+    CHECK (
+      (movement_type = 'initial' AND quantity_delta > 0)
+      OR (movement_type = 'sale' AND quantity_delta < 0)
+      OR (movement_type = 'cancellation_return' AND quantity_delta > 0)
+      OR (movement_type = 'adjustment' AND quantity_delta <> 0)
+    )
 );
 
 -- Conservar la relación histórica entre una línea de pedido y su producto.
@@ -46,6 +53,10 @@ CREATE INDEX IF NOT EXISTS inventory_movements_product_created_idx
 ALTER TABLE public.inventory_movements ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.inventory_movements FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON TABLE public.inventory_movements TO authenticated;
+-- Ningún cliente ni proceso de service_role debe alterar el libro de movimientos.
+-- La inserción la realiza exclusivamente el trigger SECURITY DEFINER.
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+  ON TABLE public.inventory_movements FROM service_role;
 
 DROP POLICY IF EXISTS inventory_movements_admin_read
   ON public.inventory_movements;
@@ -101,8 +112,17 @@ BEGIN
       v_reason := 'Cambio de existencias (origen no especificado)';
     END IF;
 
-    IF v_type IS NULL OR v_type NOT IN ('adjustment', 'sale', 'cancellation_return') THEN
+    IF v_type IS NULL THEN
       v_type := 'adjustment';
+    ELSIF v_type NOT IN ('adjustment', 'sale', 'cancellation_return') THEN
+      RAISE EXCEPTION 'Tipo de movimiento de inventario inválido.'
+        USING ERRCODE = '22023';
+    END IF;
+
+    IF (v_type = 'sale' AND v_after >= v_before)
+       OR (v_type = 'cancellation_return' AND v_after <= v_before) THEN
+      RAISE EXCEPTION 'La dirección del movimiento no coincide con su tipo.'
+        USING ERRCODE = '23514';
     END IF;
   END IF;
 
@@ -120,7 +140,30 @@ END;
 $function$;
 
 REVOKE ALL ON FUNCTION private.log_product_inventory_movement()
-  FROM PUBLIC, anon, authenticated;
+  FROM PUBLIC, anon, authenticated, service_role;
+
+-- El historial es de solo anexado: ni siquiera service_role puede editarlo o borrarlo.
+CREATE OR REPLACE FUNCTION private.prevent_inventory_movement_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+BEGIN
+  RAISE EXCEPTION 'El historial de inventario es inmutable.'
+    USING ERRCODE = '55000';
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION private.prevent_inventory_movement_mutation()
+  FROM PUBLIC, anon, authenticated, service_role;
+
+DROP TRIGGER IF EXISTS inventory_movements_immutable
+  ON public.inventory_movements;
+CREATE TRIGGER inventory_movements_immutable
+BEFORE UPDATE OR DELETE ON public.inventory_movements
+FOR EACH ROW
+EXECUTE FUNCTION private.prevent_inventory_movement_mutation();
 
 DROP TRIGGER IF EXISTS products_inventory_movement_insert
   ON public.products;
