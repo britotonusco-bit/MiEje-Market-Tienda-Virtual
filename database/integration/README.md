@@ -565,3 +565,20 @@ Antes de producción:
 7. Aprobar RPO, RTO, frecuencia, retención y responsables antes de prometer tiempos de recuperación.
 
 La revisión del 19 nov 2026 no generó backups ni ejecutó restauraciones. No se ha acreditado una copia externa recuperable. Consultar el informe para las condiciones y la lista de cierre.
+
+
+## 7. Monitoreo y respuesta ante incidentes
+
+La auditoría está en `docs/monitoring-and-incident-response-audit.md`.
+
+El proyecto activo mostró seis Edge Functions y, en la consulta de logs de 24 horas del 19 nov 2026, solo devolvió fuentes `postgres_logs` y `pgbouncer_logs`; no aparecieron fuentes de Edge Functions. El conteo de palabras error/warning fue cero en esas dos fuentes, pero esto no demuestra ausencia de fallos. `audit_logs` tenía cero filas y `pg_cron` no estaba instalado.
+
+Antes de producción:
+1. Instrumentar logs estructurados sin PII ni secretos.
+2. Propagar un `request_id` desde Edge Function a RPC y respuesta.
+3. Crear alertas para 5xx, checkout, pagos, autenticación, Storage, limpieza y backups.
+4. Verificar qué fuentes de logs Edge están disponibles y su retención.
+5. Ensayar un incidente en staging, incluyendo fallo parcial y reconciliación.
+6. Vincular cada versión desplegada a su commit y evidencia de pruebas.
+
+No desplegar ni cambiar configuración de observabilidad en producción durante esta auditoría. La revisión fue de solo lectura.
