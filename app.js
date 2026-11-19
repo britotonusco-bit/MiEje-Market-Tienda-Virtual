@@ -1223,7 +1223,9 @@
     const customerPhone = String(form.get("phone") || "").trim();
     const privacyConsent = event.currentTarget.elements.namedItem("privacyConsent");
     const privacyConsentAccepted = privacyConsent instanceof HTMLInputElement && privacyConsent.checked === true;
-    const privacyConsentVersion = "privacy-2026-11-19-v1";
+    const privacyConsentVersion = privacyConsent instanceof HTMLInputElement
+      ? String(privacyConsent.dataset.policyVersion || "")
+      : "";
     if (!paymentMethodId || !deliveryMethod || !address || !customerName || !customerPhone) {
       showToast("Completa tus datos, la dirección y la forma de pago.");
       return;
