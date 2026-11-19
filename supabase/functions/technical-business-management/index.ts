@@ -417,10 +417,26 @@ Deno.serve(async (req: Request) => {
       if (cursor.createdAt && cursor.id) {
         query = query.or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`);
       }
-      const { data, error } = await query;
+      const [{ data, error }, totalResult, activeResult, suspendedResult] = await Promise.all([
+        query,
+        admin.from("businesses").select("id", { count: "exact", head: true }),
+        admin.from("businesses").select("id", { count: "exact", head: true }).eq("status", "active"),
+        admin.from("businesses").select("id", { count: "exact", head: true }).eq("status", "suspended"),
+      ]);
       if (error) throw error;
+      if (totalResult.error) throw totalResult.error;
+      if (activeResult.error) throw activeResult.error;
+      if (suspendedResult.error) throw suspendedResult.error;
       const rows = data ?? [];
-      return reply(200, { ok: true, businesses: rows, has_more: rows.length === limit });
+      const hasMore = rows.length === limit;
+      return reply(200, {
+        ok: true,
+        businesses: limit > 1 ? rows.slice(0, limit - 1) : rows,
+        has_more: hasMore,
+        business_count: totalResult.count ?? 0,
+        active_count: activeResult.count ?? 0,
+        suspended_count: suspendedResult.count ?? 0,
+      });
     }
 
     if (action === "list_audit_logs") {
