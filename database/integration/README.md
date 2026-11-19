@@ -629,3 +629,6 @@ Las consultas de productos/publicaciones agrupan IDs de negocio en lotes de 100;
 
 
 Los listados técnicos de negocios, miembros, moderación y solicitudes de bloqueo usan cursor `created_at + id` en la Edge Function `technical-business-management`, con límite por consulta de 51 filas. El panel muestra 50 por página para moderación/solicitudes y pagina localmente la tabla de negocios. Los negocios y miembros se recorren por bloques para conservar los datos completos necesarios en selectores. La función Edge todavía requiere despliegue y pruebas en staging.
+
+
+Los registros de acceso se paginan en bloques de 50 con cursor `created_at + id`. En el panel técnico, la Edge Function aplica primero el filtro de eventos de acceso (`panel.login`, `log_login`, `panel_open`) y luego el cursor; en el panel de negocio se filtra por `panel.login` y por el negocio correspondiente.
