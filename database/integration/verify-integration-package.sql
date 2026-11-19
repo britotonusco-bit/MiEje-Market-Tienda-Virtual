@@ -311,6 +311,36 @@ BEGIN
      OR to_regclass('public.financial_transactions') IS NULL THEN
     RAISE EXCEPTION 'FALLO: faltan tablas necesarias para conciliar reembolsos.';
   END IF;
+
+  IF position('for update' IN lower(pg_get_functiondef(
+       'public.complete_order_refund(uuid,text,text,text,text)'::regprocedure
+     ))) = 0
+     OR position('payment_status <> ''paid''' IN lower(pg_get_functiondef(
+       'public.complete_order_refund(uuid,text,text,text,text)'::regprocedure
+     ))) = 0
+     OR position('status <> ''cancelled''' IN lower(pg_get_functiondef(
+       'public.complete_order_refund(uuid,text,text,text,text)'::regprocedure
+     ))) = 0
+     OR position('v_payment_count <> 1' IN lower(pg_get_functiondef(
+       'public.complete_order_refund(uuid,text,text,text,text)'::regprocedure
+     ))) = 0
+     OR position('v_paid_amount <> v_order.total' IN lower(pg_get_functiondef(
+       'public.complete_order_refund(uuid,text,text,text,text)'::regprocedure
+     ))) = 0
+     OR position('ft.currency = ''cop''' IN lower(pg_get_functiondef(
+       'public.complete_order_refund(uuid,text,text,text,text)'::regprocedure
+     ))) = 0
+     OR position('r.status = ''approved''' IN lower(pg_get_functiondef(
+       'public.complete_order_refund(uuid,text,text,text,text)'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: el reembolso no valida bloqueo, cancelación aprobada, pago único y conciliación exacta en COP.';
+  END IF;
+
+  IF position('ft.currency=''cop''' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: el reporte de ganancias debe separar explícitamente los movimientos en COP.';
+  END IF;
   IF to_regprocedure('public.complete_order_refund(uuid,text,text,text,text)') IS NULL
      OR NOT has_function_privilege('authenticated',
        'public.complete_order_refund(uuid,text,text,text,text)','EXECUTE')
