@@ -37,6 +37,10 @@
   let productPageIndex = 0;
   let businessContentCursorStack = [null];
   let businessContentPageIndex = 0;
+  let platformFinanceCursorStack = [null];
+  let platformFinancePageIndex = 0;
+  let platformPayrollCursorStack = [null];
+  let platformPayrollPageIndex = 0;
   const statusLabels = {
     received: 'Recibido', confirmed: 'Confirmado', preparing: 'En preparación',
     ready: 'Listo', on_the_way: 'En camino', delivered: 'Entregado', cancelled: 'Cancelado'
@@ -1861,14 +1865,28 @@
     });
   }
 
-  async function loadFinance() {
+  async function loadFinance(reset = true) {
     const target = document.querySelector('#financeContainer');
     if (!target) return;
+    if (reset) {
+      platformFinanceCursorStack = [null]; platformFinancePageIndex = 0;
+      platformPayrollCursorStack = [null]; platformPayrollPageIndex = 0;
+    }
+    const financeCursor = platformFinanceCursorStack[platformFinancePageIndex];
+    const payrollCursor = platformPayrollCursorStack[platformPayrollPageIndex];
     target.innerHTML = '<div class="empty">Cargando finanzas y nómina…</div>';
     try {
-      const result = await callTechnicalFunction({ action: 'list_platform_finance' });
-      const finance = result.financial_records || [];
-      const payroll = result.payroll_records || [];
+      const result = await callTechnicalFunction({
+        action: 'list_platform_finance', limit: PANEL_PAGE_SIZE + 1,
+        before_finance_created_at: financeCursor?.created_at || undefined,
+        before_finance_id: financeCursor?.id || undefined,
+        before_payroll_created_at: payrollCursor?.created_at || undefined,
+        before_payroll_id: payrollCursor?.id || undefined
+      });
+      const financeFetched = result.financial_records || [];
+      const payrollFetched = result.payroll_records || [];
+      const finance = financeFetched.slice(0, PANEL_PAGE_SIZE);
+      const payroll = payrollFetched.slice(0, PANEL_PAGE_SIZE);
       const businessMap = new Map(cachedBusinesses.map(b => [b.id, b.name]));
       populateFinanceBusinessOptions();
       const financeHtml = finance.length
@@ -1876,9 +1894,9 @@
             dateTime(r.occurred_at),
             r.business_id ? businessMap.get(r.business_id) || 'Negocio' : 'Plataforma',
             ({ income: 'Ingreso', expense: 'Gasto', refund: 'Reembolso', adjustment: 'Ajuste' })[r.record_type] || r.record_type,
-            r.description,
+            esc(r.description),
             money(r.amount),
-            r.reference || '—'
+            esc(r.reference || '—')
           ]))
         : '<div class="empty">Todavía no hay movimientos financieros registrados.</div>';
       const payrollHtml = payroll.length
@@ -1893,7 +1911,31 @@
               : '—'}</td>
           </tr>`).join('')}</tbody></table></div>`
         : '<div class="empty">Todavía no hay obligaciones de nómina registradas.</div>';
-      target.innerHTML = `<div class="section-heading"><h3>Movimientos financieros</h3></div>${financeHtml}<div class="section-heading"><h3>Nómina y honorarios</h3></div>${payrollHtml}`;
+      target.innerHTML = `<div class="section-heading"><h3>Movimientos financieros</h3></div>${financeHtml}<div id="platformFinancePager"></div><div class="section-heading"><h3>Nómina y honorarios</h3></div>${payrollHtml}<div id="platformPayrollPager"></div>`;
+      appendCursorPager(target.querySelector('#platformFinancePager'), {
+        page: platformFinancePageIndex + 1, canPrevious: platformFinancePageIndex > 0,
+        hasMore: financeFetched.length > PANEL_PAGE_SIZE,
+        previous: () => { platformFinancePageIndex--; void loadFinance(false); },
+        next: () => {
+          const last = finance[finance.length - 1];
+          if (!last) return;
+          platformFinanceCursorStack[platformFinancePageIndex + 1] = { created_at: last.occurred_at, id: last.id };
+          platformFinancePageIndex++;
+          void loadFinance(false);
+        }
+      });
+      appendCursorPager(target.querySelector('#platformPayrollPager'), {
+        page: platformPayrollPageIndex + 1, canPrevious: platformPayrollPageIndex > 0,
+        hasMore: payrollFetched.length > PANEL_PAGE_SIZE,
+        previous: () => { platformPayrollPageIndex--; void loadFinance(false); },
+        next: () => {
+          const last = payroll[payroll.length - 1];
+          if (!last) return;
+          platformPayrollCursorStack[platformPayrollPageIndex + 1] = { created_at: last.created_at, id: last.id };
+          platformPayrollPageIndex++;
+          void loadFinance(false);
+        }
+      });
       target.querySelectorAll('[data-payroll-action]').forEach(button => button.addEventListener('click', async () => {
         const decision = button.dataset.payrollAction;
         if (decision === 'cancelled' && !window.confirm('¿Cancelar esta obligación de nómina?')) return;
