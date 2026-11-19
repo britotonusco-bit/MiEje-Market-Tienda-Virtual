@@ -793,7 +793,7 @@ BEGIN
     JOIN pg_namespace n ON n.oid=p.pronamespace
     WHERE n.nspname='public'
       AND p.proname='submit_public_job_application'
-      AND pg_get_function_identity_arguments(p.oid) =
+      AND pg_get_function_arguments(p.oid) =
         'p_application_id uuid, p_business_id uuid, p_content_page_id uuid, p_applicant_name text, p_applicant_contact text, p_applicant_message text, p_form_responses jsonb, p_privacy_consent boolean, p_privacy_consent_version text, p_resume_path text'
       AND position('job-application-2026-11-19-v1' IN pg_get_functiondef(p.oid)) > 0
       AND position('transaction_timestamp()' IN pg_get_functiondef(p.oid)) > 0
