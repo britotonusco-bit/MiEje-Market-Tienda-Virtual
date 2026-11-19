@@ -339,3 +339,8 @@ Se amplió el verificador de integración para revisar el contenido de las RPC i
 ### Conciliación de moneda en reportes y reembolsos — 19 nov 2026
 
 El borrador del reporte de ganancias ahora filtra explícitamente en COP tanto los pagos como los reembolsos, evitando sumar movimientos de otra moneda como si fueran pesos colombianos. El verificador de integración inspecciona la RPC de reembolso para exigir bloqueo del pedido, estado cancelado, estado de pago pagado, exactamente un pago completado por el total, moneda COP y solicitud aprobada. También comprueba que el reporte financiero filtre COP. Son comprobaciones del código del borrador y del verificador; no certifican que la base activa tenga estas definiciones.
+
+
+### Gastos pagados y conservación del histórico — 19 nov 2026
+
+Se detectó que la RPC de anulación permitía cambiar a `voided` un gasto que ya estaba pagado. Como el reporte solo suma gastos `active` y `paid`, esa anulación retiraba el importe de periodos históricos sin crear un movimiento compensatorio. Se corrigió el borrador para permitir anular únicamente gastos pendientes. La función de trigger también exige que el gasto permanezca pendiente durante la anulación y el verificador de integración comprueba ambas condiciones. Los gastos pagados deben conservarse; una corrección de un pago ya realizado requiere un procedimiento de reversión auditado que todavía no forma parte de este alcance.
