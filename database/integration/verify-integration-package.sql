@@ -739,7 +739,9 @@ BEGIN
      OR NOT has_column_privilege('authenticated','public.job_applications','admin_notes','UPDATE')
      OR has_column_privilege('authenticated','public.job_applications','business_id','UPDATE')
      OR has_column_privilege('authenticated','public.job_applications','applicant_name','UPDATE')
-     OR has_column_privilege('authenticated','public.job_applications','resume_path','UPDATE') THEN
+     OR has_column_privilege('authenticated','public.job_applications','resume_path','UPDATE')
+     OR has_column_privilege('authenticated','public.job_applications','reviewed_by','UPDATE')
+     OR has_column_privilege('authenticated','public.job_applications','reviewed_at','UPDATE') THEN
     RAISE EXCEPTION 'FALLO: los permisos de revisión permiten campos incorrectos o no habilitan los campos operativos.';
   END IF;
 
