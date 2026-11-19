@@ -18,6 +18,8 @@
 -- Crear una asignación y su auditoría en una sola transacción.
 -- La creación de usuarios y el envío de correo siguen siendo operaciones de Auth
 -- fuera de PostgreSQL; esta RPC solo finaliza la asignación después de Auth.
+DROP FUNCTION IF EXISTS public.create_business_membership_assignment(uuid, uuid, text, text, text, uuid, boolean);
+
 CREATE OR REPLACE FUNCTION public.create_business_membership_assignment(
   p_business_id uuid,
   p_user_id uuid,
