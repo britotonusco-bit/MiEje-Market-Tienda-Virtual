@@ -1433,7 +1433,7 @@
     data.action = 'set_business_status';
     data.status = active ? 'active' : 'suspended';
     delete data.is_active;
-    if (!active && String(data.reason || '').trim().length < 5) { message.textContent = 'El motivo debe tener al menos 5 caracteres.'; return; }
+    if (String(data.reason || '').trim().length < 5) { message.textContent = 'Escribe un motivo de al menos 5 caracteres para registrar el cambio de estado.'; message.className = 'message error'; return; }
     message.textContent = 'Guardando estado y auditoría…';
     try { const result = await callTechnicalFunction(data); message.textContent = result.message || 'Estado actualizado.'; message.className = 'message success'; await loadTechnical(); }
     catch (error) { message.textContent = error.message; message.className = 'message error'; }
