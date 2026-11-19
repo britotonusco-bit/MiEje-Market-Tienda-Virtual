@@ -606,3 +606,6 @@ El catálogo público también agrupa los productos por `business_id` en un `Map
 ### Pedidos administrativos con paginación financiera
 
 El panel administrativo utiliza el RPC borrador `get_business_admin_order_financials_page` para obtener páginas de 50 pedidos más una fila de comprobación. El cursor es `created_at + order_id`; los datos operativos se consultan únicamente para esos IDs y el negocio activo. El SQL debe probarse en staging antes de aplicar en el proyecto activo. Ver `docs/performance-and-scalability-audit.md`.
+
+
+Los listados de postulaciones laborales y solicitudes de cancelación del panel administrativo también usan cursor compuesto `created_at + id`, páginas de 50 y filtro del negocio. Los cambios no alteran el flujo de descarga firmada de hojas de vida ni las RPC de decisión de cancelación. Requieren pruebas en staging.
