@@ -89,3 +89,8 @@ También se confirmó:
 **Revisión estática favorable, pruebas de ejecución pendientes.** No se encontró una razón suficiente para modificar estos SQL en esta pasada; no se hicieron cambios a las migraciones. El siguiente paso seguro es ejecutar el paquete completo en un proyecto de ensayo separado y completar la matriz de pruebas antes de integrar.
 
 No se ejecutó SQL, no se modificó Supabase, no se desplegaron Edge Functions, no se fusionó ningún PR y no se publicó GitHub Pages.
+
+
+## 8. Gastos pagados y reportes históricos
+
+Se detectó que el borrador permitía anular gastos pagados. El reporte financiero suma únicamente gastos activos y pagados; por tanto, anular uno pagado lo retiraba del histórico sin registrar un movimiento compensatorio. La corrección restringe la anulación a gastos pendientes tanto en la RPC como en el trigger de protección. El verificador de integración exige ambas barreras. Para corregir un gasto que ya fue pagado se necesitará un flujo separado de reversión con referencia, motivo y auditoría; no debe simularse mediante anulación.
