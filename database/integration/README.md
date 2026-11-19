@@ -593,3 +593,8 @@ El asesor de Supabase detectó 16 claves foráneas sin índice de cobertura, 16 
 Se añadió el borrador `database/performance/index-optimization-draft.sql` con 14 índices candidatos. Aplicar únicamente en staging, medir antes/después y volver a ejecutar el asesor. La rama también tiene topes de carga en la interfaz (por ejemplo, 1.000 productos públicos y 100 pedidos del panel), pero no una paginación histórica completa en todas las listas. Se recomienda paginación por cursor con orden estable y filtro de negocio.
 
 No se aplicaron índices ni se modificaron políticas o consultas en el proyecto activo. Las pruebas de carga, concurrencia y aislamiento siguen pendientes.
+
+
+### Paginación inicial de paneles
+
+`panel-live.js` implementa páginas de 50 productos para el administrador y 50 pedidos para el empleado mediante cursor compuesto `created_at + id`, con filtro de negocio y orden estable. Los costos de producto se consultan solo para los IDs de la página actual. Los pedidos del administrador y otras listas aún conservan límites anteriores; revisar `docs/performance-and-scalability-audit.md`. Esta implementación no se ha probado en navegador ni staging.
