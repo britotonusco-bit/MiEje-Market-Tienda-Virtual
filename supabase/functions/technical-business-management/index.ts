@@ -498,7 +498,7 @@ Deno.serve(async (req: Request) => {
       const limitValue = Number(body.limit ?? 51);
       const limit = Number.isInteger(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 51;
       let query = admin.from("business_memberships")
-        .select("id,business_id,user_id,role,status,job_title,blocked_reason,created_at,profiles(display_name,avatar_url,phone)")
+        .select("id,business_id,user_id,role,status,job_title,blocked_reason,created_at,profiles(display_name)")
         .eq("business_id", businessId)
         .order("created_at", { ascending: false }).order("id", { ascending: false })
         .limit(limit);
@@ -510,10 +510,7 @@ Deno.serve(async (req: Request) => {
       // La fila adicional solo confirma que existe otra página; no requiere
       // consultar Auth para obtener un correo que no se mostrará en el selector.
       const pageRows = limit > 1 ? rows.slice(0, limit - 1) : rows;
-      const members = await Promise.all(pageRows.map(async (membership: any) => {
-        const { data: authUser } = await admin.auth.admin.getUserById(membership.user_id);
-        return { ...membership, email: authUser?.user?.email ?? null };
-      }));
+      const members = pageRows;
       return reply(200, { ok: true, members, has_more: hasMore });
     }
 
