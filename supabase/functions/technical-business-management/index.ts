@@ -46,6 +46,19 @@ async function findUserByEmail(admin: any, email: string) {
   return { user: null, complete: false };
 }
 
+function createInvitationToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return reply(405, { error: "Método no permitido." });
@@ -579,10 +592,11 @@ Deno.serve(async (req: Request) => {
       const role = textValue(body.role, 40);
       const displayName = textValue(body.display_name, 160);
       const jobTitle = textValue(body.job_title, 100) || (role === "business_admin" ? "Administrador del negocio" : "");
-      const redirectTo = "https://britotonusco-bit.github.io/MiEje-Market-Tienda-Virtual/aceptar-invitacion.html";
+      const redirectBase = "https://britotonusco-bit.github.io/MiEje-Market-Tienda-Virtual/aceptar-invitacion.html";
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(businessId)
-          || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+      if (!uuidPattern.test(businessId)
+          || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)
           || !["business_admin", "employee"].includes(role)
           || displayName.length < 3
           || jobTitle.length < 2) {
@@ -600,113 +614,199 @@ Deno.serve(async (req: Request) => {
       const lookup = await findUserByEmail(admin, email);
       if (!lookup.complete && !lookup.user) {
         return reply(503, {
-          error: "No se pudo completar la búsqueda de la cuenta. No se envió ningún correo ni se asignó acceso. Inténtalo más tarde o revisa el usuario desde Auth.",
+          error: "No se pudo completar la búsqueda de la cuenta. No se envió ningún correo ni se asignó acceso.",
         });
       }
 
-      let targetUser = lookup.user;
-      let invitationSent = false;
+      const { data: pendingInvitation, error: pendingError } = await admin
+        .from("business_invitations")
+        .select("id,user_id,membership_id,status,expires_at")
+        .eq("business_id", businessId)
+        .eq("email_normalized", email)
+        .eq("status", "pending")
+        .maybeSingle();
+      if (pendingError) throw pendingError;
 
-      if (!targetUser) {
-        const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
-          data: { display_name: displayName },
-          redirectTo,
-        });
-        if (inviteError) {
-          console.error("inviteUserByEmail failed:", inviteError);
-          return reply(502, {
-            error: "Supabase no confirmó el envío de la invitación. No se creó la asignación. Revisa Authentication > Users antes de repetir la operación: si aparece una invitación pendiente, el sistema podrá recuperar la asignación sin crear otra cuenta ni enviar otro correo.",
-            invitation_sent: false,
+      if (pendingInvitation) {
+        if (Date.parse(pendingInvitation.expires_at) <= Date.now()) {
+          return reply(409, {
+            error: "La invitación anterior venció. Debe marcarse como vencida y generarse una nueva invitación desde el flujo de renovación.",
+            invitation_pending: false,
+            invitation_id: pendingInvitation.id,
           });
         }
-        targetUser = inviteData?.user ?? null;
-        invitationSent = true;
-      }
-
-      if (!targetUser?.id) {
-        return reply(502, {
-          error: "Auth no devolvió el identificador de la cuenta. No se creó la asignación.",
-          invitation_sent: invitationSent,
+        if (!lookup.user) {
+          return reply(409, {
+            error: "Ya existe una invitación en preparación. No se enviará otro correo para evitar duplicados. Revisa Auth y vuelve a intentar la vinculación.",
+            invitation_pending: true,
+            invitation_id: pendingInvitation.id,
+          });
+        }
+        if (pendingInvitation.user_id && pendingInvitation.user_id !== lookup.user.id) {
+          return reply(409, { error: "La invitación está vinculada a otra cuenta. No se modificó ninguna membresía." });
+        }
+        if (!pendingInvitation.user_id) {
+          const { data: attached, error: attachError } = await admin.rpc("attach_business_invitation_user", {
+            p_invitation_id: pendingInvitation.id,
+            p_user_id: lookup.user.id,
+          });
+          if (attachError) throw attachError;
+          return reply(200, {
+            ok: true,
+            invitation_pending: true,
+            invitation_sent: false,
+            membership: { id: attached?.membership_id, business_id: businessId, user_id: lookup.user.id, role, status: "suspended" },
+            message: "Se recuperó la vinculación de una invitación ya enviada. No se envió otro correo; la persona debe abrir el enlace original y completar la aceptación.",
+          });
+        }
+        return reply(200, {
+          ok: true,
+          invitation_pending: true,
+          invitation_sent: false,
+          membership: { id: pendingInvitation.membership_id, business_id: businessId, user_id: lookup.user.id, role, status: "suspended" },
+          message: "La invitación ya está pendiente. No se envió otro correo ni se creó otra membresía.",
         });
       }
 
-      // Una cuenta preexistente sin correo confirmado no debe recibir una
-      // membresía nueva. El alta de cuentas nuevas sigue el flujo de invitación.
-      // No se intenta reenviar un enlace automáticamente: requiere un flujo
-      // explícito y limitado de reenvío desde Auth.
-      const existingPendingInvite = Boolean(
-        lookup.user && !targetUser.email_confirmed_at && targetUser.invited_at,
-      );
-      if (lookup.user && !targetUser.email_confirmed_at && !existingPendingInvite) {
+      if (lookup.user && !lookup.user.email_confirmed_at) {
+        if (lookup.user.invited_at) {
+          return reply(409, {
+            error: "Esta cuenta tiene una invitación anterior al nuevo proceso seguro y no tiene un registro individual de MiEje. Completa el enlace anterior y luego el técnico podrá asignarla, o solicita soporte para renovar la invitación.",
+            requires_email_confirmation: true,
+            assignment_created: false,
+          });
+        }
         return reply(409, {
-          error: "La cuenta ya existe y todavía no ha confirmado su correo mediante una invitación pendiente. La asignación no se creó. El usuario debe completar primero su verificación.",
-          invitation_sent: false,
+          error: "La cuenta ya existe y todavía no ha confirmado su correo. No se creó una asignación ni se envió otro enlace.",
           requires_email_confirmation: true,
           assignment_created: false,
         });
       }
 
-      // La RPC comprueba el bloqueo global, el negocio activo, la membresía
-      // duplicada y registra la membresía junto con su auditoría atómicamente.
-      // El trigger on_auth_user_created ya crea profiles para usuarios nuevos.
+      if (!lookup.user) {
+        const rawInvitationToken = createInvitationToken();
+        const tokenHash = await sha256Hex(rawInvitationToken);
+        const invitationExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        const { data: prepared, error: prepareError } = await admin.rpc("prepare_business_invitation", {
+          p_business_id: businessId,
+          p_email: email,
+          p_role: role,
+          p_job_title: jobTitle,
+          p_token_hash: tokenHash,
+          p_actor_id: user.id,
+          p_expires_at: invitationExpiresAt,
+        });
+        if (prepareError) {
+          if (prepareError.code === "23505") {
+            return reply(409, { error: "Ya existe una invitación pendiente para ese correo y negocio. No se envió otro correo." });
+          }
+          if (prepareError.code === "42501") return reply(403, { error: "No tienes autorización para crear invitaciones." });
+          if (prepareError.code === "23514" || prepareError.code === "22023") return reply(400, { error: "Los datos de la invitación no son válidos." });
+          throw prepareError;
+        }
+
+        const invitationId = textValue(prepared?.invitation_id, 80);
+        if (!uuidPattern.test(invitationId)) throw new Error("La RPC no devolvió un identificador de invitación válido.");
+        const redirectUrl = new URL(redirectBase);
+        redirectUrl.searchParams.set("invitation_id", invitationId);
+        redirectUrl.searchParams.set("invitation_token", rawInvitationToken);
+
+        const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
+          data: { display_name: displayName },
+          redirectTo: redirectUrl.toString(),
+        });
+        if (inviteError || !inviteData?.user?.id) {
+          const failureCode = textValue((inviteError as any)?.code, 80) || "invite_send_failed";
+          const { error: failedError } = await admin.rpc("mark_business_invitation_failed", {
+            p_invitation_id: invitationId,
+            p_actor_id: user.id,
+            p_failure_code: failureCode,
+          });
+          if (failedError) console.error("Could not mark invitation as failed:", failedError);
+          console.error("inviteUserByEmail failed:", inviteError);
+          return reply(502, {
+            error: "Supabase no confirmó el envío del correo. La invitación quedó registrada como fallida; puedes iniciar una nueva invitación sin duplicar una asignación.",
+            invitation_sent: false,
+          });
+        }
+
+        const { data: attached, error: attachError } = await admin.rpc("attach_business_invitation_user", {
+          p_invitation_id: invitationId,
+          p_user_id: inviteData.user.id,
+        });
+        if (attachError) {
+          console.error("Invitation user attachment failed:", attachError);
+          return reply(503, {
+            error: "El correo fue enviado, pero falta vincular la cuenta a la membresía pendiente. No crees otra invitación: vuelve a intentar la misma operación para reconciliarla.",
+            invitation_sent: true,
+            invitation_pending: true,
+            invitation_id: invitationId,
+            retryable: true,
+          });
+        }
+
+        return reply(201, {
+          ok: true,
+          invitation_id: invitationId,
+          invitation_pending: true,
+          invitation_sent: true,
+          membership: {
+            id: attached?.membership_id,
+            business_id: businessId,
+            user_id: inviteData.user.id,
+            role,
+            status: "suspended",
+            job_title: jobTitle,
+          },
+          requires_email_confirmation: true,
+          message: "Invitación enviada. La membresía permanece bloqueada hasta que la persona verifique el enlace y establezca su contraseña.",
+        });
+      }
+
+      // Una cuenta existente y ya confirmada recibe una asignación directa.
+      // No se genera un enlace de invitación ni se cambia su contraseña.
       const { data, error } = await admin.rpc("create_business_membership_assignment", {
         p_business_id: businessId,
-        p_user_id: targetUser.id,
+        p_user_id: lookup.user.id,
         p_role: role,
         p_job_title: jobTitle,
         p_display_name: displayName,
         p_actor_id: user.id,
-        p_invitation_sent: invitationSent,
-        p_existing_invitation: existingPendingInvite,
+        p_invitation_sent: false,
+        p_existing_invitation: false,
       });
 
       if (error) {
-        if (error.code === "P0002") return reply(404, { error: "No se encontró el negocio.", invitation_sent: invitationSent });
-        if (error.code === "42501") return reply(403, { error: "La cuenta técnica no está autorizada o el usuario de destino tiene un bloqueo global.", invitation_sent: invitationSent });
-        if (error.code === "23503") return reply(409, { error: "La cuenta de Auth existe, pero no tiene un perfil asociado. No se asignó acceso; requiere revisión técnica.", invitation_sent: invitationSent });
-        if (error.code === "23514") return reply(409, { error: error.message, invitation_sent: invitationSent });
-        if (error.code === "22023") return reply(400, { error: "Los datos de la asignación no son válidos.", invitation_sent: invitationSent });
-        console.error("Business membership assignment RPC failed:", error);
-        return reply(503, {
-          error: invitationSent
-            ? "La invitación se envió, pero la asignación no pudo finalizarse. La cuenta ya fue creada. El usuario debe aceptar la invitación y confirmar su correo; después podrás volver a asignar esa misma cuenta. No crees otra cuenta. Si el correo no llega, este panel todavía no tiene una función de reenvío automático y se requiere revisar Auth."
-            : "No se pudo completar la asignación. No se modificó la membresía ni su auditoría.",
-          invitation_sent: invitationSent,
-          retryable: true,
-        });
+        if (error.code === "P0002") return reply(404, { error: "No se encontró el negocio." });
+        if (error.code === "42501") return reply(403, { error: "La cuenta técnica no está autorizada o el usuario de destino tiene un bloqueo global." });
+        if (error.code === "23503") return reply(409, { error: "La cuenta de Auth existe, pero no tiene un perfil asociado. Requiere revisión técnica." });
+        if (error.code === "23514") return reply(409, { error: error.message });
+        if (error.code === "22023") return reply(400, { error: "Los datos de la asignación no son válidos." });
+        throw error;
       }
 
       const result = data as Record<string, any> | null;
       if (!result?.membership) throw new Error("La RPC de asignación no devolvió la membresía.");
-      const requiresEmailConfirmation = !targetUser.email_confirmed_at;
       if (result.already_assigned) {
         return reply(409, {
-          error: requiresEmailConfirmation
-            ? "La cuenta ya tiene una asignación en este negocio, pero todavía debe aceptar la invitación y confirmar su correo."
-            : result.membership.status === "active"
-              ? "Ese usuario ya tiene acceso a este negocio."
-              : "Ese usuario ya tiene una asignación suspendida. Reactiva su acceso desde la gestión de usuarios.",
+          error: result.membership.status === "active"
+            ? "Ese usuario ya tiene acceso a este negocio."
+            : "Ese usuario ya tiene una asignación suspendida. Reactiva su acceso desde la gestión de usuarios.",
           membership: result.membership,
-          invitation_sent: invitationSent,
-          requires_email_confirmation: requiresEmailConfirmation,
+          invitation_sent: false,
+          requires_email_confirmation: false,
         });
       }
 
       return reply(201, {
         ok: true,
         membership: result.membership,
-        invitation_sent: invitationSent,
-        requires_email_confirmation: requiresEmailConfirmation,
-        message: invitationSent
-          ? "Correo de invitación enviado y acceso asignado."
-          : requiresEmailConfirmation && existingPendingInvite
-            ? "Se recuperó la asignación de una invitación que ya existía. No se envió otro correo. La persona debe aceptar la invitación y confirmar su correo."
-            : requiresEmailConfirmation
-              ? "Asignación creada. La cuenta todavía debe confirmar su correo antes de poder iniciar sesión; no se envió otro mensaje."
-              : "Cuenta existente asignada al negocio.",
+        invitation_sent: false,
+        invitation_pending: false,
+        requires_email_confirmation: false,
+        message: "Cuenta existente confirmada asignada al negocio.",
       });
     }
-
     if (action === "update_member_assignment") {
       const membershipId = textValue(body.membership_id, 80);
       const role = textValue(body.role, 40);
