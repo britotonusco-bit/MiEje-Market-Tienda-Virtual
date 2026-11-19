@@ -181,3 +181,17 @@ La aprobación de cancelación bloquea el pedido y la solicitud, solo procesa so
 Se amplió el verificador SQL para detectar que la cancelación no registre por sí misma un reembolso ni marque el pago como devuelto, que la decisión no procese solicitudes ya atendidas y que la reversión de costo requiera un pago completado en COP.
 
 **Pendiente de prueba:** ejecutar en staging escenarios concurrentes y de conciliación con datos controlados. Esta revisión es estática; no confirma que los triggers, índices y RPC estén instalados en la base activa.
+
+### 16. Integridad del libro de movimientos de inventario
+
+La revisión encontró que el historial necesitaba dos protecciones adicionales: impedir modificaciones/borrados incluso desde `service_role` y validar que el signo de la variación coincida con el tipo de movimiento. Se actualizaron los borradores:
+
+- `inventory_movements_direction_check` exige variación negativa para ventas y positiva para inventario inicial y restituciones por cancelación; los ajustes manuales pueden ser positivos o negativos.
+- Un trigger `inventory_movements_immutable` rechaza UPDATE y DELETE. Se revocaron a `service_role` los permisos directos de INSERT, UPDATE, DELETE y TRUNCATE; las inserciones normales las realiza el trigger de productos con privilegios de función.
+- El trigger de inventario ahora rechaza tipos explícitamente inválidos y evita clasificar una venta o restitución con dirección contraria.
+- Se agregó `inventory-ledger-baseline-draft.sql` para registrar una sola línea base de productos preexistentes que todavía no tengan movimientos. Debe ejecutarse después de instalar los triggers y con la tabla de productos bloqueada durante la transacción.
+- Se agregó `verify-inventory-ledger.sql`, consulta de solo lectura que compara las existencias actuales con la suma de variaciones del historial y señala movimientos con dirección incompatible.
+
+**Criterio de conciliación:** para cada producto, `products.inventory` debe coincidir con la suma de `inventory_movements.quantity_delta`. Un resultado distinto de cero requiere investigar el historial y la secuencia de instalación; no se debe inventar un ajuste para ocultar la diferencia.
+
+**Pendiente:** ejecutar primero la migración de movimientos, luego la línea base, y finalmente la consulta de conciliación en staging. También faltan pruebas de concurrencia, rollback y permisos con dos negocios. No se ejecutó ninguna de estas operaciones en la base activa.
