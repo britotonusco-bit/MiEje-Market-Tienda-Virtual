@@ -2288,6 +2288,7 @@ BEGIN
   IF position('for update' IN lower(v_accept)) = 0
      OR position('token_hash' IN lower(v_accept)) = 0
      OR position('blocked_reason' IN lower(v_accept)) = 0
+     OR position('p.is_blocked is false' IN lower(v_accept)) = 0
      OR position('for update' IN lower(v_revoke)) = 0
      OR position('auth_user_deleted' IN lower(v_revoke)) = 0 THEN
     RAISE EXCEPTION 'FALLO: aceptación/revocación no verifican token, bloquean filas o preservan Auth.';
