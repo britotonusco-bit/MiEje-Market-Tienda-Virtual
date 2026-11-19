@@ -535,34 +535,13 @@ WITH CHECK (
 REVOKE UPDATE ON TABLE public.job_applications FROM PUBLIC, anon, authenticated;
 REVOKE UPDATE (status, admin_notes, reviewed_by, reviewed_at)
 ON TABLE public.job_applications FROM PUBLIC, anon, authenticated;
-GRANT UPDATE (status, admin_notes, reviewed_by, reviewed_at)
+GRANT UPDATE (status, admin_notes)
 ON TABLE public.job_applications TO authenticated;
 
--- El actor y la hora de revisión se generan en la base de datos, no se confía
--- en los valores enviados desde el navegador.
-CREATE OR REPLACE FUNCTION private.stamp_job_application_review()
-RETURNS trigger
-LANGUAGE plpgsql
-SECURITY INVOKER
-SET search_path = ''
-AS $function$
-BEGIN
-  IF auth.uid() IS NOT NULL THEN
-    NEW.reviewed_by := auth.uid();
-    NEW.reviewed_at := now();
-  END IF;
-  RETURN NEW;
-END;
-$function$;
-
-REVOKE ALL ON FUNCTION private.stamp_job_application_review()
-FROM PUBLIC, anon, authenticated;
-
+-- La auditoría de reviewed_by/reviewed_at se instala en el paso específico
+-- database/jobs/job-application-review-audit-draft.sql. Así no hay dos
+-- triggers que compitan ni permisos directos sobre metadatos de auditoría.
 DROP TRIGGER IF EXISTS job_applications_stamp_review ON public.job_applications;
-CREATE TRIGGER job_applications_stamp_review
-BEFORE UPDATE OF status, admin_notes ON public.job_applications
-FOR EACH ROW
-EXECUTE FUNCTION private.stamp_job_application_review();
 
 
 -- Impedir trasladar registros entre tiendas cuando una misma cuenta
