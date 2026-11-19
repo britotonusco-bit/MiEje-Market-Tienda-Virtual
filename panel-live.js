@@ -13,6 +13,10 @@
   let employeeOrderCursorStack = [null];
   let businessOrderCursorStack = [null];
   let businessOrderPageIndex = 0;
+  let jobApplicationCursorStack = [null];
+  let jobApplicationPageIndex = 0;
+  let cancellationCursorStack = [null];
+  let cancellationPageIndex = 0;
   let employeeOrderPageIndex = 0;
   let productCursorStack = [null];
   let productPageIndex = 0;
@@ -1488,15 +1492,23 @@
     }));
   }
 
-  async function loadJobApplications() {
+  async function loadJobApplications(reset = true) {
     const target = document.querySelector('#jobApplicationsContainer');
     if (!target) return;
-    const { data, error } = await db.from('job_applications')
+    if (reset) { jobApplicationCursorStack = [null]; jobApplicationPageIndex = 0; }
+    let query = db.from('job_applications')
       .select('id,content_page_id,applicant_name,applicant_contact,applicant_message,form_responses,status,admin_notes,created_at,resume_path')
-      .eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+      .limit(PANEL_PAGE_SIZE + 1);
+    const cursor = jobApplicationCursorStack[jobApplicationPageIndex];
+    if (cursor) query = query.or('created_at.lt.' + cursor.created_at + ',and(created_at.eq.' + cursor.created_at + ',id.lt.' + cursor.id + ')');
+    const { data, error } = await query;
     if (error) { showError(target, error); return; }
-    const rows = data || [];
-    if (!rows.length) { target.innerHTML = '<div class="empty">Todavía no se han recibido postulaciones.</div>'; return; }
+    const fetchedRows = data || [];
+    const rows = fetchedRows.slice(0, PANEL_PAGE_SIZE);
+    if (!rows.length && jobApplicationPageIndex === 0) { target.innerHTML = '<div class="empty">Todavía no se han recibido postulaciones.</div>'; return; }
+    if (!rows.length) target.innerHTML = '<div class="empty">No hay más postulaciones en esta página.</div>';
     target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Postulante</th><th>Contacto</th><th>Mensaje y respuestas</th><th>Hoja de vida</th><th>Estado</th><th>Notas internas</th><th>Guardar</th></tr></thead><tbody>' +
       rows.map(row => {
         const resumeLink = row.resume_path
@@ -1546,6 +1558,19 @@
       else alert('Postulación actualizada.');
       button.disabled = false;
     }));
+    appendCursorPager(target, {
+      page: jobApplicationPageIndex + 1,
+      canPrevious: jobApplicationPageIndex > 0,
+      hasMore: fetchedRows.length > PANEL_PAGE_SIZE,
+      previous: () => { jobApplicationPageIndex--; void loadJobApplications(false); },
+      next: () => {
+        const last = rows[rows.length - 1];
+        if (!last) return;
+        jobApplicationCursorStack[jobApplicationPageIndex + 1] = { created_at: last.created_at, id: last.id };
+        jobApplicationPageIndex++;
+        void loadJobApplications(false);
+      }
+    });
   }
 
   async function initBusinessAi() {
@@ -2125,21 +2150,27 @@
     else await loadEmployeeOrders();
   }
 
-  async function loadCancellationRequests() {
+  async function loadCancellationRequests(reset = true) {
     const target = document.querySelector('#cancellationRequestsContainer');
     if (!target || panel !== 'business_admin') return;
+    if (reset) { cancellationCursorStack = [null]; cancellationPageIndex = 0; }
     target.innerHTML = '<div class="empty">Cargando solicitudes…</div>';
-    const { data, error } = await db.from('order_cancellation_requests')
-      .select('id,order_id,customer_reason,status,forwarded_at,admin_response,orders(order_number,status)')
+    let query = db.from('order_cancellation_requests')
+      .select('id,order_id,customer_reason,status,forwarded_at,admin_response,created_at,orders(order_number,status)')
       .eq('business_id', businessId)
-      .order('created_at', { ascending: false })
-      .limit(100);
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+      .limit(PANEL_PAGE_SIZE + 1);
+    const cursor = cancellationCursorStack[cancellationPageIndex];
+    if (cursor) query = query.or('created_at.lt.' + cursor.created_at + ',and(created_at.eq.' + cursor.created_at + ',id.lt.' + cursor.id + ')');
+    const { data, error } = await query;
     if (error) return showError(target, error);
-    const requests = data || [];
-    if (!requests.length) {
+    const fetchedRows = data || [];
+    const requests = fetchedRows.slice(0, PANEL_PAGE_SIZE);
+    if (!requests.length && cancellationPageIndex === 0) {
       target.innerHTML = '<div class="empty">Todavía no hay solicitudes de cancelación.</div>';
       return;
     }
+    if (!requests.length) target.innerHTML = '<div class="empty">No hay más solicitudes en esta página.</div>';
     const rows = requests.map(r => {
       const order = Array.isArray(r.orders) ? r.orders[0] : r.orders;
       const decision = r.status === 'pending'
@@ -2158,6 +2189,19 @@
     target.innerHTML = tableHtml(['Pedido','Motivo','Estado del pedido','Solicitud','Fecha','Respuesta del administrador','Decisión'], rows);
     target.querySelectorAll('[data-cancellation-decision][data-request]').forEach(button => {
       button.addEventListener('click', () => decideCancellation(button.dataset.request, button.dataset.cancellationDecision, button));
+    });
+    appendCursorPager(target, {
+      page: cancellationPageIndex + 1,
+      canPrevious: cancellationPageIndex > 0,
+      hasMore: fetchedRows.length > PANEL_PAGE_SIZE,
+      previous: () => { cancellationPageIndex--; void loadCancellationRequests(false); },
+      next: () => {
+        const last = requests[requests.length - 1];
+        if (!last) return;
+        cancellationCursorStack[cancellationPageIndex + 1] = { created_at: last.created_at, id: last.id };
+        cancellationPageIndex++;
+        void loadCancellationRequests(false);
+      }
     });
   }
 
