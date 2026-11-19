@@ -259,3 +259,20 @@ Commits de la rama:
 Se modificó `panel-live.js` para que el panel no genere hasta 100 enlaces firmados al cargar la lista. Ahora muestra un botón por CV y solicita el enlace firmado de 300 segundos únicamente cuando el administrador pulsa Descargar. La ventana se abre durante la interacción para evitar que el navegador bloquee la descarga después de la respuesta asíncrona; si la creación del enlace falla, se cierra la ventana temporal. El servidor Storage sigue aplicando la política RLS del bucket.
 
 Verificación estática posterior al guardado: se confirmó que el archivo de la rama contiene el botón `data-download-resume`, la llamada `createSignedUrl(path, 300, ...)`, la apertura previa de ventana y que ya no usa `Promise.all(rows.map(async ...))` para generar enlaces durante la carga. No se ejecutó una prueba de navegador ni se descargó ningún CV real.
+
+
+### Correcciones adicionales de vacantes — 19 nov 2026
+
+Se reforzó el flujo de postulaciones en `correcciones-funcionales`:
+
+- La respuesta de la Edge Function ahora incluye `Cache-Control: no-store, private, max-age=0`, `Pragma: no-cache` y `X-Content-Type-Options: nosniff`. Esto es especialmente importante porque la acción `request_upload` devuelve un token temporal de carga.
+- El formulario y la Edge Function usan la versión `job-application-2026-11-19-v1`. Tanto la preparación de la carga como el envío final rechazan una aceptación ausente o con versión distinta.
+- La migración nueva `database/jobs/job-application-consent-draft.sql` añade `privacy_consent_version` y `privacy_consent_at`, permitiendo conservar los registros históricos sin evidencia versionada.
+- La RPC `submit_public_job_application` valida la versión y guarda la fecha con `pg_catalog.transaction_timestamp()`. Se corrigió también el GRANT para que coincida con la firma de diez argumentos.
+- El verificador integral ahora revisa las tablas/RLS, las políticas de administrador, los permisos de columnas, el bucket privado y las firmas/privilegios de las RPC de postulación y limpieza.
+
+**Límite importante:** la versión identifica el aviso aceptado, pero no convierte automáticamente el texto actual en un aviso jurídicamente aprobado. El contenido, finalidades, base jurídica, periodo de conservación y mecanismo para atender solicitudes de titulares deben revisarse antes de producción. La política de retención de postulaciones y CV sigue sin definirse.
+
+**Dependencia del esquema:** no se encontró en el repositorio una migración completa de creación de `job_applications`, `job_application_upload_sessions` y `job_application_rate_limits`. La nueva migración añade columnas sobre las tablas existentes; no sustituye el DDL base. Recuperar y revisar el esquema aprobado antes de preparar un staging desde cero.
+
+No se aplicó SQL ni se desplegó la Edge Function. No se ejecutaron pruebas dinámicas ni análisis antimalware. Las comprobaciones nuevas del verificador están preparadas para staging.
