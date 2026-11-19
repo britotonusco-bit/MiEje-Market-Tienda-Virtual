@@ -197,3 +197,10 @@ Se añadió cursor compuesto `created_at + id` al listado de eventos de auditor�
 - La búsqueda de nombres de usuario se limita a los actores presentes en la página actual.
 
 La Edge Function modificada está en la rama y todavía no está desplegada. No se ha validado en navegador ni staging; la paginación de registros de acceso específicos continúa con el límite anterior de 100.
+
+
+## 17. Paginación de reembolsos pendientes
+
+El panel administrativo cambió el listado de pedidos cancelados y pagados pendientes de registrar como reembolso para usar `get_business_admin_order_financials_page`. Conserva el filtro de cancelación aprobada y pago confirmado dentro del RPC, y pagina 50 resultados mediante `created_at + order_id`. No se trasladó la decisión financiera al navegador.
+
+El cambio requiere que el RPC nuevo esté aplicado en staging junto con el resto del paquete de finanzas. La función antigua permanece para compatibilidad con otras llamadas.
