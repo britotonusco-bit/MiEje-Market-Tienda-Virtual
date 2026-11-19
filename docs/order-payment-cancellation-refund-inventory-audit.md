@@ -226,3 +226,22 @@ También se amplió el verificador de integración para comprobar que los roles 
 **Resultado de esta pasada:** se corrigió la discrepancia de estados en el panel y se fortaleció el verificador para importes y datos históricos. La revisión del código confirma que el cambio de estado usa comparación con el estado anterior (`.eq('status', currentStatus)`), mientras el trigger del servidor valida la transición permitida. Los importes se entregan al administrador mediante RPC y no mediante escritura directa desde el panel.
 
 **Pendiente de ejecución:** ejecutar el verificador SQL en staging y probar con dos sesiones concurrentes, estados terminales, empleado y administrador de negocios distintos, y cambios de precio/nombre del producto después de una compra. No se ejecutó SQL ni se modificó la base activa en esta revisión.
+
+
+### 19. Seguridad del seguimiento público y respuestas del checkout
+
+Se contrastó el código de seguimiento contra el esquema activo mediante consultas SQL de solo lectura. La columna `orders.public_tracking_token` está declarada `NOT NULL`, su valor predeterminado es `gen_random_uuid()` y existe un índice único sobre esa columna. Esto respalda que el código se genera en PostgreSQL y no se repite entre pedidos. El token debe tratarse como una credencial privada: quien lo tenga puede consultar el estado del pedido sin iniciar sesión.
+
+La Edge Function `track-public-order` solo consulta y devuelve una lista explícita de campos operativos: número de pedido, estado, fechas, referencia de entrega y nombre del negocio. No devuelve nombre/teléfono/correo/dirección del cliente, importes, medio de pago ni productos. Se reforzó para:
+- rechazar cuerpos JSON que no sean objetos o superen 2 KB;
+- aceptar únicamente los estados operativos definidos;
+- limpiar caracteres de control y limitar la referencia de entrega a 500 caracteres;
+- enviar `Cache-Control: no-store`, `Pragma: no-cache`, `X-Content-Type-Options: nosniff` y `Referrer-Policy: no-referrer`.
+
+La Edge Function `create-public-order` ahora limita el cuerpo a 64 KB, exige un objeto JSON y aplica las mismas cabeceras de no almacenamiento en caché. Esto es especialmente importante porque su respuesta incluye el código privado de seguimiento.
+
+**Riesgo pendiente antes de producción:** no se encontró un limitador persistente de solicitudes para `track-public-order`. La alta entropía de UUID reduce la posibilidad de adivinar un token, pero no reemplaza límites de frecuencia, monitoreo ni protección contra abuso. Antes de publicar esta función se debe configurar un límite por IP en la capa perimetral o implementar una tabla/RPC de rate limit en el servidor. No se debe confiar en un encabezado de IP que el cliente pueda falsificar; debe usarse únicamente un encabezado normalizado por el proxy de confianza.
+
+La referencia `delivery_tracking` sigue siendo texto libre que el negocio introduce y que se muestra al titular del token. La limpieza técnica elimina caracteres de control, pero no puede detectar con fiabilidad teléfonos, direcciones u otros datos personales. El panel advierte que no deben introducirse esos datos; falta una prueba de uso y una política operativa para evitar su publicación.
+
+**Estado de validación:** se verificó el esquema activo solo mediante SELECT y se hicieron cambios estáticos en la rama. No se ejecutó SQL, no se desplegaron funciones y no se hicieron pruebas de abuso, caché o carga en staging.
