@@ -1405,6 +1405,11 @@
       const id = button.dataset.saveApplication;
       const status = target.querySelector('[data-application-status="' + id + '"]')?.value;
       const notes = target.querySelector('[data-application-notes="' + id + '"]')?.value || '';
+      const allowedStatuses = new Set(['pending', 'reviewing', 'contacted', 'accepted', 'rejected']);
+      if (!allowedStatuses.has(status) || notes.length > 3000) {
+        alert('El estado o las notas de la postulación no son válidos.');
+        return;
+      }
       button.disabled = true;
       // Solo se actualizan campos operativos autorizados por RLS/GRANT.
       // La identidad y la fecha de revisión no deben venir del navegador.
