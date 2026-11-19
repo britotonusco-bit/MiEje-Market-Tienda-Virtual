@@ -2299,8 +2299,23 @@ BEGIN
       AND indexdef ILIKE '%business_id%'
       AND indexdef ILIKE '%email_normalized%'
       AND indexdef ILIKE '%status = ''pending''%'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE schemaname='public'
+      AND indexname='business_invitations_one_pending_user_idx'
+      AND indexdef ILIKE '%UNIQUE%'
+      AND indexdef ILIKE '%business_id%'
+      AND indexdef ILIKE '%user_id%'
+      AND indexdef ILIKE '%status = ''pending''%'
   ) THEN
-    RAISE EXCEPTION 'FALLO: falta índice único para invitaciones pendientes por negocio/correo.';
+    RAISE EXCEPTION 'FALLO: faltan índices únicos para invitaciones pendientes por negocio/correo y negocio/usuario.';
+  END IF;
+
+  IF position('invitation pending' IN lower(v_revoke)) > 0
+     OR position('delete from public.business_memberships' IN lower(v_revoke)) > 0
+     OR position('update public.business_memberships' IN lower(v_revoke)) = 0
+     OR position('auth_user_deleted' IN lower(v_revoke)) = 0 THEN
+    RAISE EXCEPTION 'FALLO: la revocación debe conservar la cuenta y el historial de la membresía.';
   END IF;
 END
 $verify_invitations$;
