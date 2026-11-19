@@ -387,3 +387,5 @@ La revisión estática confirmó que la Edge Function vincula los pedidos autent
 
 
 La versión admitida actualmente para el consentimiento del checkout es `privacy-2026-11-19-v1`. Debe coincidir entre `index.html`, `app.js`, `supabase/functions/create-public-order/index.ts` y `checkout-idempotency-draft.sql`. El servidor y la RPC rechazan pedidos sin aceptación; PostgreSQL registra la fecha. La verificación posterior exige las tres columnas y la restricción de coherencia. Véase `docs/customer-favorites-history-consent-audit.md`.
+
+La interfaz de cliente está en `cuenta.html` + `cuenta.js`: implementa registro, inicio/cierre de sesión, historial mediante `get_customer_order_history()` y favoritos mediante `customer_favorites`. Las pruebas funcionales de estas rutas deben ejecutarse con dos cuentas distintas y pedidos de dos negocios en staging. No confundir la ausencia de la llamada en `app.js` con ausencia de la interfaz: la pantalla de cuenta tiene su propio script.
