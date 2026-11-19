@@ -288,3 +288,16 @@ El envío de correo de Auth y la asignación de membresía son dos operaciones d
 Esta separación no se puede hacer atómica con una sola transacción PostgreSQL. Antes de producción hace falta un proceso idempotente de reconciliación y un flujo de reenvío limitado y auditado.
 
 No se desplegó la Edge Function ni se aplicó el borrador SQL. La revisión es estática; no se probaron correos, confirmaciones, concurrencia ni restricciones en staging.
+
+
+### Corrección adicional: motivo de reactivación de una tienda
+
+La revisión encontró que el formulario pedía una nota al reactivar una tienda, pero la RPC borraba el motivo de suspensión y también perdía la nota de reactivación antes de escribir la auditoría. Se corrigió el borrador:
+
+- Se conserva el texto de la decisión en una variable separada del motivo de suspensión que queda en la ficha del negocio.
+- Si cambia el estado, el servidor exige un motivo de al menos cinco caracteres.
+- El registro de auditoría guarda `decision_reason` tanto al suspender como al reactivar.
+- La ficha pública/administrativa sigue limpiando el motivo de suspensión y el mensaje público al reactivar.
+- El formulario y la Edge Function también exigen el motivo para cualquier cambio de estado.
+
+El verificador SQL ahora comprueba que la RPC contenga la persistencia de `decision_reason`. No se aplicó el borrador a Supabase activo.
