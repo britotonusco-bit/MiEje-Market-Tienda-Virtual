@@ -528,3 +528,6 @@ La rama contiene la RPC `moderate_business_content_transactionally`, que valida 
 El borrador `database/security/access-block-requests-draft.sql` permite solicitudes solo a administradores del negocio para miembros activos, evita duplicados pendientes por negocio/usuario, y resuelve exclusivamente desde la Edge Function técnica. La aprobación suspende solo la membresía del negocio indicado y protege al último administrador activo. Las resoluciones repetidas producen conflicto sin duplicar el evento.
 
 El verificador ahora comprueba el índice único, los permisos de inserción por columna, SECURITY INVOKER/search_path y la autorización/auditoría de ambas RPC. En la base activa consultada, `access_block_requests` y su RPC no existen; la RPC de moderación tampoco está instalada. La política activa de lectura de `business_content_pages` aún permite acceso global a `platform_owner`, mientras la rama lo limita. No se aplicó SQL.
+
+
+En la versión 6 desplegada, la acción de moderación sí existe, pero hace UPDATE de contenido y luego INSERT de auditoría en dos llamadas separadas; no usa la RPC transaccional. La versión activa tampoco valida AAL2 en la Edge Function. La rama ya sustituye el flujo por `moderate_business_content_transactionally` y exige AAL2. No desplegar hasta probar la migración/RPC y la función en staging.
