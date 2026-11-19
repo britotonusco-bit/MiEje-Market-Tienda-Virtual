@@ -567,14 +567,16 @@ BEGIN
     JOIN pg_namespace n ON n.oid=c.relnamespace
     JOIN pg_proc p ON p.oid=t.tgfoid
     WHERE n.nspname='public' AND c.relname='orders'
-      AND t.tgname='orders_enforce_status_transition'
       AND NOT t.tgisinternal
+      AND (t.tgtype & 1) = 1
+      AND (t.tgtype & 2) = 2
+      AND (t.tgtype & 16) = 16
       AND p.proname='enforce_order_status_transition'
-      AND position('OLD.status' IN pg_get_functiondef(p.oid)) > 0
-      AND position('NEW.status' IN pg_get_functiondef(p.oid)) > 0
+      AND position('old.status' IN lower(pg_get_functiondef(p.oid))) > 0
+      AND position('new.status' IN lower(pg_get_functiondef(p.oid))) > 0
       AND position('subtotal' IN lower(pg_get_functiondef(p.oid))) = 0
       AND position('delivery_fee' IN lower(pg_get_functiondef(p.oid))) = 0
-      AND position('NEW.total' IN lower(pg_get_functiondef(p.oid))) = 0
+      AND position('new.total' IN lower(pg_get_functiondef(p.oid))) = 0
   ) THEN
     RAISE EXCEPTION 'FALLO: falta el trigger de transición de estado o inspecciona campos financieros.';
   END IF;
