@@ -102,3 +102,12 @@ Se amplió `database/integration/verify-integration-package.sql` para revisar ta
 - que los predicados RLS de favoritos incluyan la identidad del usuario y la validación de producto/negocio activo.
 
 **Estado:** auditoría estática y verificación de consistencia del código realizadas. Las pruebas A/B, la exposición de Data API, las consultas reales y la evaluación del verificador SQL siguen pendientes en staging. No se ejecutó SQL ni se modificó el proyecto Supabase activo.
+
+
+## Seguimiento público de pedidos
+
+Se revisó `supabase/functions/track-public-order/index.ts`. La consulta usa un token de seguimiento y la respuesta solo incluye número de pedido, estado, fechas, referencia de seguimiento y nombre del negocio. No devuelve teléfono, dirección, correo, importes ni líneas del pedido. Las respuestas usan `Cache-Control: no-store, private`.
+
+**Punto pendiente de privacidad:** `delivery_tracking` es un campo de texto libre que el negocio puede introducir desde el panel y la función lo publica a quien tenga el token. Debe tratarse como una referencia pública (por ejemplo, un código o enlace de seguimiento), nunca como un espacio para teléfonos, direcciones, nombres de terceros u otros datos personales. Antes de cerrar esta parte, probar el formato que admite el panel y definir una validación/aviso que reduzca el riesgo de publicar información sensible. No se alteró ese comportamiento porque todavía falta confirmar el formato funcional que MiEje quiere permitir.
+
+El token debe seguir siendo impredecible y tratarse como credencial de acceso al seguimiento. La generación del token no quedó acreditada en los archivos revisados de este bloque; verificar su origen y entropía en el esquema instalado y en staging antes de dar por cerrada la prueba de acceso público.
