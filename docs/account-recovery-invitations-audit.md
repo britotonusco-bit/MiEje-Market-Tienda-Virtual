@@ -251,3 +251,36 @@ La operación que falta debe denominarse **revocar asignación pendiente al nego
 No se implementó todavía una acción de revocación. El esquema actual crea la membresía con `status='active'` antes de la aceptación del correo y no conserva un estado inequívoco `invited/pending`. Añadir una operación segura exige primero introducir una señal persistente de invitación pendiente, migrar la creación de membresías y actualizar `resolve-my-access`/los controles de panel para que una membresía pendiente nunca otorgue acceso antes de aceptar. Implementar solo un botón que borre o suspenda una membresía activa podría afectar administradores reales o no distinguir una invitación de una cuenta confirmada.
 
 La revisión queda documentada como brecha funcional. No se modificó Auth, no se borraron cuentas ni membresías y no se desplegaron funciones.
+
+
+## ACC-07 — La sesión de verificación de invitación puede obtener acceso antes de completar la contraseña — 19 nov 2026
+
+### Hallazgo de seguridad
+
+La revisión conjunta de `aceptar-invitacion.js`, `resolve-my-access/index.ts`, `technical-business-management/index.ts` y `login.js` identifica un riesgo alto de orden de activación:
+
+1. `invite_member` crea la membresía con el estado que devuelve `create_business_membership_assignment`; la función no marca la membresía como pendiente de aceptación.
+2. `aceptar-invitacion.js` procesa `verifyOtp({ type: 'invite' })`, obtiene y conserva una sesión autenticada (`persistSession: true`) y solo ejecuta `signOut({ scope: 'local' })` después de cambiar la contraseña.
+3. `resolve-my-access` valida el token con `auth.getUser`, pero para las membresías solo comprueba `status='active'` y que el negocio esté activo. No verifica que el proceso de incorporación haya terminado.
+4. `login.js` invoca `resolve-my-access` tras el inicio de sesión, y los paneles también usan sesiones existentes. Por tanto, la sesión temporal generada al verificar el enlace podría consultar las asignaciones activas antes de que la persona termine de establecer su contraseña. El flujo actual no demuestra que ese acceso anticipado esté bloqueado.
+
+Esto no demuestra que una persona externa haya accedido; es una brecha de diseño reproducible que requiere prueba controlada en staging.
+
+### Corrección necesaria antes de cerrar ACC-07
+
+No basta con ocultar botones ni con confiar en `invited_at` o `email_confirmed_at`: la verificación OTP puede confirmar el correo antes de que se complete el establecimiento de la contraseña, y esos campos por sí solos no representan de forma fiable el final del onboarding.
+
+La solución debe introducir un estado de incorporación persistente y confiable en servidor. Requisitos mínimos:
+
+- Las asignaciones creadas para invitaciones nuevas y recuperadas deben quedar en estado pendiente, sin ser elegibles para `resolve-my-access` ni para las comprobaciones de acceso a panel.
+- La aceptación debe completar la verificación del enlace y el establecimiento de contraseña, y luego llamar a una operación de servidor autenticada que valide el contexto y marque la incorporación como completada.
+- La operación final debe confirmar la identidad desde el JWT validado por Auth, comprobar que la invitación/membresía sigue pendiente y activar únicamente la membresía correspondiente; la escritura y la auditoría deben ser atómicas.
+- Si se revocó la asignación, la operación final no puede reactivarla. Si la cuenta tiene otras membresías, no debe modificarlas.
+- `resolve-my-access`, el registro de acceso y las funciones privadas de autorización deben excluir cualquier membresía pendiente, no solo la pantalla de inicio de sesión.
+- Las cuentas existentes y las membresías históricas requieren una migración de compatibilidad explícita; no deben quedar bloqueadas por un valor por defecto aplicado sin clasificación.
+
+La implementación exige coordinar esquema, RPC, Edge Functions, página de aceptación, validadores de panel y verificador de integración. No se hizo un parche parcial que pudiera dejar una ruta alternativa abierta.
+
+### Estado
+
+**Abierto — severidad alta.** La revisión estática confirmó los cuatro puntos del flujo descrito. No se ejecutó una prueba de navegador con enlace real, no se modificó Auth ni la base activa, y no se desplegó ninguna función. La próxima implementación debe hacerse en la rama de trabajo como un cambio coordinado y probarse con cuentas ficticias en staging antes de considerar cerrado el hallazgo.
