@@ -188,6 +188,20 @@ BEGIN
     RAISE EXCEPTION 'El pedido ya terminó y no puede cancelarse.' USING ERRCODE = '23514';
   END IF;
 
+  -- Pedidos históricos anteriores al libro de inventario pueden contener
+  -- líneas cuyo producto fue eliminado y quedó en NULL por la FK antigua
+  -- ON DELETE SET NULL. No aprobar una cancelación si no se puede restituir
+  -- cada línea: la transacción debe quedar íntegra y requerir revisión manual.
+  IF p_decision = 'approved' AND EXISTS (
+    SELECT 1
+    FROM public.order_items oi
+    WHERE oi.order_id = v_request.order_id
+      AND oi.product_id IS NULL
+  ) THEN
+    RAISE EXCEPTION 'No se puede aprobar esta cancelación automáticamente: el pedido contiene productos sin referencia histórica. Requiere revisión del inventario.'
+      USING ERRCODE = '23514';
+  END IF;
+
   UPDATE public.order_cancellation_requests
   SET status = p_decision,
       decided_by = v_actor,
