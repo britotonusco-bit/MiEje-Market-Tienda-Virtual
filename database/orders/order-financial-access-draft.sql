@@ -457,9 +457,11 @@ BEGIN
     'net_sales',sales-refunds,'delivery_fees_collected',delivery_fees,
     'gross_cost_of_sales',gross_cost,
     'inventory_cost_reversals',inventory_cost_reversals,'cost_of_sales',cost_of_sales,
-    'gross_profit_estimate',sales-refunds-cost_of_sales,
+    'gross_profit_estimate',CASE WHEN missing_cost_lines=0
+      THEN sales-refunds-cost_of_sales ELSE NULL END,
     'paid_expenses',paid_expenses,
-    'net_profit_estimate',sales-refunds-cost_of_sales-paid_expenses,
+    'net_profit_estimate',CASE WHEN missing_cost_lines=0
+      THEN sales-refunds-cost_of_sales-paid_expenses ELSE NULL END,
     'missing_cost_lines',missing_cost_lines,'paid_orders',paid_orders,
     'complete_cost_data',missing_cost_lines=0,
     'basis','Reporte de movimientos por fecha de confirmación en hora Bogotá. Los cobros incluyen productos y domicilio; el costo de entrega debe registrarse como gasto si lo asume el negocio. El costo de productos se reconoce con el pago y se revierte al aprobar una cancelación pagada. Resultado estimado, no estado contable certificado.'
