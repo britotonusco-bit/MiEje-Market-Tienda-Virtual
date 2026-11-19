@@ -673,6 +673,105 @@ BEGIN
     RAISE EXCEPTION 'FALLO: anon tiene una política directa sobre hojas de vida o comprobantes financieros.';
   END IF;
 
+
+  IF to_regclass('public.job_applications') IS NULL
+     OR to_regclass('public.job_application_upload_sessions') IS NULL
+     OR to_regclass('public.job_application_rate_limits') IS NULL THEN
+    RAISE EXCEPTION 'FALLO: faltan tablas base de postulaciones, sesiones de carga o límite de solicitudes.';
+  END IF;
+
+  IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid='public.job_applications'::regclass)
+     OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid='public.job_application_upload_sessions'::regclass)
+     OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid='public.job_application_rate_limits'::regclass) THEN
+    RAISE EXCEPTION 'FALLO: las tablas de postulaciones/sesiones/límites deben tener RLS habilitado.';
+  END IF;
+
+  IF has_table_privilege('anon','public.job_applications','SELECT')
+     OR has_table_privilege('anon','public.job_applications','INSERT')
+     OR has_table_privilege('anon','public.job_applications','UPDATE')
+     OR has_table_privilege('anon','public.job_applications','DELETE')
+     OR has_table_privilege('authenticated','public.job_application_upload_sessions','SELECT')
+     OR has_table_privilege('authenticated','public.job_application_upload_sessions','INSERT')
+     OR has_table_privilege('authenticated','public.job_application_upload_sessions','UPDATE')
+     OR has_table_privilege('authenticated','public.job_application_upload_sessions','DELETE')
+     OR has_table_privilege('anon','public.job_application_upload_sessions','SELECT')
+     OR has_table_privilege('anon','public.job_application_rate_limits','SELECT')
+     OR has_table_privilege('authenticated','public.job_application_rate_limits','SELECT') THEN
+    RAISE EXCEPTION 'FALLO: anon o authenticated conservan acceso directo indebido a postulaciones, sesiones o contadores privados.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='job_applications'
+      AND policyname='job_applications_business_admin_read'
+      AND cmd='SELECT'
+      AND roles @> ARRAY['authenticated']::name[]
+      AND qual ILIKE '%has_business_role%'
+      AND qual ILIKE '%business_admin%'
+      AND qual ILIKE '%business_is_active%'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='job_applications'
+      AND policyname='job_applications_business_admin_update'
+      AND cmd='UPDATE'
+      AND roles @> ARRAY['authenticated']::name[]
+      AND qual ILIKE '%has_business_role%'
+      AND qual ILIKE '%business_admin%'
+      AND with_check ILIKE '%business_is_active%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: las postulaciones no están limitadas por RLS al administrador del negocio activo.';
+  END IF;
+
+  IF NOT has_column_privilege('authenticated','public.job_applications','status','UPDATE')
+     OR NOT has_column_privilege('authenticated','public.job_applications','admin_notes','UPDATE')
+     OR has_column_privilege('authenticated','public.job_applications','business_id','UPDATE')
+     OR has_column_privilege('authenticated','public.job_applications','applicant_name','UPDATE')
+     OR has_column_privilege('authenticated','public.job_applications','resume_path','UPDATE') THEN
+    RAISE EXCEPTION 'FALLO: los permisos de revisión permiten campos incorrectos o no habilitan los campos operativos.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='storage' AND tablename='objects'
+      AND coalesce(qual,'') ILIKE '%job-applications-private%'
+      AND cmd <> 'SELECT'
+  ) OR EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='storage' AND tablename='objects'
+      AND coalesce(with_check,'') ILIKE '%job-applications-private%'
+      AND cmd <> 'SELECT'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: hay políticas de escritura directa sobre el bucket privado de hojas de vida; la carga debe usar URL firmada.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='public'
+      AND p.proname='submit_public_job_application'
+      AND p.prosecdef
+      AND p.proconfig @> ARRAY['search_path=""']::text[]
+      AND has_function_privilege('service_role',p.oid,'EXECUTE')
+      AND NOT has_function_privilege('anon',p.oid,'EXECUTE')
+      AND NOT has_function_privilege('authenticated',p.oid,'EXECUTE')
+  ) THEN
+    RAISE EXCEPTION 'FALLO: la RPC de postulación debe ser SECURITY DEFINER, usar search_path vacío y ejecutarse solo desde service_role.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='public'
+      AND p.proname='list_expired_job_application_upload_sessions'
+      AND p.prosecdef
+      AND p.proconfig @> ARRAY['search_path=""']::text[]
+      AND has_function_privilege('service_role',p.oid,'EXECUTE')
+      AND NOT has_function_privilege('anon',p.oid,'EXECUTE')
+      AND NOT has_function_privilege('authenticated',p.oid,'EXECUTE')
+  ) THEN
+    RAISE EXCEPTION 'FALLO: la RPC de limpieza de sesiones debe estar restringida a service_role.';
+  END IF;
+
   IF NOT has_column_privilege('anon','public.businesses','id','SELECT')
      OR NOT has_column_privilege('anon','public.businesses','status','SELECT') THEN
     RAISE EXCEPTION 'FALLO: anon no tiene las columnas públicas mínimas para resolver contenido publicado.';
