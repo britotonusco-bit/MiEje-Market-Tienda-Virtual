@@ -618,3 +618,8 @@ El listado de auditoría general también incorpora cursor `created_at + id`. El
 
 
 El listado de pedidos cancelados/pagados pendientes de reembolso utiliza el RPC financiero paginado, conserva la condición de cancelación aprobada y pago confirmado, y muestra 50 por página. Depende del nuevo RPC borrador; validar en staging.
+
+
+El historial de pedidos del cliente incorpora `get_customer_order_history_page(integer,timestamptz,uuid)`: máximo 50 pedidos, cursor `created_at + id`, validación de usuario propietario y cuenta activa. La interfaz usa Anterior/Siguiente. La función antigua queda por compatibilidad.
+
+El catálogo público carga negocios, productos y publicaciones por bloques de 500 con conteo exacto y orden estable, sin límites fijos de 200/1.000/500. Todavía acumula los resultados en memoria; no es carga progresiva. Probar con volumen mayor a 500 filas en staging.
