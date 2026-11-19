@@ -272,9 +272,50 @@ BEGIN
     RAISE EXCEPTION 'FALLO: faltan RPCs de finanzas o historial de clientes.';
   END IF;
 
-  IF to_regclass('public.financial_one_completed_payment_per_order') IS NULL
-     OR to_regclass('public.financial_one_completed_refund_per_order') IS NULL THEN
-    RAISE EXCEPTION 'FALLO: falta la protección contra pagos o reembolsos completados duplicados.';
+  IF NOT EXISTS (
+       SELECT 1 FROM pg_indexes
+       WHERE schemaname='public'
+         AND indexname='financial_one_completed_payment_per_order'
+         AND indexdef ILIKE '%UNIQUE INDEX%'
+         AND indexdef ILIKE '%(business_id, order_id)%'
+         AND indexdef ILIKE '%WHERE ((transaction_type = ''payment_received''::text) AND (status = ''completed''::text))%'
+     )
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_indexes
+       WHERE schemaname='public'
+         AND indexname='financial_one_completed_refund_per_order'
+         AND indexdef ILIKE '%UNIQUE INDEX%'
+         AND indexdef ILIKE '%(business_id, order_id)%'
+         AND indexdef ILIKE '%WHERE ((transaction_type = ''refund''::text) AND (status = ''completed''::text))%'
+     ) THEN
+    RAISE EXCEPTION 'FALLO: los índices únicos de pagos y reembolsos no protegen exactamente una operación completada por pedido.';
+  END IF;
+
+  IF position('v_order.total' IN lower(pg_get_functiondef(
+       'public.mark_order_payment_received(uuid,text,text,text)'::regprocedure
+     ))) = 0
+     OR position('''cop''' IN lower(pg_get_functiondef(
+       'public.mark_order_payment_received(uuid,text,text,text)'::regprocedure
+     ))) = 0
+     OR position('completed_at' IN lower(pg_get_functiondef(
+       'public.mark_order_payment_received(uuid,text,text,text)'::regprocedure
+     ))) = 0
+     OR position('payment_status = ''paid''' IN lower(pg_get_functiondef(
+       'public.mark_order_payment_received(uuid,text,text,text)'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: la confirmación de pago no registra total, moneda, fecha efectiva y estado del pedido de forma coherente.';
+  END IF;
+
+  IF position('cancellation_request_id' IN lower(pg_get_functiondef(
+       'public.complete_order_refund(uuid,text,text,text,text)'::regprocedure
+     ))) = 0
+     OR position('completed_at' IN lower(pg_get_functiondef(
+       'public.complete_order_refund(uuid,text,text,text,text)'::regprocedure
+     ))) = 0
+     OR position('payment_status = ''refunded''' IN lower(pg_get_functiondef(
+       'public.complete_order_refund(uuid,text,text,text,text)'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: el reembolso no vincula la cancelación, su fecha efectiva y el estado reembolsado del pedido.';
   END IF;
 
   IF EXISTS (
