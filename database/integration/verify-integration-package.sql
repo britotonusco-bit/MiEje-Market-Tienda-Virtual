@@ -619,6 +619,8 @@ BEGIN
       AND qual ILIKE '%business_admin%'
       AND qual ILIKE '%array_length%'
       AND qual ILIKE '%storage.filename%'
+      AND qual ILIKE '%job_applications%'
+      AND qual ILIKE '%resume_path%'
   ) OR EXISTS (
     SELECT 1 FROM pg_policies
     WHERE schemaname='storage' AND tablename='objects'
@@ -695,8 +697,19 @@ BEGIN
      OR has_table_privilege('authenticated','public.job_application_upload_sessions','UPDATE')
      OR has_table_privilege('authenticated','public.job_application_upload_sessions','DELETE')
      OR has_table_privilege('anon','public.job_application_upload_sessions','SELECT')
+     OR has_table_privilege('anon','public.job_application_upload_sessions','INSERT')
+     OR has_table_privilege('anon','public.job_application_upload_sessions','UPDATE')
+     OR has_table_privilege('anon','public.job_application_upload_sessions','DELETE')
      OR has_table_privilege('anon','public.job_application_rate_limits','SELECT')
-     OR has_table_privilege('authenticated','public.job_application_rate_limits','SELECT') THEN
+     OR has_table_privilege('anon','public.job_application_rate_limits','INSERT')
+     OR has_table_privilege('anon','public.job_application_rate_limits','UPDATE')
+     OR has_table_privilege('anon','public.job_application_rate_limits','DELETE')
+     OR has_table_privilege('authenticated','public.job_application_rate_limits','SELECT')
+     OR has_table_privilege('authenticated','public.job_application_rate_limits','INSERT')
+     OR has_table_privilege('authenticated','public.job_application_rate_limits','UPDATE')
+     OR has_table_privilege('authenticated','public.job_application_rate_limits','DELETE')
+     OR has_table_privilege('authenticated','public.job_applications','INSERT')
+     OR has_table_privilege('authenticated','public.job_applications','DELETE') THEN
     RAISE EXCEPTION 'FALLO: anon o authenticated conservan acceso directo indebido a postulaciones, sesiones o contadores privados.';
   END IF;
 
@@ -756,6 +769,20 @@ BEGIN
       AND NOT has_function_privilege('authenticated',p.oid,'EXECUTE')
   ) THEN
     RAISE EXCEPTION 'FALLO: la RPC de postulación debe ser SECURITY DEFINER, usar search_path vacío y ejecutarse solo desde service_role.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='public'
+      AND p.proname='consume_job_application_rate_limit'
+      AND p.prosecdef
+      AND p.proconfig @> ARRAY['search_path=""']::text[]
+      AND has_function_privilege('service_role',p.oid,'EXECUTE')
+      AND NOT has_function_privilege('anon',p.oid,'EXECUTE')
+      AND NOT has_function_privilege('authenticated',p.oid,'EXECUTE')
+  ) THEN
+    RAISE EXCEPTION 'FALLO: el limitador de postulaciones no está restringido a service_role.';
   END IF;
 
   IF NOT EXISTS (
