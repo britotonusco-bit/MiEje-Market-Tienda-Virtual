@@ -709,6 +709,7 @@
           <section class="assistant-panel">
             <h3>Asistente de ${business.name}</h3>
             <p>Pregunta por productos, precios, horario o ubicación. Las respuestas se basan en la información visible del negocio y su catálogo.</p>
+            <p class="muted">Este asistente es una ayuda básica y no es un canal de soporte ni permite gestionar pedidos o reclamos. No compartas contraseñas, códigos, datos de pago, teléfonos ni direcciones personales.</p>
             <div id="chatMessages" class="chat-messages">
               <div class="chat-bubble">¡Hola! Soy el asistente de ${escapeHtml(business.name)}. ¿Qué deseas saber?</div>
             </div>
