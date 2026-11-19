@@ -53,6 +53,7 @@ CREATE OR REPLACE FUNCTION public.submit_public_job_application(
   p_applicant_message text,
   p_form_responses jsonb,
   p_privacy_consent boolean,
+  p_privacy_consent_version text,
   p_resume_path text
 )
 RETURNS uuid
@@ -72,6 +73,7 @@ BEGIN
      OR length(p_applicant_contact) > 180
      OR length(coalesce(p_applicant_message, '')) > 2000
      OR p_privacy_consent IS DISTINCT FROM true
+     OR p_privacy_consent_version IS DISTINCT FROM 'job-application-2026-11-19-v1'
      OR jsonb_typeof(coalesce(p_form_responses, '{}'::jsonb)) <> 'object' THEN
     RAISE EXCEPTION 'Datos de postulación inválidos.';
   END IF;
@@ -112,11 +114,13 @@ BEGIN
 
   INSERT INTO public.job_applications (
     id, business_id, content_page_id, applicant_name, applicant_contact,
-    applicant_message, form_responses, privacy_consent, resume_path
+    applicant_message, form_responses, privacy_consent,
+    privacy_consent_version, privacy_consent_at, resume_path
   ) VALUES (
     p_application_id, p_business_id, p_content_page_id, btrim(p_applicant_name),
     btrim(p_applicant_contact), nullif(btrim(coalesce(p_applicant_message, '')), ''),
-    coalesce(p_form_responses, '{}'::jsonb), true, p_resume_path
+    coalesce(p_form_responses, '{}'::jsonb), true,
+    p_privacy_consent_version, pg_catalog.transaction_timestamp(), p_resume_path
   );
 
   -- La postulación ya conserva la ruta del archivo. La sesión temporal ya no
@@ -134,7 +138,7 @@ END;
 $function$;
 
 REVOKE ALL ON FUNCTION public.submit_public_job_application(
-  uuid, uuid, uuid, text, text, text, jsonb, boolean, text
+  uuid, uuid, uuid, text, text, text, jsonb, boolean, text, text
 ) FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION public.submit_public_job_application(
@@ -142,5 +146,5 @@ GRANT EXECUTE ON FUNCTION public.submit_public_job_application(
 ) TO service_role;
 
 COMMENT ON FUNCTION public.submit_public_job_application(
-  uuid, uuid, uuid, text, text, text, jsonb, boolean, text
+  uuid, uuid, uuid, text, text, text, jsonb, boolean, text, text
 ) IS 'Registra una postulación y elimina su sesión temporal de carga en la misma transacción. La hoja de vida permanece en Storage y vinculada por resume_path.';
