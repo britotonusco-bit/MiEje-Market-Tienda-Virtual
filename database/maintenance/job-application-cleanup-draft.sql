@@ -142,7 +142,7 @@ REVOKE ALL ON FUNCTION public.submit_public_job_application(
 ) FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION public.submit_public_job_application(
-  uuid, uuid, uuid, text, text, text, jsonb, boolean, text
+  uuid, uuid, uuid, text, text, text, jsonb, boolean, text, text
 ) TO service_role;
 
 COMMENT ON FUNCTION public.submit_public_job_application(
