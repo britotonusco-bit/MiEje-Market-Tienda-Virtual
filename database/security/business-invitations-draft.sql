@@ -178,10 +178,37 @@ BEGIN
   WHERE i.id = p_invitation_id AND i.business_id = v_business_id
   FOR UPDATE;
   IF NOT FOUND OR v_invitation.status <> 'pending'
-     OR v_invitation.expires_at <= pg_catalog.now()
-     OR v_invitation.user_id IS NOT NULL THEN
+     OR v_invitation.expires_at <= pg_catalog.now() THEN
     RAISE EXCEPTION 'La invitación ya no está disponible para vincularse.'
       USING ERRCODE = '23514';
+  END IF;
+
+  IF v_invitation.user_id IS NOT NULL THEN
+    IF v_invitation.user_id IS DISTINCT FROM p_user_id
+       OR v_invitation.membership_id IS NULL THEN
+      RAISE EXCEPTION 'La invitación ya está vinculada a otra cuenta.'
+        USING ERRCODE = '23505';
+    END IF;
+
+    SELECT m.* INTO v_membership
+    FROM public.business_memberships m
+    WHERE m.id = v_invitation.membership_id
+      AND m.business_id = v_business_id
+      AND m.user_id = p_user_id
+      AND m.status = 'suspended'
+      AND m.blocked_reason = 'Invitación pendiente de aceptación'
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'La asignación pendiente ya no está disponible.'
+        USING ERRCODE = '23514';
+    END IF;
+
+    RETURN pg_catalog.jsonb_build_object(
+      'ok', true, 'already_attached', true,
+      'invitation_id', v_invitation.id,
+      'membership_id', v_membership.id, 'status', 'pending'
+    );
   END IF;
 
   IF NOT EXISTS (
