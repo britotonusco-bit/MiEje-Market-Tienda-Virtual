@@ -172,3 +172,10 @@ La consulta de solo lectura confirmó:
 - Las verificaciones fueron de esquema, historial, definiciones y dependencias estáticas. No sustituyen pruebas funcionales reales en staging.
 
 **Dictamen:** el paquete tiene una base técnica aprovechable, pero todavía no está listo para ejecutarse como lote. Los bloqueos principales son la duplicación de cambios de estado, la dependencia de Data API para tablas nuevas, la referencia incorrecta del archivo de Storage, la necesidad de prevalidar restricciones únicas/FK y la falta de pruebas integrales en staging.
+
+
+### 3.11 Costos históricos: privilegios y políticas del esquema activo
+
+La inspección de solo lectura del proyecto independiente confirmó las tablas y restricciones de `product_costs` y `order_item_costs`: cada producto tiene como máximo un costo vigente (PK `product_id`) y cada línea de pedido como máximo un snapshot (PK `order_item_id`), con FKs compuestas que preservan el negocio y pedido de origen. `order_item_costs.unit_cost` admite NULL para costos no registrados; el reporte ya los contabiliza como faltantes.
+
+También se encontraron políticas activas con `is_platform_owner()` en `USING` y `WITH CHECK`, y privilegios de modificación para `service_role` sobre snapshots históricos. El paso 2 del paquete ahora elimina el bypass, bloquea UPDATE/DELETE mediante trigger y revoca UPDATE/DELETE/TRUNCATE a `service_role`. Estas protecciones están pendientes de staging; no se han aplicado a la base independiente.
