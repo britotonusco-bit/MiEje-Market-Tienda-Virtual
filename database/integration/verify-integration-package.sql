@@ -1795,6 +1795,38 @@ BEGIN
     RAISE EXCEPTION 'FALLO: falta la protección transaccional contra retirar al último administrador activo.';
   END IF;
 
+  -- audit_logs debe ser append-only, incluso frente a service_role.
+  IF to_regprocedure('private.prevent_audit_log_mutation()') IS NULL
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_trigger t
+       JOIN pg_class c ON c.oid = t.tgrelid
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       JOIN pg_proc p ON p.oid = t.tgfoid
+       WHERE n.nspname = 'public'
+         AND c.relname = 'audit_logs'
+         AND NOT t.tgisinternal
+         AND p.proname = 'prevent_audit_log_mutation'
+         AND (t.tgtype::integer & 16) = 16
+         AND (t.tgtype::integer & 8) = 8
+     )
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_trigger t
+       JOIN pg_class c ON c.oid = t.tgrelid
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       JOIN pg_proc p ON p.oid = t.tgfoid
+       WHERE n.nspname = 'public'
+         AND c.relname = 'audit_logs'
+         AND NOT t.tgisinternal
+         AND p.proname = 'prevent_audit_log_mutation'
+         AND (t.tgtype::integer & 32) = 32
+     )
+     OR has_table_privilege('service_role','public.audit_logs','UPDATE')
+     OR has_table_privilege('service_role','public.audit_logs','DELETE')
+     OR has_table_privilege('service_role','public.audit_logs','TRUNCATE')
+     OR NOT has_table_privilege('service_role','public.audit_logs','INSERT') THEN
+    RAISE EXCEPTION 'FALLO: audit_logs debe impedir UPDATE/DELETE/TRUNCATE y conservar INSERT de servidor.';
+  END IF;
+
   -- Los perfiles son privados: cada usuario autenticado solo lee su fila.
   IF NOT EXISTS (
     SELECT 1 FROM pg_policies
