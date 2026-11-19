@@ -23,15 +23,21 @@ No se enviaron correos, no se modificaron usuarios de Auth, no se cambiaron ajus
 | AUD-02 | No hay una tabla propia de ciclo de invitación/reenvío/revocación | Media-alta | Pendiente |
 | CFG-01 | Comentario de `config.toml` describía el secreto antiguo de limpieza | Baja / documentación | Corregido solo en la rama |
 
-## ACC-01 — Usuario existente no confirmado
+## ACC-01 — Invitaciones pendientes y cuentas existentes
 
-El flujo técnico busca una cuenta por correo. Si no encuentra usuario, usa `inviteUserByEmail`. Si encuentra una cuenta ya existente, no envía una invitación nueva. Después puede crear la membresía.
+La rama actual distingue tres escenarios:
 
-Cuando la cuenta existente todavía no tiene correo confirmado, la respuesta indica que debe confirmar el correo, pero no reenvía la confirmación. Esto deja un caso operativo incompleto: la membresía existe, pero el usuario puede no tener un enlace vigente para completar el acceso.
+1. **Correo sin cuenta en Auth:** se envía una invitación con `inviteUserByEmail`. Después, la Edge Function intenta crear la membresía mediante `create_business_membership_assignment`, que registra la membresía y la auditoría en una transacción.
+2. **Cuenta existente sin confirmar y con `invited_at`:** se considera una invitación pendiente. No se envía otro correo; se intenta finalizar la asignación mediante la RPC. La RPC es idempotente frente a una membresía ya existente: devuelve `already_assigned` y no duplica la fila.
+3. **Cuenta existente sin confirmar y sin `invited_at`:** la Edge Function rechaza la asignación y no crea una membresía nueva.
 
-**Corrección necesaria:** diseñar un proceso de reenvío controlado para cuentas existentes no confirmadas. Debe comprobar que la dirección pertenece a la invitación/membresía prevista, limitar reenvíos, respetar expiración y no revelar si una cuenta existe a solicitantes no autorizados. No asumir que `inviteUserByEmail` sirve para usuarios ya registrados.
+La membresía de una invitación recién enviada se crea con estado `active` antes de que el destinatario complete la aceptación del correo. El acceso efectivo sigue dependiendo de que la persona pueda completar el flujo de Auth y luego iniciar sesión. Conviene evaluar en staging si el modelo debe distinguir explícitamente membresías invitadas pendientes de las activas; no cambiarlo sin revisar el comportamiento de todos los paneles y consultas de acceso.
 
-**Pruebas obligatorias:** correo nuevo, usuario existente confirmado, usuario existente sin confirmar, invitación vencida, correo no entregado, reenvío repetido, asignación duplicada y negocio suspendido. Usar solo cuentas y correos ficticios en staging.
+**Limitación que permanece:** no existe un flujo de reenvío controlado ni una operación de revocación de invitación desde el panel. Una cuenta con invitación vencida puede quedar sin una ruta operativa para recibir un enlace nuevo.
+
+**Corrección de documentación:** la descripción anterior que decía que cualquier cuenta existente no confirmada podía recibir una membresía sin reenvío era demasiado amplia. El comportamiento depende de `invited_at`, como se detalla arriba.
+
+**Pruebas obligatorias en staging:** cuenta nueva; cuenta confirmada; cuenta existente no confirmada sin invitación; invitación pendiente con membresía ausente; invitación pendiente con membresía ya creada; fallo de RPC después del envío; enlace vencido; reenvío limitado; revocación; negocio suspendido. Usar únicamente cuentas y correos ficticios.
 
 ## ACC-02 — Aceptación de invitación
 
@@ -181,3 +187,17 @@ Se revisó la gestión de membresías y la diferencia entre un bloqueo local y u
 Una consulta SQL estrictamente de solo lectura a Supabase activo confirmó la restricción validada `UNIQUE (business_id, user_id)`. Esto impide que una misma cuenta tenga dos membresías para el mismo negocio. El borrador de verificación ahora exige que esa restricción exista y esté validada, y comprueba la columna `profiles.is_blocked`.
 
 No se modificó la base activa. No se desplegó la Edge Function. Se realizaron 12 comprobaciones estáticas; siguen pendientes las pruebas de navegador, Deno check y pruebas concurrentes en staging.
+
+
+## Revisión de consistencia Auth, perfil y membresía — 19 nov 2026
+
+Se contrastaron la Edge Function técnica, `resolve-my-access`, la página de aceptación de invitación, el inicio de sesión y la RPC de asignación.
+
+- `resolve-my-access` valida el token con Auth, rechaza perfiles inexistentes o bloqueados y solo devuelve membresías activas asociadas a negocios activos.
+- Suspender una membresía no equivale a bloquear el perfil completo. El filtro por usuario y la evaluación individual de cada membresía permiten conservar las demás asignaciones activas.
+- La aceptación exige que el enlace sea de tipo `invite`, verifica el correo, actualiza la contraseña y cierra la sesión local al terminar.
+- La RPC de asignación bloquea el negocio y el perfil, rechaza perfiles globalmente bloqueados y evita duplicar la membresía. La creación de la membresía y su registro de auditoría son atómicos.
+- El envío de correo de Auth y la escritura SQL no pueden ser una sola transacción. Si el correo se envía y la RPC falla, queda una cuenta invitada sin asignación finalizada; el flujo puede intentar completar la asignación después, pero no reenvía el correo.
+- La membresía se crea activa antes de la aceptación del enlace. Esto no equivale a una sesión autenticada, pero es una decisión de ciclo de vida que debe validarse con cuentas ficticias en staging.
+
+No se realizaron cambios en Auth, SQL activo, membresías ni funciones desplegadas. Esta revisión es estática; no prueba entrega de correo, expiración real de enlaces ni comportamiento del proveedor SMTP.
