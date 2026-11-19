@@ -294,22 +294,34 @@
           .in("business_id", businessBatch).eq("is_active", true)
           .order("created_at", { ascending: false }).order("id", { ascending: false }));
         products.push(...batchProducts);
-        const batchContent = await fetchAllVisibleRows(() => client.from('business_content_pages')
-          .select('id,business_id,content_type,title,body,content,created_at', { count: "exact" })
-          .in('business_id', businessBatch)
-          .eq('is_published', true)
-          .eq('moderation_status', 'approved')
-          .order('created_at', { ascending: false }).order('id', { ascending: false }));
-        publicContentPages.push(...batchContent);
+      }
+      try {
+        for (let index = 0; index < activeBusinessIds.length; index += 100) {
+          const businessBatch = activeBusinessIds.slice(index, index + 100);
+          const batchContent = await fetchAllVisibleRows(() => client.from('business_content_pages')
+            .select('id,business_id,content_type,title,body,content,created_at', { count: "exact" })
+            .in('business_id', businessBatch)
+            .eq('is_published', true)
+            .eq('moderation_status', 'approved')
+            .order('created_at', { ascending: false }).order('id', { ascending: false }));
+          publicContentPages.push(...batchContent);
+        }
+      } catch (contentError) {
+        console.warn('No se pudieron cargar las publicaciones públicas.', contentError);
       }
       // La Edge Function limita cada solicitud a 200 negocios.
-      for (let index = 0; index < activeBusinessIds.length; index += 200) {
-        const businessBatch = activeBusinessIds.slice(index, index + 200);
-        const { data: paymentData, error: paymentError } = await client.functions.invoke("get-public-storefront", {
-          body: { business_ids: businessBatch }
-        });
-        if (paymentError) throw paymentError;
-        paymentMethods.push(...(paymentData?.payment_methods || []));
+      try {
+        for (let index = 0; index < activeBusinessIds.length; index += 200) {
+          const businessBatch = activeBusinessIds.slice(index, index + 200);
+          const { data: paymentData, error: paymentError } = await client.functions.invoke("get-public-storefront", {
+            body: { business_ids: businessBatch }
+          });
+          if (paymentError) throw paymentError;
+          paymentMethods.push(...(paymentData?.payment_methods || []));
+        }
+      } catch (paymentError) {
+        paymentMethods = [];
+        console.warn("No se pudieron cargar las formas de pago públicas.", paymentError);
       }
       const productsByBusiness = new Map();
       products.forEach(product => {
