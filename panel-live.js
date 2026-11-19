@@ -755,6 +755,9 @@
           .in('id', orderIds)
       : { data: [], error: null };
     if (ordersResult.error) return showError(target, ordersResult.error);
+    if ((ordersResult.data || []).length !== orderIds.length) {
+      return showError(target, new Error('No se pudieron recuperar los datos operativos de todos los pedidos de esta página.'));
+    }
     const orderById = new Map((ordersResult.data || []).map(order => [order.id, order]));
     const merged = pageRows.map(finance => {
       const order = orderById.get(finance.order_id);
