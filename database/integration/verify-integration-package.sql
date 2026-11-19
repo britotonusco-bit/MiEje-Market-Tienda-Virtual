@@ -345,6 +345,44 @@ BEGIN
      ))) = 0 THEN
     RAISE EXCEPTION 'FALLO: el reporte de ganancias debe separar explícitamente los movimientos en COP.';
   END IF;
+
+  -- Conciliar cada clase de movimiento por su fecha efectiva local:
+  -- cobros/reembolsos por completed_at, cancelación por decided_at y gastos por paid_at.
+  IF position('ft.completed_at >=' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0
+     OR position('ft.completed_at <' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0
+     OR position('be.paid_at >=' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0
+     OR position('be.paid_at <' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0
+     OR position('cr.decided_at >=' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0
+     OR position('cr.decided_at <' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0
+     OR position('america/bogota' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: cobros, reembolsos, cancelaciones o gastos no se filtran por su fecha efectiva en hora Bogotá.';
+  END IF;
+
+  -- Las cancelaciones aprobadas no pueden duplicar la reversión de costo.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE schemaname='public'
+      AND indexname='order_cancellation_one_approved_per_order'
+      AND indexdef ILIKE '%UNIQUE INDEX%'
+      AND indexdef ILIKE '%(business_id, order_id)%'
+      AND indexdef ILIKE '%WHERE (status = ''approved''::text)%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: no está garantizada una sola cancelación aprobada por pedido.';
+  END IF;
   IF to_regprocedure('public.complete_order_refund(uuid,text,text,text,text)') IS NULL
      OR NOT has_function_privilege('authenticated',
        'public.complete_order_refund(uuid,text,text,text,text)','EXECUTE')
