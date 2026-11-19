@@ -166,20 +166,46 @@ Deno.serve(async (req: Request) => {
     if (!isOwner) return reply(403, { error: "Solo el administrador técnico puede realizar esta acción." });
 
     if (action === "list_platform_finance") {
-      const [financeResult, payrollResult] = await Promise.all([
-        admin.from("platform_financial_records")
-          .select("id,business_id,record_type,description,amount,currency,occurred_at,reference,created_at")
-          .order("occurred_at", { ascending: false }).limit(100),
-        admin.from("payroll_records")
-          .select("id,business_id,payee_name,description,amount,currency,status,due_date,paid_at,payment_reference,created_at,updated_at")
-          .order("created_at", { ascending: false }).limit(100),
-      ]);
+      const limitValue = Number(body.limit ?? 51);
+      const limit = Number.isInteger(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 51;
+      const financeCursor = {
+        createdAt: typeof body.before_finance_created_at === "string" ? body.before_finance_created_at : "",
+        id: textValue(body.before_finance_id, 80),
+      };
+      const payrollCursor = {
+        createdAt: typeof body.before_payroll_created_at === "string" ? body.before_payroll_created_at : "",
+        id: textValue(body.before_payroll_id, 80),
+      };
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const timestampPattern = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|[+-]\\d{2}:\\d{2})$/;
+      for (const cursor of [financeCursor, payrollCursor]) {
+        if (Boolean(cursor.createdAt) !== Boolean(cursor.id) ||
+            (cursor.createdAt && (!timestampPattern.test(cursor.createdAt) || !Number.isFinite(Date.parse(cursor.createdAt)))) ||
+            (cursor.id && !uuidPattern.test(cursor.id))) {
+          return reply(400, { error: "El cursor de finanzas o nómina no es válido o está incompleto." });
+        }
+      }
+      let financeQuery = admin.from("platform_financial_records")
+        .select("id,business_id,record_type,description,amount,currency,occurred_at,reference,created_at")
+        .order("occurred_at", { ascending: false }).order("id", { ascending: false }).limit(limit);
+      if (financeCursor.createdAt && financeCursor.id) {
+        financeQuery = financeQuery.or(`occurred_at.lt.${financeCursor.createdAt},and(occurred_at.eq.${financeCursor.createdAt},id.lt.${financeCursor.id})`);
+      }
+      let payrollQuery = admin.from("payroll_records")
+        .select("id,business_id,payee_name,description,amount,currency,status,due_date,paid_at,payment_reference,created_at,updated_at")
+        .order("created_at", { ascending: false }).order("id", { ascending: false }).limit(limit);
+      if (payrollCursor.createdAt && payrollCursor.id) {
+        payrollQuery = payrollQuery.or(`created_at.lt.${payrollCursor.createdAt},and(created_at.eq.${payrollCursor.createdAt},id.lt.${payrollCursor.id})`);
+      }
+      const [financeResult, payrollResult] = await Promise.all([financeQuery, payrollQuery]);
       if (financeResult.error) throw financeResult.error;
       if (payrollResult.error) throw payrollResult.error;
       return reply(200, {
         ok: true,
         financial_records: financeResult.data ?? [],
         payroll_records: payrollResult.data ?? [],
+        finance_has_more: (financeResult.data ?? []).length === limit,
+        payroll_has_more: (payrollResult.data ?? []).length === limit,
       });
     }
 
