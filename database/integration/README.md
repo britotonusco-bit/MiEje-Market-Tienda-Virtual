@@ -31,12 +31,12 @@ Cada archivo es una unidad independiente. Ejecutar uno a uno, revisar el resulta
 | 6 | `database/security/access-block-requests-draft.sql` | Requiere helpers, membresías y la protección de último administrador del paso 2. |
 | 7 | `database/security/storage-policy-fix.sql` | Corrige políticas de Storage usando los helpers y el modelo de permisos del paso 2. |
 | 8 | `database/customers/customer-account-migration.sql` | Crea `orders.customer_user_id` y favoritos; debe preceder al checkout idempotente y al historial. |
-| 9 | `database/inventory/inventory-movements-draft.sql` | Crea el registro de movimientos y el RPC de ajuste; cambia la FK de productos en líneas de pedido a `ON DELETE RESTRICT`. |
+| 9 | `database/inventory/inventory-movements-draft.sql` | Crea el registro de movimientos y el RPC de ajuste; conserva referencias de productos en pedidos, valida que cada línea pertenezca al mismo negocio y protege los snapshots históricos. |
 | 10 | `database/security/business-payment-methods-atomic-draft.sql` | Después del paso 2; revoca escrituras directas de métodos de pago y exige usar su RPC desde el panel. |
 | 11 | `database/inventory/checkout-inventory-lock-order-draft.sql` | Después de inventario y límites de negocio; sustituye el checkout base y etiqueta movimientos de venta. |
 | 12 | `database/orders/checkout-idempotency-draft.sql` | Depende de clientes, métodos de pago, `create_public_order` del paso 11 y `extensions.digest`. Configura las políticas del historial/favoritos e incorpora idempotencia y límite de solicitudes; el paso 8 es la única fuente de verdad del esquema de clientes. |
 | 13 | `database/orders/order-financial-access-draft.sql` | Después del checkout; usa `customer_user_id` y `payment_method_name`, y restringe columnas financieras para roles autenticados. |
-| 14 | `database/orders/cancellation-flow-draft.sql` | Depende de estados canónicos, helpers, tabla de solicitudes y trigger; requiere inventario para registrar devoluciones. |
+| 14 | `database/orders/cancellation-flow-draft.sql` | Depende de estados canónicos, helpers, tabla de solicitudes y trigger; requiere inventario para registrar devoluciones y bloquea cancelaciones automáticas de pedidos históricos con productos sin referencia. |
 | 15 | `database/orders/refund-flow-draft.sql` | Después de cancelaciones y finanzas; registra el reembolso externo ya realizado, no transfiere dinero. |
 | 16 | `database/finance/expense-receipts-storage-draft.sql` | Crea el bucket privado requerido por la RPC de comprobantes. |
 | 17 | `database/finance/business-expense-audit-draft.sql` | Después del paso 16 y de los límites de negocio; sustituye escrituras directas por RPC auditadas. |
@@ -454,3 +454,5 @@ El RPC `get_business_admin_profit_report` ahora devuelve `NULL` en las estimacio
 
 
 **Protección del costo histórico:** el paso 2 también instala `order_item_costs_immutable` y revoca UPDATE, DELETE y TRUNCATE a `service_role` sobre los snapshots de costo. El checkout crea el snapshot mediante INSERT; ningún flujo normal debe reescribirlo o borrarlo.
+
+**Pedidos históricos:** el paso 9 instala `order_items_history_guard`. Las líneas nuevas deben conservar un producto del mismo negocio que el pedido; sus snapshots no pueden modificarse ni eliminarse. La FK `order_items_product_id_fkey` usa `ON DELETE RESTRICT`, por lo que los productos vendidos deben desactivarse en lugar de borrarse. Las líneas antiguas cuyo `product_id` ya sea NULL se conservan para consulta; el paso 14 impide aprobar automáticamente su cancelación porque no es posible reponer inventario con certeza. Deben revisarse manualmente antes de cualquier resolución.
