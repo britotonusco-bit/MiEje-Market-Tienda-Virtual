@@ -240,3 +240,7 @@ El servidor valida que fecha e ID del cursor lleguen juntos, que la fecha sea IS
 
 ### Validación pendiente
 Cambios solo en la rama. No se ha desplegado la Edge Function ni probado con grandes volúmenes en staging. Los listados de negocios y miembros se consultan en bloques pero se acumulan en memoria para alimentar selectores y estadísticas; el render de negocios sí se pagina localmente. Una siguiente optimización sería convertir esos selectores en búsquedas remotas/autocompletado para no cargar todas las cuentas.
+
+
+### 19.1. Registros de acceso
+El listado de accesos también usa cursor `created_at + id`, con 50 filas visibles por página. La Edge Function filtra los tres eventos de apertura/inicio de sesión admitidos antes de aplicar el cursor, evitando que eventos administrativos no relacionados consuman la página y oculten accesos antiguos. El panel de negocio pagina `panel.login` con el filtro de negocio ya aplicado.
