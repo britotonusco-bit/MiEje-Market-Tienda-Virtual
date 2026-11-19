@@ -2229,6 +2229,7 @@ DECLARE
   v_role_helper text;
   v_accept text;
   v_revoke text;
+  v_reactivate text;
 BEGIN
   IF to_regclass('public.business_invitations') IS NULL THEN
     RAISE EXCEPTION 'FALLO: falta public.business_invitations.';
@@ -2285,14 +2286,19 @@ BEGIN
   v_revoke := pg_get_functiondef(
     'public.revoke_business_invitation(uuid,uuid,text)'::regprocedure
   );
+  v_reactivate := pg_get_functiondef(
+    'public.reactivate_business_membership(uuid,text,uuid)'::regprocedure
+  );
 
   IF position('for update' IN lower(v_accept)) = 0
      OR position('token_hash' IN lower(v_accept)) = 0
      OR position('blocked_reason' IN lower(v_accept)) = 0
      OR position('p.is_blocked is false' IN lower(v_accept)) = 0
      OR position('for update' IN lower(v_revoke)) = 0
-     OR position('auth_user_deleted' IN lower(v_revoke)) = 0 THEN
-    RAISE EXCEPTION 'FALLO: aceptación/revocación no verifican token, bloquean filas o preservan Auth.';
+     OR position('auth_user_deleted' IN lower(v_revoke)) = 0
+     OR position('invitación pendiente de aceptación' IN lower(v_reactivate)) = 0
+     OR position('invitación revocada' IN lower(v_reactivate)) = 0 THEN
+    RAISE EXCEPTION 'FALLO: aceptación/revocación no verifican token, bloquean filas o preservan Auth; reactivación genérica no debe saltar onboarding.';
   END IF;
 
   IF NOT EXISTS (
