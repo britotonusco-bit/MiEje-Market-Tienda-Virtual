@@ -258,3 +258,21 @@ Los movimientos financieros de plataforma y los registros de nómina dejaron el 
 - Nómina: `created_at + id`.
 
 El panel muestra 50 filas por página en cada tabla y mantiene independientes los cursores para avanzar por finanzas sin mover nómina, y viceversa. El endpoint valida pares completos de cursor, fecha ISO parseable e ID UUID, y conserva la autorización técnica/MFA ya existente.
+
+
+## 18. Paginación de selectores de administradores y empleados
+
+Se corrigieron los selectores de cuentas del panel técnico y del administrador de negocio:
+
+- El panel técnico ya no recorre todas las membresías del negocio para construir cada selector.
+- Los selectores de suspensión/reactivación y de cambio de rol/cargo consultan una página de hasta 50 cuentas.
+- Los controles Anterior/Siguiente permiten recorrer las demás páginas sin conservar todas las cuentas en memoria.
+- La consulta mantiene el filtro exacto por `business_id` y orden estable `created_at DESC, id DESC`.
+- El selector del administrador para solicitar un bloqueo consulta solo cuentas activas del mismo negocio, excluye al administrador actual y usa cursor compuesto.
+- La función técnica devuelve como máximo 50 cuentas enriquecidas con correo; la fila adicional se usa únicamente para informar si existe otra página, evitando una consulta innecesaria a Auth.
+
+La paginación de los selectores no cambia la autorización de las operaciones. El servidor y RLS siguen siendo responsables de validar el negocio, el rol y la cuenta objetivo.
+
+**Pendiente de validación:** probar en staging con más de 50 membresías por negocio, varias cuentas con la misma marca temporal, cuentas suspendidas y dos negocios distintos. Verificar que cambiar de negocio reinicie el cursor y que las operaciones sigan usando el identificador de membresía o usuario correcto.
+
+No se desplegó la Edge Function ni se modificó la base activa.
