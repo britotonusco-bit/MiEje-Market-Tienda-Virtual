@@ -1470,6 +1470,26 @@ BEGIN
     RAISE EXCEPTION 'FALLO: el historial de inventario no está limitado a administradores de negocios activos.';
   END IF;
 
+  IF position(
+    'product_name' IN lower(pg_get_functiondef(
+      'public.create_public_order(uuid,text,text,text,text,text,text,jsonb)'::regprocedure
+    ))
+  ) = 0 OR position(
+    'unit_price' IN lower(pg_get_functiondef(
+      'public.create_public_order(uuid,text,text,text,text,text,text,text,jsonb)'::regprocedure
+    ))
+  ) = 0 THEN
+    -- La firma de checkout tiene 8 argumentos; la segunda comprobación usa
+    -- una firma de 9 argumentos solo si existiera una variante legacy.
+    IF position(
+      'unit_price' IN lower(pg_get_functiondef(
+        'public.create_public_order(uuid,text,text,text,text,text,text,jsonb)'::regprocedure
+      ))
+    ) = 0 THEN
+      RAISE EXCEPTION 'FALLO: el checkout no conserva nombre y precio como snapshot de la línea de pedido.';
+    END IF;
+  END IF;
+
   -- Checkout y cancelación: bloqueo determinista y restitución atómica.
   IF to_regprocedure('public.create_public_order(uuid,text,text,text,text,text,text,jsonb)') IS NULL THEN
     RAISE EXCEPTION 'FALLO: falta la RPC base de checkout con control de inventario.';
