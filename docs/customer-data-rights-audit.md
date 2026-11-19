@@ -344,3 +344,23 @@ El borrador del reporte de ganancias ahora filtra explícitamente en COP tanto l
 ### Gastos pagados y conservación del histórico — 19 nov 2026
 
 Se detectó que la RPC de anulación permitía cambiar a `voided` un gasto que ya estaba pagado. Como el reporte solo suma gastos `active` y `paid`, esa anulación retiraba el importe de periodos históricos sin crear un movimiento compensatorio. Se corrigió el borrador para permitir anular únicamente gastos pendientes. La función de trigger también exige que el gasto permanezca pendiente durante la anulación y el verificador de integración comprueba ambas condiciones. Los gastos pagados deben conservarse; una corrección de un pago ya realizado requiere un procedimiento de reversión auditado que todavía no forma parte de este alcance.
+
+
+## Revisión de acceso a perfiles y membresías — 19 nov 2026
+
+Se consultaron en modo solo lectura las políticas y privilegios del proyecto Supabase activo `cqixlrwbqatbhzmpygiz`.
+
+**Hallazgos activos:**
+- `profiles` tiene RLS habilitado y no concede SELECT a `anon`. Su política `profiles_select_self_or_owner` permite que el propietario técnico lea todos los perfiles, además del suyo.
+- `business_memberships` tiene RLS habilitado y no concede SELECT a `anon`. Su política activa `memberships_select_self_admin_owner` permite lectura de todas las membresías al propietario técnico, además de la cuenta propia y administradores de negocio.
+- `authenticated` no tiene UPDATE de tabla completo sobre `profiles`, pero sí tiene UPDATE por columna para `display_name`, `phone` y `avatar_url`. No tiene UPDATE sobre `platform_role`, `is_blocked` ni `blocked_reason`.
+- La política de UPDATE del perfil limita la fila a `id = auth.uid()`.
+
+**Corrección preparada en `correcciones-funcionales`:**
+- La política de lectura de perfiles se sustituye por `profiles_select_self`, limitada al usuario autenticado.
+- La lectura de membresías queda limitada a la propia cuenta o al administrador activo del negocio. Se elimina el bypass global del propietario técnico.
+- La gestión técnica de usuarios y membresías debe continuar por Edge Functions/RPC de servidor, con operaciones explícitas y sin conceder acceso general a datos personales.
+
+**Verificador:** se añadieron comprobaciones para exigir las políticas anteriores y asegurar que `authenticated` no pueda modificar `platform_role`, `is_blocked` ni `blocked_reason`.
+
+**Pendiente:** ejecutar el paquete en staging y probar dos usuarios de negocios distintos, un cliente sin membresía y el propietario técnico. La base activa no se modificó; las políticas nuevas son borradores en GitHub.
