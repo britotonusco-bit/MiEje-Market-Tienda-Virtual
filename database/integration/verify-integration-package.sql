@@ -772,6 +772,35 @@ BEGIN
     RAISE EXCEPTION 'FALLO: la RPC de limpieza de sesiones debe estar restringida a service_role.';
   END IF;
 
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='job_applications'
+      AND column_name='privacy_consent_version' AND data_type='text'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='job_applications'
+      AND column_name='privacy_consent_at' AND data_type='timestamp with time zone'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid='public.job_applications'::regclass
+      AND conname='job_applications_privacy_consent_evidence_check'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: falta la evidencia versionada y fechada del consentimiento de postulaciones.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='public'
+      AND p.proname='submit_public_job_application'
+      AND pg_get_function_identity_arguments(p.oid) =
+        'p_application_id uuid, p_business_id uuid, p_content_page_id uuid, p_applicant_name text, p_applicant_contact text, p_applicant_message text, p_form_responses jsonb, p_privacy_consent boolean, p_privacy_consent_version text, p_resume_path text'
+      AND position('job-application-2026-11-19-v1' IN pg_get_functiondef(p.oid)) > 0
+      AND position('transaction_timestamp()' IN pg_get_functiondef(p.oid)) > 0
+  ) THEN
+    RAISE EXCEPTION 'FALLO: la RPC de postulaciones no valida la versión actual o no genera la fecha en PostgreSQL.';
+  END IF;
+
   IF NOT has_column_privilege('anon','public.businesses','id','SELECT')
      OR NOT has_column_privilege('anon','public.businesses','status','SELECT') THEN
     RAISE EXCEPTION 'FALLO: anon no tiene las columnas públicas mínimas para resolver contenido publicado.';
