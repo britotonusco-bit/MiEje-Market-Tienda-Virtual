@@ -18,6 +18,20 @@ function textValue(value: unknown, max = 500): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
+
+function parsePageCursor(body: Record<string, unknown>) {
+  const createdAt = typeof body.before_created_at === "string" ? body.before_created_at : "";
+  const id = textValue(body.before_id, 80);
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const timestampPattern = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|[+-]\\d{2}:\\d{2})$/;
+  if (Boolean(createdAt) !== Boolean(id) ||
+      (createdAt && (!timestampPattern.test(createdAt) || !Number.isFinite(Date.parse(createdAt)))) ||
+      (id && !uuidPattern.test(id))) {
+    return { error: "El cursor de paginación no es válido o está incompleto." };
+  }
+  return { createdAt: createdAt || null, id: id || null };
+}
+
 async function findUserByEmail(admin: any, email: string) {
   for (let page = 1; page <= 20; page++) {
     const result = await admin.auth.admin.listUsers({ page, perPage: 1000 });
@@ -366,11 +380,21 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "list_businesses") {
-      const { data, error } = await admin.from("businesses")
+      const cursor = parsePageCursor(body);
+      if (cursor.error) return reply(400, { error: cursor.error });
+      const limitValue = Number(body.limit ?? 51);
+      const limit = Number.isInteger(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 51;
+      let query = admin.from("businesses")
         .select("id,name,slug,category,status,suspension_reason,public_suspension_message,created_at")
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false }).order("id", { ascending: false })
+        .limit(limit);
+      if (cursor.createdAt && cursor.id) {
+        query = query.or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`);
+      }
+      const { data, error } = await query;
       if (error) throw error;
-      return reply(200, { ok: true, businesses: data ?? [] });
+      const rows = data ?? [];
+      return reply(200, { ok: true, businesses: rows, has_more: rows.length === limit });
     }
 
     if (action === "list_audit_logs") {
@@ -420,29 +444,42 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "list_content_moderation") {
-      const limitValue = Number(body.limit ?? 100);
-      const limit = Number.isInteger(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 100;
-      const { data, error } = await admin.from("business_content_pages")
+      const cursor = parsePageCursor(body);
+      if (cursor.error) return reply(400, { error: cursor.error });
+      const limitValue = Number(body.limit ?? 51);
+      const limit = Number.isInteger(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 51;
+      let query = admin.from("business_content_pages")
         .select("id,business_id,content_type,title,body,is_published,moderation_status,created_at,businesses(name)")
-        .order("created_at", { ascending: false })
+        .order("created_at", { ascending: false }).order("id", { ascending: false })
         .limit(limit);
+      if (cursor.createdAt && cursor.id) query = query.or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`);
+      const { data, error } = await query;
       if (error) throw error;
-      return reply(200, { ok: true, contents: data ?? [] });
+      const rows = data ?? [];
+      return reply(200, { ok: true, contents: rows, has_more: rows.length === limit });
     }
 
     if (action === "list_business_members") {
       const businessId = textValue(body.business_id, 80);
       if (!businessId) return reply(400, { error: "Falta el identificador del negocio." });
-      const { data, error } = await admin.from("business_memberships")
+      const cursor = parsePageCursor(body);
+      if (cursor.error) return reply(400, { error: cursor.error });
+      const limitValue = Number(body.limit ?? 51);
+      const limit = Number.isInteger(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 51;
+      let query = admin.from("business_memberships")
         .select("id,business_id,user_id,role,status,job_title,blocked_reason,created_at,profiles(display_name,avatar_url,phone)")
         .eq("business_id", businessId)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false }).order("id", { ascending: false })
+        .limit(limit);
+      if (cursor.createdAt && cursor.id) query = query.or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`);
+      const { data, error } = await query;
       if (error) throw error;
-      const members = await Promise.all((data ?? []).map(async (membership: any) => {
+      const rows = data ?? [];
+      const members = await Promise.all(rows.map(async (membership: any) => {
         const { data: authUser } = await admin.auth.admin.getUserById(membership.user_id);
         return { ...membership, email: authUser?.user?.email ?? null };
       }));
-      return reply(200, { ok: true, members });
+      return reply(200, { ok: true, members, has_more: rows.length === limit });
     }
 
     if (action === "create_business") {
@@ -775,14 +812,20 @@ Deno.serve(async (req: Request) => {
 
     if (action === "list_block_requests") {
       if (!isOwner) return reply(403, { error: "Solo el propietario técnico puede consultar estas solicitudes." });
-      const { data: requests, error: requestError } = await admin
-        .from("access_block_requests")
+      const cursor = parsePageCursor(body);
+      if (cursor.error) return reply(400, { error: cursor.error });
+      const limitValue = Number(body.limit ?? 51);
+      const limit = Number.isInteger(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 51;
+      let requestQuery = admin.from("access_block_requests")
         .select("id,business_id,requested_by,target_user_id,reason,status,technician_note,resolved_by,resolved_at,created_at,businesses(name)")
-        .order("created_at", { ascending: false })
-        .limit(100);
+        .order("created_at", { ascending: false }).order("id", { ascending: false })
+        .limit(limit);
+      if (cursor.createdAt && cursor.id) requestQuery = requestQuery.or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`);
+      const { data: requests, error: requestError } = await requestQuery;
       if (requestError) throw requestError;
+      const requestRows = requests ?? [];
 
-      const userIds = [...new Set((requests ?? []).flatMap((request: any) =>
+      const userIds = [...new Set(requestRows.flatMap((request: any) =>
         [request.requested_by, request.target_user_id].filter(Boolean)
       ))];
       const { data: profiles, error: profilesError } = userIds.length
@@ -793,7 +836,7 @@ Deno.serve(async (req: Request) => {
 
       return reply(200, {
         ok: true,
-        requests: (requests ?? []).map((request: any) => ({
+        requests: requestRows.map((request: any) => ({
           ...request,
           requested_by_name: names.get(request.requested_by) ?? null,
           target_user_name: names.get(request.target_user_id) ?? null,
