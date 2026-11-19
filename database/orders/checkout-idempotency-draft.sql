@@ -1,11 +1,41 @@
 -- Borrador: protección idempotente del checkout público y funciones de clientes.
 -- No ejecutar hasta revisar y autorizar la migración completa.
+-- El checkout exige privacy_consent=true y la versión fija privacy-2026-11-19-v1.
+-- La fecha se genera en PostgreSQL; pedidos históricos conservan evidencia NULL.
 
 -- Método concreto seleccionado por el cliente. El nombre queda congelado
 -- como histórico aunque el negocio renombre/desactive/elimine el método.
 ALTER TABLE public.orders
   ADD COLUMN IF NOT EXISTS payment_method_id uuid,
-  ADD COLUMN IF NOT EXISTS payment_method_name text;
+  ADD COLUMN IF NOT EXISTS payment_method_name text,
+  ADD COLUMN IF NOT EXISTS privacy_consent boolean,
+  ADD COLUMN IF NOT EXISTS privacy_consent_version text,
+  ADD COLUMN IF NOT EXISTS privacy_consent_at timestamptz;
+
+DO $privacy_consent_constraint$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.orders'::regclass
+      AND conname = 'orders_privacy_consent_evidence_check'
+  ) THEN
+    ALTER TABLE public.orders
+      ADD CONSTRAINT orders_privacy_consent_evidence_check
+      CHECK (
+        (privacy_consent IS NULL AND privacy_consent_version IS NULL AND privacy_consent_at IS NULL)
+        OR
+        (privacy_consent IS TRUE AND privacy_consent_version IS NOT NULL AND privacy_consent_at IS NOT NULL)
+      );
+  END IF;
+END;
+$privacy_consent_constraint$;
+
+COMMENT ON COLUMN public.orders.privacy_consent IS
+  'Aceptación explícita del aviso de privacidad para este pedido; NULL identifica pedidos históricos previos al registro de evidencia.';
+COMMENT ON COLUMN public.orders.privacy_consent_version IS
+  'Identificador de la versión del aviso de privacidad aceptada en el checkout.';
+COMMENT ON COLUMN public.orders.privacy_consent_at IS
+  'Fecha y hora de aceptación generada por PostgreSQL al crear el pedido.';
 
 DO $payment_method_fk$
 BEGIN
@@ -86,6 +116,8 @@ CREATE OR REPLACE FUNCTION public.create_public_order_for_customer_with_payment_
   p_customer_email text,
   p_delivery_address text,
   p_delivery_notes text,
+  p_privacy_consent boolean,
+  p_privacy_consent_version text,
   p_items jsonb
 )
 RETURNS jsonb
@@ -100,6 +132,12 @@ DECLARE
 BEGIN
   IF p_payment_method_id IS NULL OR p_business_id IS NULL THEN
     RAISE EXCEPTION 'Debes seleccionar un método de pago válido.';
+  END IF;
+
+  IF p_privacy_consent IS DISTINCT FROM true
+     OR p_privacy_consent_version IS DISTINCT FROM 'privacy-2026-11-19-v1' THEN
+    RAISE EXCEPTION 'Se requiere aceptar la versión vigente del aviso de privacidad.'
+      USING ERRCODE = '42501';
   END IF;
 
   SELECT *
@@ -130,7 +168,10 @@ BEGIN
   UPDATE public.orders
   SET payment_method_id = v_method.id,
       payment_method_name = v_method.display_name,
-      customer_user_id = p_customer_user_id
+      customer_user_id = p_customer_user_id,
+      privacy_consent = true,
+      privacy_consent_version = p_privacy_consent_version,
+      privacy_consent_at = pg_catalog.transaction_timestamp()
   WHERE id = v_order_id
     AND business_id = p_business_id
     AND customer_user_id IS NULL;
@@ -144,10 +185,10 @@ END;
 $function$;
 
 REVOKE ALL ON FUNCTION public.create_public_order_for_customer_with_payment_method(
-  uuid, uuid, uuid, text, text, text, text, text, text, jsonb
+  uuid, uuid, uuid, text, text, text, text, text, text, text, text, jsonb
 ) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.create_public_order_for_customer_with_payment_method(
-  uuid, uuid, uuid, text, text, text, text, text, text, jsonb
+  uuid, uuid, uuid, text, text, text, text, text, text, text, text, jsonb
 ) TO service_role;
 
 -- La cuenta autenticada se asigna solo después de validar el JWT en la Edge Function.
@@ -227,6 +268,8 @@ CREATE OR REPLACE FUNCTION public.get_public_order_idempotent(
   p_business_id uuid,
   p_payment_method_id uuid,
   p_customer_user_id uuid,
+  p_privacy_consent boolean,
+  p_privacy_consent_version text,
   p_customer_name text,
   p_customer_phone text,
   p_customer_email text,
@@ -253,6 +296,8 @@ BEGIN
     'business_id', p_business_id,
     'payment_method_id', p_payment_method_id,
     'customer_user_id', p_customer_user_id,
+    'privacy_consent', p_privacy_consent,
+    'privacy_consent_version', p_privacy_consent_version,
     'customer_name', p_customer_name,
     'customer_phone', p_customer_phone,
     'customer_email', p_customer_email,
@@ -280,10 +325,10 @@ END;
 $function$;
 
 REVOKE ALL ON FUNCTION public.get_public_order_idempotent(
-  uuid, uuid, uuid, uuid, text, text, text, text, text, text, jsonb
+  uuid, uuid, uuid, uuid, boolean, text, text, text, text, text, text, text, jsonb
 ) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_public_order_idempotent(
-  uuid, uuid, uuid, uuid, text, text, text, text, text, text, jsonb
+  uuid, uuid, uuid, uuid, boolean, text, text, text, text, text, text, text, jsonb
 ) TO service_role;
 
 -- Reserva de intentos en una transacción independiente al pedido.
@@ -314,6 +359,8 @@ CREATE OR REPLACE FUNCTION public.reserve_checkout_rate_limit(
   p_business_id uuid,
   p_payment_method_id uuid,
   p_customer_user_id uuid,
+  p_privacy_consent boolean,
+  p_privacy_consent_version text,
   p_customer_name text,
   p_customer_phone text,
   p_customer_email text,
@@ -347,6 +394,8 @@ BEGIN
     'business_id', p_business_id,
     'payment_method_id', p_payment_method_id,
     'customer_user_id', p_customer_user_id,
+    'privacy_consent', p_privacy_consent,
+    'privacy_consent_version', p_privacy_consent_version,
     'customer_name', p_customer_name,
     'customer_phone', p_customer_phone,
     'customer_email', p_customer_email,
@@ -417,10 +466,10 @@ END;
 $function$;
 
 REVOKE ALL ON FUNCTION public.reserve_checkout_rate_limit(
-  uuid, text, uuid, uuid, uuid, text, text, text, text, text, text, jsonb
+  uuid, text, uuid, uuid, uuid, boolean, text, text, text, text, text, text, text, jsonb
 ) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.reserve_checkout_rate_limit(
-  uuid, text, uuid, uuid, uuid, text, text, text, text, text, text, jsonb
+  uuid, text, uuid, uuid, uuid, boolean, text, text, text, text, text, text, text, jsonb
 ) TO service_role;
 
 CREATE OR REPLACE FUNCTION public.create_public_order_idempotent(
@@ -429,6 +478,8 @@ CREATE OR REPLACE FUNCTION public.create_public_order_idempotent(
   p_business_id uuid,
   p_payment_method_id uuid,
   p_customer_user_id uuid,
+  p_privacy_consent boolean,
+  p_privacy_consent_version text,
   p_customer_name text,
   p_customer_phone text,
   p_customer_email text,
@@ -459,6 +510,8 @@ BEGIN
     'business_id', p_business_id,
     'payment_method_id', p_payment_method_id,
     'customer_user_id', p_customer_user_id,
+    'privacy_consent', p_privacy_consent,
+    'privacy_consent_version', p_privacy_consent_version,
     'customer_name', p_customer_name,
     'customer_phone', p_customer_phone,
     'customer_email', p_customer_email,
@@ -517,6 +570,8 @@ BEGIN
     p_customer_email,
     p_delivery_address,
     p_delivery_notes,
+    p_privacy_consent,
+    p_privacy_consent_version,
     p_items
   );
 
@@ -532,10 +587,10 @@ END;
 $function$;
 
 REVOKE ALL ON FUNCTION public.create_public_order_idempotent(
-  uuid, text, uuid, uuid, uuid, text, text, text, text, text, text, jsonb
+  uuid, text, uuid, uuid, uuid, boolean, text, text, text, text, text, text, text, jsonb
 ) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.create_public_order_idempotent(
-  uuid, text, uuid, uuid, uuid, text, text, text, text, text, text, jsonb
+  uuid, text, uuid, uuid, uuid, boolean, text, text, text, text, text, text, text, jsonb
 ) TO service_role;
 
 -- Pruebas posteriores en staging:
