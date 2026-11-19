@@ -5,6 +5,9 @@
 DO $verify$
 DECLARE
   missing text;
+  v_mark_payment text;
+  v_complete_refund text;
+  v_decide_cancellation text;
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
@@ -1668,6 +1671,45 @@ BEGIN
      OR has_function_privilege('anon','public.set_technical_business_status(uuid,text,text,text,uuid)','EXECUTE')
      OR has_function_privilege('authenticated','public.set_technical_business_status(uuid,text,text,text,uuid)','EXECUTE') THEN
     RAISE EXCEPTION 'FALLO: las RPC técnicas no están restringidas a service_role.';
+  END IF;
+
+  -- Las RPC que reciben IDs de pedidos/solicitudes deben autorizar el negocio
+  -- antes del primer FOR UPDATE y volver a validar después de adquirir el lock.
+  v_mark_payment := pg_get_functiondef(
+    'public.mark_order_payment_received(uuid,text,text,text)'::regprocedure
+  );
+  v_complete_refund := pg_get_functiondef(
+    'public.complete_order_refund(uuid,text,text,text,text)'::regprocedure
+  );
+  v_decide_cancellation := pg_get_functiondef(
+    'public.decide_order_cancellation(uuid,text,text)'::regprocedure
+  );
+
+  IF strpos(v_mark_payment, 'private.has_business_role')
+       = 0
+     OR strpos(v_mark_payment, 'private.has_business_role')
+       > strpos(v_mark_payment, 'FOR UPDATE')
+     OR (length(v_mark_payment) - length(replace(v_mark_payment, 'private.has_business_role', '')))
+       < 2 THEN
+    RAISE EXCEPTION 'FALLO: mark_order_payment_received debe autorizar antes del bloqueo y revalidar después.';
+  END IF;
+
+  IF strpos(v_complete_refund, 'private.has_business_role')
+       = 0
+     OR strpos(v_complete_refund, 'private.has_business_role')
+       > strpos(v_complete_refund, 'FOR UPDATE')
+     OR (length(v_complete_refund) - length(replace(v_complete_refund, 'private.has_business_role', '')))
+       < 2 THEN
+    RAISE EXCEPTION 'FALLO: complete_order_refund debe autorizar antes del bloqueo y revalidar después.';
+  END IF;
+
+  IF strpos(v_decide_cancellation, 'private.has_business_role')
+       = 0
+     OR strpos(v_decide_cancellation, 'private.has_business_role')
+       > strpos(v_decide_cancellation, 'FOR UPDATE')
+     OR (length(v_decide_cancellation) - length(replace(v_decide_cancellation, 'private.has_business_role', '')))
+       < 2 THEN
+    RAISE EXCEPTION 'FALLO: decide_order_cancellation debe autorizar antes del bloqueo y revalidar después.';
   END IF;
 
   RAISE NOTICE 'OK: estructura, RPCs, RLS, privilegios y buckets del paquete están presentes.';
