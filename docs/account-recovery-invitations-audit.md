@@ -384,3 +384,13 @@ Se completó la conexión de la bandeja de invitaciones en `panel-tecnico.html` 
 La revocación conserva la fila histórica de membresía en estado suspendido con motivo `Invitación revocada`; no elimina la cuenta Auth ni otras membresías.
 
 **Estado del código en la rama:** el flujo de preparación, envío, vinculación, aceptación, listado, expiración y revocación ya tiene componentes SQL/Edge/UI coordinados. Sigue siendo una implementación no desplegada. La verificación 19/19 es estática; no equivale a ejecutar SQL ni probar el correo real.
+
+
+### ACC-08 — Reintento de aceptación y control de cuentas bloqueadas
+
+Se añadieron dos salvaguardas finales:
+
+- La RPC de aceptación vuelve a comprobar que el perfil destinatario siga existiendo y tenga `is_blocked = false`; un bloqueo global aplicado después del envío impide activar la membresía.
+- La página de aceptación reconoce una sesión de invitación que ya fue verificada. Si el enlace OTP ya se consumió pero la sesión sigue abierta, permite reintentar la finalización sin volver a consumir el mismo OTP. La Edge Function sigue comprobando identidad, correo y token individual.
+
+Si el envío de Auth devuelve error, el mensaje ahora indica revisar Authentication > Users antes de repetir: no se debe crear otra cuenta si Auth alcanzó a crear una invitación pese al error devuelto.
