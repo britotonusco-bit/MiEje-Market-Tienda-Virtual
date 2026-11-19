@@ -274,9 +274,9 @@
       ['Costo de productos vendidos',money(data.gross_cost_of_sales)],
       ['Reversión de costo por cancelaciones',money(data.inventory_cost_reversals)],
       ['Costo neto de ventas',money(data.cost_of_sales)],
-      ['Ganancia bruta estimada',money(data.gross_profit_estimate)],
+      ['Ganancia bruta estimada',data.gross_profit_estimate === null ? 'No disponible' : money(data.gross_profit_estimate)],
       ['Gastos operativos pagados',money(data.paid_expenses)],
-      ['Resultado neto estimado',money(data.net_profit_estimate)],
+      ['Resultado neto estimado',data.net_profit_estimate === null ? 'No disponible' : money(data.net_profit_estimate)],
       ['Pedidos con pago confirmado',number(data.paid_orders)],
       ['Líneas sin costo histórico',number(data.missing_cost_lines)]
     ];
@@ -284,7 +284,7 @@
       '<article class="stat"><span>'+esc(label)+'</span><strong>'+esc(value)+'</strong></article>'
     ).join('')+'</div>'+(data.complete_cost_data
       ? '<p class="message success">Todos los movimientos de costo del periodo tienen costo histórico registrado.</p>'
-      : '<p class="message error">Hay productos vendidos sin costo histórico. El resultado no representa la ganancia real completa.</p>'
+      : '<p class="message error">Hay productos vendidos sin costo histórico. La ganancia bruta y el resultado neto se muestran como “No disponible” hasta completar esos costos; no se interpretan como cero.</p>'
     )+'<p class="muted">Periodo: '+esc(data.start_date)+' a '+esc(data.end_date)+'. '+esc(data.basis)+'</p>';
   }
 
