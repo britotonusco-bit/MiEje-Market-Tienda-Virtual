@@ -615,7 +615,7 @@ Deno.serve(async (req: Request) => {
         if (inviteError) {
           console.error("inviteUserByEmail failed:", inviteError);
           return reply(502, {
-            error: "Supabase no confirmó el envío. No se creó la asignación. Si Auth alcanzó a crear la cuenta, vuelve a intentar: se detectará como existente y se podrá reenviar la confirmación.",
+            error: "Supabase no confirmó el envío de la invitación. No se creó la asignación. Revisa Authentication > Users antes de repetir la operación: si aparece una invitación pendiente, el sistema podrá recuperar la asignación sin crear otra cuenta ni enviar otro correo.",
             invitation_sent: false,
           });
         }
@@ -634,9 +634,12 @@ Deno.serve(async (req: Request) => {
       // membresía nueva. El alta de cuentas nuevas sigue el flujo de invitación.
       // No se intenta reenviar un enlace automáticamente: requiere un flujo
       // explícito y limitado de reenvío desde Auth.
-      if (lookup.user && !targetUser.email_confirmed_at) {
+      const existingPendingInvite = Boolean(
+        lookup.user && !targetUser.email_confirmed_at && targetUser.invited_at,
+      );
+      if (lookup.user && !targetUser.email_confirmed_at && !existingPendingInvite) {
         return reply(409, {
-          error: "La cuenta ya existe, pero su correo todavía no está confirmado. El usuario debe completar la verificación de correo antes de que se le asigne acceso a este negocio.",
+          error: "La cuenta ya existe y todavía no ha confirmado su correo mediante una invitación pendiente. La asignación no se creó. El usuario debe completar primero su verificación.",
           invitation_sent: false,
           requires_email_confirmation: true,
           assignment_created: false,
@@ -677,9 +680,11 @@ Deno.serve(async (req: Request) => {
       const requiresEmailConfirmation = !targetUser.email_confirmed_at;
       if (result.already_assigned) {
         return reply(409, {
-          error: result.membership.status === "active"
-            ? "Ese usuario ya tiene acceso a este negocio."
-            : "Ese usuario ya tiene una asignación suspendida. Reactiva su acceso desde la gestión de usuarios.",
+          error: requiresEmailConfirmation
+            ? "La cuenta ya tiene una asignación en este negocio, pero todavía debe aceptar la invitación y confirmar su correo."
+            : result.membership.status === "active"
+              ? "Ese usuario ya tiene acceso a este negocio."
+              : "Ese usuario ya tiene una asignación suspendida. Reactiva su acceso desde la gestión de usuarios.",
           membership: result.membership,
           invitation_sent: invitationSent,
           requires_email_confirmation: requiresEmailConfirmation,
@@ -693,9 +698,11 @@ Deno.serve(async (req: Request) => {
         requires_email_confirmation: requiresEmailConfirmation,
         message: invitationSent
           ? "Correo de invitación enviado y acceso asignado."
-          : requiresEmailConfirmation
-            ? "Asignación creada. La cuenta todavía debe confirmar su correo antes de poder iniciar sesión; no se envió otro mensaje."
-            : "Cuenta existente asignada al negocio.",
+          : requiresEmailConfirmation && existingPendingInvite
+            ? "Se recuperó la asignación de una invitación que ya existía. No se envió otro correo. La persona debe aceptar la invitación y confirmar su correo."
+            : requiresEmailConfirmation
+              ? "Asignación creada. La cuenta todavía debe confirmar su correo antes de poder iniciar sesión; no se envió otro mensaje."
+              : "Cuenta existente asignada al negocio.",
       });
     }
 
