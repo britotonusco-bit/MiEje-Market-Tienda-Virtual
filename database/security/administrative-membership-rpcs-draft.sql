@@ -341,8 +341,9 @@ DECLARE
   v_reason text := NULLIF(pg_catalog.btrim(p_reason), '');
 BEGIN
   IF p_membership_id IS NULL OR p_actor_id IS NULL
-     OR v_reason IS NULL OR pg_catalog.char_length(v_reason) > 2000 THEN
-    RAISE EXCEPTION 'La membresía, el actor y un motivo válido son obligatorios.'
+     OR v_reason IS NULL OR pg_catalog.char_length(v_reason) < 5
+     OR pg_catalog.char_length(v_reason) > 2000 THEN
+    RAISE EXCEPTION 'La membresía, el actor y un motivo válido de al menos cinco caracteres son obligatorios.'
       USING ERRCODE = '22023';
   END IF;
 
