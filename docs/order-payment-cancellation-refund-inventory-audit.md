@@ -94,3 +94,8 @@ No se ejecutó SQL, no se modificó Supabase, no se desplegaron Edge Functions, 
 ## 8. Gastos pagados y reportes históricos
 
 Se detectó que el borrador permitía anular gastos pagados. El reporte financiero suma únicamente gastos activos y pagados; por tanto, anular uno pagado lo retiraba del histórico sin registrar un movimiento compensatorio. La corrección restringe la anulación a gastos pendientes tanto en la RPC como en el trigger de protección. El verificador de integración exige ambas barreras. Para corregir un gasto que ya fue pagado se necesitará un flujo separado de reversión con referencia, motivo y auditoría; no debe simularse mediante anulación.
+
+
+## 9. Costos históricos incompletos y ganancias estimadas
+
+El reporte agrega los costos guardados por línea de pedido. Si alguna línea no tiene `order_item_costs.unit_cost`, el costo de ventas queda subestimado si se interpreta el valor faltante como cero. Se ajustó el borrador para que `gross_profit_estimate` y `net_profit_estimate` devuelvan `NULL` cuando `missing_cost_lines` sea mayor que cero. El informe conserva el conteo de líneas sin costo y la marca `complete_cost_data`. Así se evita mostrar una ganancia numérica engañosa.
