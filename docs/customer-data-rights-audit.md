@@ -491,3 +491,99 @@ La Ley 1581 de 2012 exige informar finalidades, derechos y datos de contacto del
 - Contradicción entre texto legal y flujo real de la rama: confirmada.
 - Cambios en la interfaz legal: no realizados; faltan datos de identidad y decisiones sobre responsables/encargados.
 - Recomendación: bloquear el lanzamiento comercial de checkout y postulaciones hasta corregir los textos, confirmar evidencia persistente en staging y validar el aviso con asesoría jurídica colombiana.
+
+
+## Auditoría de conservación, eliminación y archivos — 19 nov 2026
+
+### Contraste de solo lectura con Supabase activo
+
+Proyecto consultado: `cqixlrwbqatbhzmpygiz`. No se ejecutaron escrituras.
+
+Conteos observados en esta consulta:
+- `orders`: 0
+- `order_items`: 0
+- `profiles`: 1
+- `business_memberships`: 0
+- `job_applications`: 0
+- `job_application_upload_sessions`: 0
+- `audit_logs`: 0
+- Objetos en `job-applications-private`: 0
+- Objetos en `business-assets`: 0
+
+Los conteos describen el estado en el momento de la consulta, no garantizan que sigan iguales. La lista de migraciones activas llega a 12 entradas y no incluye las migraciones de cuentas/clientes, inmutabilidad de auditoría ni los borradores de conservación que están en la rama.
+
+### Dependencias de eliminación de cuentas
+
+La estructura activa muestra:
+- `profiles.id → auth.users.id` con eliminación en cascada: borrar el usuario Auth también elimina su perfil.
+- `business_memberships.user_id → profiles.id` con `ON DELETE RESTRICT`: una membresía todavía asociada puede impedir eliminar el perfil y, por consecuencia, la cuenta Auth.
+- `audit_logs.actor_id → profiles.id` y `job_applications.reviewed_by → profiles.id` con `ON DELETE SET NULL`: se conserva el evento/postulación, pero se pierde el vínculo directo con el perfil eliminado.
+- La migración de clientes aún pendiente propone `orders.customer_user_id → auth.users.id ON DELETE SET NULL`: los pedidos quedarían conservados y desvinculados de la cuenta. Los favoritos usarían `ON DELETE CASCADE`.
+
+No existe todavía un flujo completo que resuelva membresías, propiedad de archivos, sesiones abiertas, solicitudes pendientes y evidencia antes de eliminar una cuenta. No debe ofrecerse un botón de eliminación inmediata como si cubriera todo el sistema.
+
+### Dependencias de eliminación de negocios y vacantes
+
+En la base activa, las FK de `job_applications.business_id` y `job_applications.content_page_id` tienen `ON DELETE CASCADE`. Las sesiones temporales también se eliminan en cascada. Esto significa que borrar un negocio o una página de vacante puede borrar las filas SQL de postulaciones.
+
+Los objetos CV están en Storage y no se eliminan automáticamente por una FK de PostgreSQL. La Edge Function `cleanup-job-application-data` de la rama solo procesa sesiones de carga vencidas y archivos temporales sin postulación asociada; no aplica una política de retención a postulaciones completas ni borra CV asociados a una postulación histórica. Por tanto, borrar una página/negocio podría dejar objetos CV sin su fila de referencia. Hasta diseñar y probar un proceso coordinado, se debe archivar/desactivar la página o el negocio y bloquear su eliminación física cuando existan postulaciones con CV.
+
+### Qué elimina hoy la limpieza preparada
+
+La función `cleanup-job-application-data`:
+- requiere el secreto independiente `JOB_APPLICATION_CLEANUP_SECRET`;
+- procesa sesiones de carga vencidas;
+- elimina archivos temporales que no estén asociados a una postulación;
+- conserva los CV vinculados a postulaciones;
+- elimina registros de rate limit vencidos;
+- no elimina postulaciones completas, CV asociados, cuentas Auth, pedidos ni auditoría histórica.
+
+La función no está desplegada en el proyecto activo y no se encontró un programador activo que demuestre su ejecución periódica. No debe presentarse como una política integral de retención.
+
+### Precauciones específicas de Supabase
+
+La documentación oficial de Supabase indica que:
+- borrar un usuario Auth no invalida inmediatamente un access token JWT ya emitido; el token puede seguir vigente hasta su expiración;
+- no se puede borrar un usuario que todavía sea propietario de objetos de Storage; se deben eliminar los objetos o reasignar su propiedad;
+- los objetos deben eliminarse mediante la API de Storage, no borrando filas directamente desde SQL, porque eso puede dejar archivos huérfanos.
+
+Fuentes:
+- https://supabase.com/docs/guides/auth/managing-user-data
+- https://supabase.com/docs/guides/storage/security/ownership
+- https://supabase.com/docs/guides/storage/management/delete-objects
+
+### Matriz de conservación propuesta para decisión — no son plazos aprobados
+
+| Categoría | Tratamiento requerido antes de fijar plazo |
+|---|---|
+| Perfil y datos de cuenta | Eliminar o anonimizar al terminar la finalidad, salvo vínculos o deberes vigentes. |
+| Pedidos, pagos y reembolsos | Conservar el registro comercial mínimo cuando exista obligación legal/contable o controversia; desvincular la cuenta cuando proceda. |
+| Líneas de pedido e inventario | Mantener snapshots y movimientos necesarios para integridad y trazabilidad; no borrar en cascada. |
+| Favoritos y preferencias | Eliminar al cerrar cuenta o al retirar la finalidad, una vez instalada la migración pendiente. |
+| Postulaciones y CV | Definir plazo por proceso de selección y finalidad; separar CV de evidencia mínima de la decisión cuando ya no se requiera el documento. |
+| Sesiones temporales de carga | Eliminar tras vencimiento efectivo del token firmado, con margen y ejecución programada comprobada. |
+| Logs de auditoría | Conservar eventos mínimos, inmutables y sin datos de contacto o secretos; aprobar un periodo y acceso por rol. |
+| Archivos de negocio | Mantener solo mientras el negocio/servicio y su finalidad lo justifiquen; aplicar proceso de eliminación desde Storage API. |
+
+La normativa colombiana exige que la conservación sea razonable y necesaria según la finalidad y las obligaciones legales o contractuales; no se asigna un plazo universal a todas las categorías. Una vez agotada la finalidad, procede la supresión salvo deber de conservación aplicable. Fuentes: Ley 1581 de 2012 y Decreto 1074 de 2015 (compilación normativa), además de criterios de la SIC:
+- https://cancilleria.gov.co/normograma/compilacion/docs/ley_1581_2012.htm
+- https://www.igac.gov.co/sites/default/files/transparencia/normograma/ley_1581_de_2012.pdf
+- https://sedeelectronica.sic.gov.co/sites/default/files/normativa/Resolucion_1645_de_2023.pdf
+
+### Decisiones y correcciones requeridas antes de producción
+
+1. No borrar físicamente negocios o páginas de vacantes mientras existan postulaciones o CV asociados; implementar archivo lógico y un proceso coordinado de retención.
+2. Diseñar un flujo de eliminación de cuenta por servidor: verificar identidad, listar dependencias, transferir/revocar membresías, revisar propiedad Storage, revocar sesiones, desvincular pedidos cuando corresponda, eliminar datos no sujetos a conservación y registrar resultado mínimo.
+3. Evitar que el registro de auditoría dependa de una FK obligatoria al perfil; conservar identificador técnico mínimo del actor o un identificador seudonimizado cuando la política aprobada lo permita, sin mantener innecesariamente datos personales.
+4. Para pedidos, definir qué campos personales deben suprimirse/anonimizarse y cuáles deben mantenerse por obligaciones contables, fiscales, contractuales o defensa de reclamaciones.
+5. Definir plazos aprobados para CV, postulaciones, archivos temporales, auditoría y archivos de negocio; configurar un scheduler privado y verificar cada ejecución.
+6. Probar la operación con cuentas de cliente, empleado, administrador, propietario técnico y usuarios con objetos Storage, primero en staging.
+
+### Estado de esta revisión
+
+- Catálogo, migraciones, FK y conteos activos: consultados en solo lectura.
+- Eliminación de cuenta/negocio: no ejecutada.
+- SQL, Auth, Storage y datos activos: sin cambios.
+- Riesgo de CV huérfanos por cascadas de negocio/página: documentado.
+- Limpieza de CV históricos y política integral de retención: pendiente.
+- Plazos de conservación: no inventados; requieren aprobación jurídica y operativa.
