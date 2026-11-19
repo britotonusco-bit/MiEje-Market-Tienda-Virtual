@@ -146,7 +146,7 @@
         const suspended = selected.dataset.status !== 'active';
         if (action) action.value = suspended ? 'false' : 'true';
         if (note) note.textContent = globallyBlocked
-          ? 'Esta cuenta también está bloqueada globalmente. Reactivar la membresía no habilitará el acceso hasta retirar ese bloqueo global desde el procedimiento autorizado.'
+          ? 'Esta cuenta tiene un bloqueo global. Este formulario solo administra la membresía del negocio y no puede retirar el bloqueo. El panel todavía no dispone de un flujo de desbloqueo global; no intentes resolverlo reactivando la membresía.'
           : suspended
             ? 'La membresía está suspendida en este negocio. Puedes reactivarla si el negocio está activo.'
             : 'La membresía está activa en este negocio.';
