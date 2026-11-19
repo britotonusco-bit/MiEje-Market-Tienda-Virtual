@@ -108,3 +108,12 @@ La inspección de solo lectura del esquema activo confirmó que `order_item_cost
 Se añadió al borrador de límites de negocio un trigger que rechaza UPDATE y DELETE sobre snapshots, además de revocar esos privilegios y TRUNCATE a `service_role`. El checkout conserva INSERT para crear la fotografía original dentro de la transacción. El verificador ahora exige el trigger y la ausencia de esos privilegios.
 
 La tabla `product_costs` conserva el costo vigente del producto y puede actualizarse por el administrador del negocio. Esa actualización no modifica la fila histórica de `order_item_costs`. No se ejecutó esta protección en la base activa; debe probarse en staging.
+
+
+## 11. Hallazgo confirmado en el esquema activo: bypass técnico en políticas de costos
+
+La consulta de solo lectura al proyecto Supabase independiente encontró que las políticas activas `product_costs_admin_select`, `product_costs_admin_insert`, `product_costs_admin_update` y `order_item_costs_admin_select` todavía incluyen `private.is_platform_owner()`. Esto concede al propietario técnico acceso directo global a costos de negocios, contrario al límite previsto. El borrador de `business-admin-boundaries.sql` recrea esas políticas sin el bypass; no se ha aplicado a la base activa.
+
+Se amplió el verificador para revisar tanto `USING` (`qual`) como `WITH CHECK`, y para incluir las políticas INSERT y UPDATE de `product_costs`. La verificación anterior solo revisaba `qual` y podía dejar pasar un bypass en `WITH CHECK`.
+
+La consulta también confirmó que `order_item_costs` no tiene triggers y que `service_role` conserva UPDATE, DELETE y TRUNCATE. El borrador ahora instala el trigger de inmutabilidad y revoca esos privilegios. No se ejecutaron cambios en Supabase.
