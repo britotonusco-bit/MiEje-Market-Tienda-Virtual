@@ -2,6 +2,7 @@
 (() => {
   "use strict";
 
+  const JOB_APPLICATION_PRIVACY_CONSENT_VERSION = "job-application-2026-11-19-v1";
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
@@ -668,7 +669,7 @@
     const contentPagesHtml = contentPages.map(page => {
       const fields = Array.isArray(page.content?.form_fields) ? page.content.form_fields : [];
       const customFields = page.content_type === "job_form" ? fields.map((field, index) => `<label>${escapeHtml(field)}<input name="custom_field_${index}" required maxlength="500"></label>`).join("") : "";
-      return `<section class="info-panel"><h3>${escapeHtml(page.title)}</h3><p>${escapeHtml(page.body)}</p>${page.content_type === "job_form" ? `<form class="job-application-form" data-job-page="${escapeHtml(page.id)}"><div aria-hidden="true" style="position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden"><label>No completar este campo<input name="website" tabindex="-1" autocomplete="off"></label></div><label>Nombre completo<input name="applicant_name" required maxlength="120"></label><label>Teléfono o correo<input name="applicant_contact" required maxlength="180"></label>${customFields}<label>Experiencia y mensaje<textarea name="applicant_message" rows="3" maxlength="2000"></textarea></label><label>Hoja de vida (PDF, DOC o DOCX; máximo 5 MB)<input type="file" name="resume" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label><label><input type="checkbox" name="privacy_consent" required> Autorizo el tratamiento de mis datos para gestionar esta postulación.</label><button class="button primary" type="submit">Enviar postulación</button></form>` : ""}</section>`;
+      return `<section class="info-panel"><h3>${escapeHtml(page.title)}</h3><p>${escapeHtml(page.body)}</p>${page.content_type === "job_form" ? `<form class="job-application-form" data-job-page="${escapeHtml(page.id)}"><div aria-hidden="true" style="position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden"><label>No completar este campo<input name="website" tabindex="-1" autocomplete="off"></label></div><label>Nombre completo<input name="applicant_name" required maxlength="120"></label><label>Teléfono o correo<input name="applicant_contact" required maxlength="180"></label>${customFields}<label>Experiencia y mensaje<textarea name="applicant_message" rows="3" maxlength="2000"></textarea></label><label>Hoja de vida (PDF, DOC o DOCX; máximo 5 MB)<input type="file" name="resume" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label><label><input type="checkbox" name="privacy_consent" data-policy-version="${JOB_APPLICATION_PRIVACY_CONSENT_VERSION}" required> Autorizo el tratamiento de mis datos para gestionar esta postulación.</label><button class="button primary" type="submit">Enviar postulación</button></form>` : ""}</section>`;
     }).join("");
 
     $("#storeContent").innerHTML = `
@@ -1144,6 +1145,7 @@
             body: {
               action: "request_upload",
               privacy_consent: formData.get("privacy_consent") === "on",
+              privacy_consent_version: JOB_APPLICATION_PRIVACY_CONSENT_VERSION,
               website: String(formData.get("website") || ""),
               business_id: business.id,
               content_page_id: jobForm.dataset.jobPage,
@@ -1176,7 +1178,8 @@
             applicant_contact: String(formData.get("applicant_contact") || "").trim(),
             applicant_message: String(formData.get("applicant_message") || "").trim(),
             form_responses: applicationData,
-            privacy_consent: formData.get("privacy_consent") === "on"
+            privacy_consent: formData.get("privacy_consent") === "on",
+            privacy_consent_version: JOB_APPLICATION_PRIVACY_CONSENT_VERSION
           }
         });
         if (submitError || !submitted?.ok) throw submitError || new Error("No se pudo registrar la postulación.");
