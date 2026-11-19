@@ -618,7 +618,7 @@ Deno.serve(async (req: Request) => {
         });
       }
 
-      const { data: pendingInvitation, error: pendingError } = await admin
+      let { data: pendingInvitation, error: pendingError } = await admin
         .from("business_invitations")
         .select("id,user_id,membership_id,status,expires_at")
         .eq("business_id", businessId)
@@ -627,14 +627,15 @@ Deno.serve(async (req: Request) => {
         .maybeSingle();
       if (pendingError) throw pendingError;
 
+      if (pendingInvitation && Date.parse(pendingInvitation.expires_at) <= Date.now()) {
+        const { error: expireError } = await admin.rpc("expire_business_invitation", {
+          p_invitation_id: pendingInvitation.id,
+        });
+        if (expireError) throw expireError;
+        pendingInvitation = null;
+      }
+
       if (pendingInvitation) {
-        if (Date.parse(pendingInvitation.expires_at) <= Date.now()) {
-          return reply(409, {
-            error: "La invitación anterior venció. Debe marcarse como vencida y generarse una nueva invitación desde el flujo de renovación.",
-            invitation_pending: false,
-            invitation_id: pendingInvitation.id,
-          });
-        }
         if (!lookup.user) {
           return reply(409, {
             error: "Ya existe una invitación en preparación. No se enviará otro correo para evitar duplicados. Revisa Auth y vuelve a intentar la vinculación.",
