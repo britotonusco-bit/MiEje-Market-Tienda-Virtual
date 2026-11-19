@@ -234,8 +234,8 @@ BEGIN
   END IF;
 
   IF to_regprocedure('public.get_public_order_idempotent(uuid,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)') IS NULL
-     OR to_regprocedure('public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,text,jsonb)') IS NULL
-     OR to_regprocedure('public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,text,jsonb)') IS NULL THEN
+     OR to_regprocedure('public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)') IS NULL
+     OR to_regprocedure('public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)') IS NULL THEN
     RAISE EXCEPTION 'FALLO: faltan RPCs de idempotencia del checkout.';
   END IF;
 
@@ -400,21 +400,21 @@ BEGIN
   IF NOT has_function_privilege('service_role',
        'public.get_public_order_idempotent(uuid,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)','EXECUTE')
      OR NOT has_function_privilege('service_role',
-       'public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,text,jsonb)','EXECUTE')
+       'public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)','EXECUTE')
      OR NOT has_function_privilege('service_role',
-       'public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,text,jsonb)','EXECUTE')
+       'public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)','EXECUTE')
      OR has_function_privilege('anon',
        'public.get_public_order_idempotent(uuid,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)','EXECUTE')
      OR has_function_privilege('authenticated',
        'public.get_public_order_idempotent(uuid,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)','EXECUTE')
      OR has_function_privilege('anon',
-       'public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,text,jsonb)','EXECUTE')
+       'public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)','EXECUTE')
      OR has_function_privilege('authenticated',
-       'public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,text,jsonb)','EXECUTE')
+       'public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)','EXECUTE')
      OR has_function_privilege('anon',
-       'public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,text,jsonb)','EXECUTE')
+       'public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)','EXECUTE')
      OR has_function_privilege('authenticated',
-       'public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,text,jsonb)','EXECUTE') THEN
+       'public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)','EXECUTE') THEN
     RAISE EXCEPTION 'FALLO: permisos incorrectos en RPCs de idempotencia del checkout.';
   END IF;
 
