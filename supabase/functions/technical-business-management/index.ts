@@ -506,11 +506,15 @@ Deno.serve(async (req: Request) => {
       const { data, error } = await query;
       if (error) throw error;
       const rows = data ?? [];
-      const members = await Promise.all(rows.map(async (membership: any) => {
+      const hasMore = rows.length === limit;
+      // La fila adicional solo confirma que existe otra página; no requiere
+      // consultar Auth para obtener un correo que no se mostrará en el selector.
+      const pageRows = limit > 1 ? rows.slice(0, limit - 1) : rows;
+      const members = await Promise.all(pageRows.map(async (membership: any) => {
         const { data: authUser } = await admin.auth.admin.getUserById(membership.user_id);
         return { ...membership, email: authUser?.user?.email ?? null };
       }));
-      return reply(200, { ok: true, members, has_more: rows.length === limit });
+      return reply(200, { ok: true, members, has_more: hasMore });
     }
 
     if (action === "create_business") {
