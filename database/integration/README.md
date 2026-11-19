@@ -582,3 +582,14 @@ Antes de producción:
 6. Vincular cada versión desplegada a su commit y evidencia de pruebas.
 
 No desplegar ni cambiar configuración de observabilidad en producción durante esta auditoría. La revisión fue de solo lectura.
+
+
+## 8. Rendimiento y escalabilidad
+
+Informe: `docs/performance-and-scalability-audit.md`.
+
+El asesor de Supabase detectó 16 claves foráneas sin índice de cobertura, 16 índices sin uso registrado y una advertencia de políticas SELECT permisivas múltiples en `business_content_pages`. La base comercial está casi vacía; no borrar índices por la señal de no utilizados ni asumir que las métricas reflejan carga real.
+
+Se añadió el borrador `database/performance/index-optimization-draft.sql` con 14 índices candidatos. Aplicar únicamente en staging, medir antes/después y volver a ejecutar el asesor. La rama también tiene topes de carga en la interfaz (por ejemplo, 1.000 productos públicos y 100 pedidos del panel), pero no una paginación histórica completa en todas las listas. Se recomienda paginación por cursor con orden estable y filtro de negocio.
+
+No se aplicaron índices ni se modificaron políticas o consultas en el proyecto activo. Las pruebas de carga, concurrencia y aislamiento siguen pendientes.
