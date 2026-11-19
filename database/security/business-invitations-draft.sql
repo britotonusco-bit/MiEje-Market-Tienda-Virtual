@@ -44,6 +44,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS business_invitations_one_pending_email_idx
   ON public.business_invitations (business_id, email_normalized)
   WHERE status = 'pending';
 
+CREATE UNIQUE INDEX IF NOT EXISTS business_invitations_one_pending_user_idx
+  ON public.business_invitations (business_id, user_id)
+  WHERE status = 'pending' AND user_id IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS business_invitations_pending_expiry_idx
   ON public.business_invitations (expires_at)
   WHERE status = 'pending';
@@ -525,5 +529,5 @@ GRANT EXECUTE ON FUNCTION public.revoke_business_invitation(uuid,uuid,text) TO s
 -- 2) resolve-my-access no devuelve esa membresía (solo status='active').
 -- 3) Aceptar token correcto activa solo esa membresía.
 -- 4) Token incorrecto, vencido, revocado o de otro usuario no activa nada.
--- 5) Revocar elimina solo la membresía pendiente y conserva auth.users/otras membresías.
+-- 5) Revocar conserva la fila de membresía en estado suspended con marca 'Invitación revocada', y conserva auth.users/otras membresías.
 -- 6) Aceptación y revocación concurrentes producen exactamente un resultado válido.
