@@ -422,3 +422,8 @@ El paso 20 de vacantes revoca UPDATE a nivel de tabla para `PUBLIC`, `anon` y `a
 ### Vigencia de tokens de carga de CV — 19 nov 2026
 
 `create-job-application` ya no asume una vigencia fija de 30 minutos para la sesión SQL. Primero solicita el token firmado a Storage, lee su claim JWT `exp` y fija `expires_at` cinco minutos después. Rechaza tokens sin vencimiento válido, ya vencidos o con una vigencia superior a 24 horas. Esto mantiene la sesión de base de datos vigente durante toda la vida del token y deja un margen breve para completar la solicitud; la limpieza de sesiones vencidas no debe ejecutarse antes de ese vencimiento SQL. La función no expone el token si falla la inserción de la sesión. Pendiente: prueba de integración en staging que confirme el vencimiento efectivo del token y que una carga posterior a su expiración sea rechazada.
+
+
+### Verificación reforzada de inventario — 19 nov 2026
+
+El verificador integral ahora comprueba que `authenticated` y `anon` no puedan escribir directamente en `inventory_movements` ni modificar `products.inventory`; que `adjust_business_inventory` sea `SECURITY DEFINER` con `search_path` vacío; y que la política de lectura del historial limite el acceso a administradores de negocios activos. Ejecutar estas comprobaciones únicamente en staging antes de aprobar las migraciones de inventario.
