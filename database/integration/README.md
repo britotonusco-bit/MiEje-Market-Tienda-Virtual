@@ -609,3 +609,6 @@ El panel administrativo utiliza el RPC borrador `get_business_admin_order_financ
 
 
 Los listados de postulaciones laborales y solicitudes de cancelación del panel administrativo también usan cursor compuesto `created_at + id`, páginas de 50 y filtro del negocio. Los cambios no alteran el flujo de descarga firmada de hojas de vida ni las RPC de decisión de cancelación. Requieren pruebas en staging.
+
+
+Gastos del administrador, movimientos de inventario y favoritos del cliente ya tienen paginación por cursor (50 filas). Los gastos ordenan por `expense_date + id`; inventario y favoritos por `created_at + id`. Los movimientos consultan nombres de productos solo para los IDs de la página. Pendientes: historial de pedidos de cliente, auditoría, reembolsos y catálogo público.
