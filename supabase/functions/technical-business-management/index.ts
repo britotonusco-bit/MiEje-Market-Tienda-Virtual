@@ -519,6 +519,19 @@ Deno.serve(async (req: Request) => {
         });
       }
 
+      // Una cuenta preexistente sin correo confirmado no debe recibir una
+      // membresía nueva. El alta de cuentas nuevas sigue el flujo de invitación.
+      // No se intenta reenviar un enlace automáticamente: requiere un flujo
+      // explícito y limitado de reenvío desde Auth.
+      if (lookup.user && !targetUser.email_confirmed_at) {
+        return reply(409, {
+          error: "La cuenta ya existe, pero su correo todavía no está confirmado. El usuario debe completar la verificación de correo antes de que se le asigne acceso a este negocio.",
+          invitation_sent: false,
+          requires_email_confirmation: true,
+          assignment_created: false,
+        });
+      }
+
       // La RPC comprueba el bloqueo global, el negocio activo, la membresía
       // duplicada y registra la membresía junto con su auditoría atómicamente.
       // El trigger on_auth_user_created ya crea profiles para usuarios nuevos.
