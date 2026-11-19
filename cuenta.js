@@ -4,6 +4,9 @@
   let client;
   let activeUserId = null;
   const FAVORITES_PAGE_SIZE = 50;
+  const CUSTOMER_ORDERS_PAGE_SIZE = 50;
+  let orderCursorStack = [null];
+  let orderPageIndex = 0;
   let favoriteCursorStack = [null];
   let favoritePageIndex = 0;
 
@@ -30,6 +33,8 @@
       activeUserId = null;
       favoriteCursorStack = [null];
       favoritePageIndex = 0;
+      orderCursorStack = [null];
+      orderPageIndex = 0;
       $("#accountAccess").hidden = false;
       $("#customerDashboard").hidden = true;
       $("#customerOrders").replaceChildren();
@@ -44,27 +49,62 @@
     $("#customerEmailLabel").textContent = session.user.email || "";
     await Promise.all([loadOrders(session.user.id), loadFavorites(session.user.id)]);
   }
-  async function loadOrders(userId) {
+  async function loadOrders(userId, reset = true) {
     const target = $("#customerOrders");
+    if (reset) { orderCursorStack = [null]; orderPageIndex = 0; }
     target.innerHTML = '<p class="muted">Cargando pedidos…</p>';
-    const { data, error } = await client.rpc("get_customer_order_history");
+    const cursor = orderCursorStack[orderPageIndex];
+    const { data, error } = await client.rpc("get_customer_order_history_page", {
+      p_limit: CUSTOMER_ORDERS_PAGE_SIZE,
+      p_before_created_at: cursor?.created_at || null,
+      p_before_order_id: cursor?.id || null
+    });
     if (activeUserId !== userId) return;
     if (error) {
-      target.textContent = "No fue posible cargar el historial. Comprueba que las migraciones de clientes y acceso financiero estén aplicadas.";
+      target.textContent = "No fue posible cargar el historial paginado. Comprueba que la migración de historial de clientes esté aplicada.";
       console.warn("Customer order history:", error);
       return;
     }
-    if (!data?.length) {
+    const orders = data?.orders || [];
+    if (!orders.length && orderPageIndex === 0) {
       target.innerHTML = '<p class="muted">Todavía no tienes pedidos asociados a esta cuenta. Los pedidos realizados como invitado no se vinculan automáticamente.</p>';
       return;
     }
-    target.innerHTML = data.map(order => `
+    if (!orders.length) target.innerHTML = '<p class="muted">No hay más pedidos en esta página.</p>';
+    if (orders.length) target.innerHTML = orders.map(order => `
       <article class="security-note">
         <strong>Pedido #${escapeHtml(order.order_number)} · ${escapeHtml(order.business_name || "Negocio")}</strong>
         <p>${escapeHtml(date(order.created_at))} · ${escapeHtml(status(order.status))}</p>
         <p>Total: <strong>${money(order.total)}</strong> · Pago: ${escapeHtml(order.payment_status)} · Método: ${escapeHtml(order.payment_method_name || "No disponible")}</p>
         <ul>${(order.items || []).map(item => `<li>${escapeHtml(item.product_name)} × ${Number(item.quantity)} — ${money(item.line_total ?? Number(item.unit_price) * Number(item.quantity))}</li>`).join("")}</ul>
       </article>`).join("");
+    const pager = document.createElement("div");
+    pager.className = "form-grid";
+    pager.style.alignItems = "center";
+    pager.style.marginTop = "12px";
+    const previous = document.createElement("button");
+    previous.type = "button";
+    previous.className = "button secondary";
+    previous.textContent = "Anterior";
+    previous.disabled = orderPageIndex === 0;
+    previous.addEventListener("click", () => { orderPageIndex--; void loadOrders(userId, false); });
+    const label = document.createElement("span");
+    label.className = "muted";
+    label.textContent = "Página " + (orderPageIndex + 1);
+    const next = document.createElement("button");
+    next.type = "button";
+    next.className = "button secondary";
+    next.textContent = "Siguiente";
+    next.disabled = data?.has_more !== true;
+    next.addEventListener("click", () => {
+      const last = orders[orders.length - 1];
+      if (!last) return;
+      orderCursorStack[orderPageIndex + 1] = { created_at: last.created_at, id: last.id };
+      orderPageIndex++;
+      void loadOrders(userId, false);
+    });
+    pager.append(previous, label, next);
+    target.appendChild(pager);
   }
   async function loadFavorites(userId, reset = true) {
     const target = $("#customerFavorites");
