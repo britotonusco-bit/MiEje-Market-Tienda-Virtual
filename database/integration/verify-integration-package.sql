@@ -1987,9 +1987,14 @@ BEGIN
          AND NOT t.tgisinternal
          AND p.proname = 'guard_last_active_business_admin'
          AND (t.tgtype::integer & 16) = 16
+         AND (t.tgtype::integer & 8) = 8
+         AND (t.tgtype::integer & 2) = 2
+         AND (t.tgtype::integer & 1) = 1
      )
      OR position('FOR UPDATE' IN upper(pg_get_functiondef(to_regprocedure('private.guard_last_active_business_admin()')))) = 0
-     OR position('business_admin' IN pg_get_functiondef(to_regprocedure('private.guard_last_active_business_admin()'))) = 0 THEN
+     OR position('business_admin' IN pg_get_functiondef(to_regprocedure('private.guard_last_active_business_admin()'))) = 0
+     OR position('v_remaining_admins' IN pg_get_functiondef(to_regprocedure('private.guard_last_active_business_admin()'))) = 0
+     OR position('count(*)' IN lower(pg_get_functiondef(to_regprocedure('private.guard_last_active_business_admin()')))) = 0 THEN
     RAISE EXCEPTION 'FALLO: falta la protección transaccional contra retirar al último administrador activo.';
   END IF;
 
@@ -2006,6 +2011,8 @@ BEGIN
          AND p.proname = 'prevent_audit_log_mutation'
          AND (t.tgtype::integer & 16) = 16
          AND (t.tgtype::integer & 8) = 8
+         AND (t.tgtype::integer & 2) = 2
+         AND (t.tgtype::integer & 1) = 1
      )
      OR NOT EXISTS (
        SELECT 1 FROM pg_trigger t
@@ -2017,6 +2024,7 @@ BEGIN
          AND NOT t.tgisinternal
          AND p.proname = 'prevent_audit_log_mutation'
          AND (t.tgtype::integer & 32) = 32
+         AND (t.tgtype::integer & 2) = 2
      )
      OR has_table_privilege('service_role','public.audit_logs','UPDATE')
      OR has_table_privilege('service_role','public.audit_logs','DELETE')
