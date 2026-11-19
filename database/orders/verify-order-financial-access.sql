@@ -158,3 +158,73 @@ BEGIN
   RAISE NOTICE 'OK: los privilegios de lectura financiera de pedidos coinciden con el diseño esperado.';
 END;
 $verification$;
+
+
+-- Los RPC privilegiados deben ser SECURITY DEFINER solo cuando lo necesitan,
+-- fijar search_path vacío, comprobar auth.uid() y no conservar EXECUTE para PUBLIC/anon.
+DO $verification$
+DECLARE
+  signature text;
+  function_oid oid;
+  function_definition text;
+  function_config text[];
+  function_is_definer boolean;
+  has_public_execute boolean;
+  signatures text[] := ARRAY[
+    'public.get_business_admin_order_financials(uuid,boolean,integer)',
+    'public.mark_order_payment_received(uuid,text,text,text)',
+    'public.get_customer_order_history()',
+    'private.customer_owns_order(uuid)',
+    'public.request_order_cancellation(uuid,uuid,text)',
+    'public.decide_order_cancellation(uuid,text,text)',
+    'public.complete_order_refund(uuid,text,text,text,text)'
+  ];
+BEGIN
+  FOREACH signature IN ARRAY signatures LOOP
+    function_oid := pg_catalog.to_regprocedure(signature);
+    IF function_oid IS NULL THEN
+      RAISE EXCEPTION 'FALLO: falta el RPC requerido: %.', signature;
+    END IF;
+
+    SELECT p.prosecdef, p.proconfig, pg_catalog.pg_get_functiondef(p.oid)
+      INTO function_is_definer, function_config, function_definition
+    FROM pg_catalog.pg_proc p
+    WHERE p.oid = function_oid;
+
+    IF function_is_definer IS DISTINCT FROM true THEN
+      RAISE EXCEPTION 'FALLO: el RPC privilegiado no está definido como SECURITY DEFINER: %.', signature;
+    END IF;
+
+    IF NOT COALESCE(function_config @> ARRAY['search_path=""']::text[], false) THEN
+      RAISE EXCEPTION 'FALLO: el RPC no fija search_path vacío: %.', signature;
+    END IF;
+
+    IF function_definition NOT ILIKE '%auth.uid()%' THEN
+      RAISE EXCEPTION 'FALLO: el RPC no valida la identidad de la sesión mediante auth.uid(): %.', signature;
+    END IF;
+
+    IF pg_catalog.has_function_privilege('anon', function_oid, 'EXECUTE') THEN
+      RAISE EXCEPTION 'FALLO: anon puede ejecutar el RPC: %.', signature;
+    END IF;
+
+    IF NOT pg_catalog.has_function_privilege('authenticated', function_oid, 'EXECUTE') THEN
+      RAISE EXCEPTION 'FALLO: authenticated no tiene el EXECUTE esperado: %.', signature;
+    END IF;
+
+    SELECT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_proc p
+      CROSS JOIN LATERAL pg_catalog.aclexplode(
+        COALESCE(p.proacl, pg_catalog.acldefault('f', p.proowner))
+      ) AS acl
+      WHERE p.oid = function_oid
+        AND acl.grantee = 0
+        AND acl.privilege_type = 'EXECUTE'
+    ) INTO has_public_execute;
+
+    IF has_public_execute THEN
+      RAISE EXCEPTION 'FALLO: PUBLIC conserva EXECUTE sobre el RPC: %.', signature;
+    END IF;
+  END LOOP;
+END
+$verification$;
