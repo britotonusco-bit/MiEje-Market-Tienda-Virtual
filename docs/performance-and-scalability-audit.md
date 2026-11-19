@@ -178,10 +178,10 @@ Se ampliaron los listados:
 - Favoritos del cliente: 50 por página, cursor `created_at + id`, filtro por `user_id`. Se conserva la eliminación del favorito y al volver a cargar se regresa a la primera página.
 
 Pendientes de rendimiento/paginación:
-- Historial de pedidos del cliente: la RPC actual devuelve los últimos 50; falta crear una variante paginada.
+- Historial de pedidos del cliente: ya dispone de una variante paginada de 50 registros (ver sección 18).
 - Eventos de auditoría: el endpoint técnico y la consulta administrativa aún tienen tope de 100.
 - El listado de reembolsos conserva el RPC anterior con tope de 100.
-- El catálogo público conserva límites globales; necesita carga por tienda y categoría.
+- El catálogo público ya elimina los topes globales mediante carga por bloques; aún falta evolucionar a carga progresiva por tienda/categoría.
 - Publicaciones del negocio y listas técnicas de negocios/usuarios requieren revisar paginación de extremo a extremo.
 
 No se ha probado en navegador ni staging. Los cambios de cuenta/favoritos dependen de que la migración de clientes esté instalada y la tabla esté expuesta por Data API.
