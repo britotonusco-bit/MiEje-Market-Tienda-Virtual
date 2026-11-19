@@ -540,3 +540,10 @@ La revisión de la base activa encontró la tabla sin eventos, sin triggers y co
 El borrador `database/security/audit-log-immutability-draft.sql` bloquea UPDATE/DELETE/TRUNCATE, conserva INSERT de servidor, valida acción/entidad, exige objeto JSON de máximo 16 KiB y fija `created_at` desde PostgreSQL. Los formularios de motivos advierten no introducir contraseñas, teléfonos, correos, documentos ni datos personales innecesarios. La Edge Function limita cada consulta a 100 eventos y valida el UUID de negocio.
 
 La retención formal y paginación histórica siguen pendientes. No se debe instalar una purga automática hasta aprobar una política de conservación. La base activa sigue sin cambios; el recuento agregado consultado fue cero eventos.
+
+
+### Soporte técnico y atención al cliente — 19 nov 2026
+
+La revisión estática está documentada en `docs/support-and-customer-service-audit.md`. El proyecto tiene un enlace externo a WhatsApp para soporte técnico y contactos WhatsApp de cada negocio. No existe actualmente un módulo interno de tickets ni conversaciones persistentes. El asistente de tienda es una ayuda local basada en reglas, no un servicio de IA ni un canal para reclamos.
+
+En Supabase activo no se encontraron tablas públicas de soporte/tickets/chat/mensajes/contacto. La Edge Function `get-platform-public-settings` y la tabla `platform_public_settings` no están activas en el proyecto actual. La rama añade cabeceras de no-cache al endpoint, aclara el uso público de los números y advierte sobre datos personales en el asistente. No se desplegó ni se aplicó SQL.
