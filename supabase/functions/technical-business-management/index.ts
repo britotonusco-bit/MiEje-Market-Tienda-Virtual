@@ -375,16 +375,28 @@ Deno.serve(async (req: Request) => {
 
     if (action === "list_audit_logs") {
       const businessId = textValue(body.business_id, 80);
-      const limitValue = Number(body.limit ?? 100);
-      const limit = Number.isInteger(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 100;
-      if (businessId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(businessId)) {
+      const limitValue = Number(body.limit ?? 51);
+      const limit = Number.isInteger(limitValue) ? Math.min(Math.max(limitValue, 1), 51) : 51;
+      const beforeCreatedAt = typeof body.before_created_at === "string" ? body.before_created_at : "";
+      const beforeId = textValue(body.before_id, 80);
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (businessId && !uuidPattern.test(businessId)) {
         return reply(400, { error: "El identificador del negocio no es válido." });
+      }
+      if ((beforeCreatedAt && !Number.isFinite(Date.parse(beforeCreatedAt))) ||
+          Boolean(beforeCreatedAt) !== Boolean(beforeId) ||
+          (beforeId && !uuidPattern.test(beforeId))) {
+        return reply(400, { error: "El cursor de auditoría no es válido o está incompleto." });
       }
       let query = admin.from("audit_logs")
         .select("id,business_id,actor_id,action,entity_type,entity_id,details,created_at", { count: "exact" })
         .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .limit(limit);
       if (businessId) query = query.eq("business_id", businessId);
+      if (beforeCreatedAt && beforeId) {
+        query = query.or(`created_at.lt.${beforeCreatedAt},and(created_at.eq.${beforeCreatedAt},id.lt.${beforeId})`);
+      }
       const { data, error, count } = await query;
       if (error) throw error;
 
