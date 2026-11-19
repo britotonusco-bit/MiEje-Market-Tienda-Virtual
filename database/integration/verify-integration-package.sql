@@ -1953,6 +1953,25 @@ BEGIN
     RAISE EXCEPTION 'FALLO: la lectura directa de audit_logs conserva un bypass técnico global o carece de límites por negocio.';
   END IF;
 
+  -- audit_logs requiere RLS y no admite escritura directa desde clientes.
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname='public'
+      AND c.relname='audit_logs'
+      AND c.relrowsecurity
+  )
+     OR has_table_privilege('anon','public.audit_logs','SELECT')
+     OR has_table_privilege('anon','public.audit_logs','INSERT')
+     OR has_table_privilege('authenticated','public.audit_logs','INSERT')
+     OR has_table_privilege('authenticated','public.audit_logs','UPDATE')
+     OR has_table_privilege('authenticated','public.audit_logs','DELETE')
+     OR has_table_privilege('authenticated','public.audit_logs','TRUNCATE')
+     OR NOT has_table_privilege('service_role','public.audit_logs','INSERT') THEN
+    RAISE EXCEPTION 'FALLO: RLS o privilegios de audit_logs permiten acceso directo no autorizado.';
+  END IF;
+
   -- Los perfiles son privados: cada usuario autenticado solo lee su fila.
   IF NOT EXISTS (
     SELECT 1 FROM pg_policies
