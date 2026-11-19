@@ -400,6 +400,73 @@ BEGIN
 
   IF NOT EXISTS (
     SELECT 1
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='public'
+      AND p.proname='get_customer_order_history'
+      AND p.prosecdef
+      AND p.proconfig @> ARRAY['search_path=""']::text[]
+      AND position('auth.uid()' IN lower(pg_get_functiondef(p.oid))) > 0
+      AND position('customer_user_id = v_actor' IN lower(pg_get_functiondef(p.oid))) > 0
+      AND position('is_blocked = false' IN lower(pg_get_functiondef(p.oid))) > 0
+  ) THEN
+    RAISE EXCEPTION 'FALLO: la RPC de historial no valida sesión, perfil activo, propiedad y search_path seguro.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='private'
+      AND p.proname='customer_owns_order'
+      AND p.prosecdef
+      AND p.proconfig @> ARRAY['search_path=""']::text[]
+      AND position('auth.uid()' IN lower(pg_get_functiondef(p.oid))) > 0
+      AND position('customer_user_id = auth.uid()' IN lower(pg_get_functiondef(p.oid))) > 0
+  ) OR NOT has_function_privilege('authenticated',
+       'private.customer_owns_order(uuid)','EXECUTE')
+     OR has_function_privilege('anon',
+       'private.customer_owns_order(uuid)','EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: la función interna de propiedad del pedido no está limitada por auth.uid() o tiene permisos incorrectos.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='order_items'
+      AND policyname='order_items_customer_select_own'
+      AND cmd='SELECT'
+      AND coalesce(qual,'') ILIKE '%customer_owns_order%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: las líneas de pedido no tienen política de lectura propia para el cliente.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='customer_favorites'
+      AND policyname='customer_favorites_select_own'
+      AND cmd='SELECT'
+      AND coalesce(qual,'') ILIKE '%auth.uid%'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='customer_favorites'
+      AND policyname='customer_favorites_insert_own_active_product'
+      AND cmd='INSERT'
+      AND coalesce(with_check,'') ILIKE '%auth.uid%'
+      AND coalesce(with_check,'') ILIKE '%is_active%'
+      AND coalesce(with_check,'') ILIKE '%status%'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='customer_favorites'
+      AND policyname='customer_favorites_delete_own'
+      AND cmd='DELETE'
+      AND coalesce(qual,'') ILIKE '%auth.uid%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: las políticas de favoritos no restringen lectura/escritura a su propietario y productos activos.';
+  END IF;
+
+
+  IF NOT EXISTS (
+    SELECT 1
     FROM pg_constraint c
     JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=ANY(c.conkey)
     WHERE c.conrelid='public.orders'::regclass
