@@ -68,6 +68,32 @@ BEGIN
     RAISE EXCEPTION 'FALLO: la RPC no exige la versión de aviso de privacidad configurada para el checkout.';
   END IF;
 
+  -- El código público de seguimiento es una credencial aleatoria:
+  -- debe generarse en PostgreSQL, ser obligatorio y tener unicidad global.
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema='public'
+      AND table_name='orders'
+      AND column_name='public_tracking_token'
+      AND is_nullable='NO'
+      AND column_default ILIKE '%gen_random_uuid%'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM pg_index i
+    JOIN pg_class t ON t.oid=i.indrelid
+    JOIN pg_namespace n ON n.oid=t.relnamespace
+    JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=ANY(i.indkey)
+    WHERE n.nspname='public'
+      AND t.relname='orders'
+      AND i.indisunique
+      AND i.indisvalid
+      AND a.attname='public_tracking_token'
+      AND i.indnkeyatts=1
+  ) THEN
+    RAISE EXCEPTION 'FALLO: el código privado de seguimiento debe ser obligatorio, generado por gen_random_uuid() y único.';
+  END IF;
+
   IF to_regclass('public.customer_favorites') IS NULL
      OR to_regclass('private.checkout_idempotency') IS NULL
      OR to_regclass('private.checkout_rate_limit_reservations') IS NULL
