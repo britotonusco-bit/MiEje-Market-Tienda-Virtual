@@ -724,7 +724,7 @@ Deno.serve(async (req: Request) => {
             p_failure_code: failureCode,
           });
           if (failedError) console.error("Could not mark invitation as failed:", failedError);
-          console.error("inviteUserByEmail failed:", inviteError);
+          console.error("inviteUserByEmail failed:", failureCode);
           return reply(502, {
             error: "Supabase no confirmó el envío del correo y la invitación quedó marcada como fallida. Antes de repetir, revisa Authentication > Users: si no existe la cuenta, puedes intentarlo de nuevo; si quedó una cuenta invitada sin confirmar, requiere reconciliación técnica y no debes crear otra cuenta.",
             invitation_sent: false,
@@ -736,7 +736,7 @@ Deno.serve(async (req: Request) => {
           p_user_id: inviteData.user.id,
         });
         if (attachError) {
-          console.error("Invitation user attachment failed:", attachError);
+          console.error("Invitation user attachment failed:", attachError.code || "unknown");
           return reply(503, {
             error: "El correo fue enviado, pero falta vincular la cuenta a la membresía pendiente. No crees otra invitación: vuelve a intentar la misma operación para reconciliarla.",
             invitation_sent: true,
