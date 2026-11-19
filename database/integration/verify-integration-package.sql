@@ -295,6 +295,37 @@ BEGIN
   END IF;
 
 
+
+
+  IF to_regprocedure('public.get_business_admin_order_financials_page(uuid,boolean,integer,timestamptz,uuid)') IS NULL THEN
+    RAISE EXCEPTION 'FALLO: falta el RPC paginado de finanzas para pedidos del administrador.';
+  END IF;
+
+  IF position('has_business_role' IN lower(pg_get_functiondef(
+       'public.get_business_admin_order_financials_page(uuid,boolean,integer,timestamptz,uuid)'::regprocedure
+     ))) = 0
+     OR position('business_is_active' IN lower(pg_get_functiondef(
+       'public.get_business_admin_order_financials_page(uuid,boolean,integer,timestamptz,uuid)'::regprocedure
+     ))) = 0
+     OR position('p_before_created_at' IN lower(pg_get_functiondef(
+       'public.get_business_admin_order_financials_page(uuid,boolean,integer,timestamptz,uuid)'::regprocedure
+     ))) = 0
+     OR position('p_before_order_id' IN lower(pg_get_functiondef(
+       'public.get_business_admin_order_financials_page(uuid,boolean,integer,timestamptz,uuid)'::regprocedure
+     ))) = 0
+     OR position('order by o.created_at desc, o.id desc' IN lower(pg_get_functiondef(
+       'public.get_business_admin_order_financials_page(uuid,boolean,integer,timestamptz,uuid)'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: el RPC paginado no aplica autorización, cursor compuesto y orden estable.';
+  END IF;
+
+  IF NOT has_function_privilege('authenticated',
+       'public.get_business_admin_order_financials_page(uuid,boolean,integer,timestamptz,uuid)','EXECUTE')
+     OR has_function_privilege('anon',
+       'public.get_business_admin_order_financials_page(uuid,boolean,integer,timestamptz,uuid)','EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: permisos incorrectos en el RPC financiero paginado.';
+  END IF;
+
   IF to_regprocedure('public.get_business_admin_order_financials(uuid,boolean,integer)') IS NULL
      OR to_regprocedure('public.mark_order_payment_received(uuid,text,text,text)') IS NULL
      OR to_regprocedure('public.get_customer_order_history()') IS NULL THEN
