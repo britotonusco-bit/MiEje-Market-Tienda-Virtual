@@ -185,10 +185,10 @@ END;
 $function$;
 
 REVOKE ALL ON FUNCTION public.create_public_order_for_customer_with_payment_method(
-  uuid, uuid, uuid, text, text, text, text, text, text, text, text, jsonb
+  uuid, uuid, uuid, text, text, text, text, text, text, boolean, text, jsonb
 ) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.create_public_order_for_customer_with_payment_method(
-  uuid, uuid, uuid, text, text, text, text, text, text, text, text, jsonb
+  uuid, uuid, uuid, text, text, text, text, text, text, boolean, text, jsonb
 ) TO service_role;
 
 -- La cuenta autenticada se asigna solo después de validar el JWT en la Edge Function.
