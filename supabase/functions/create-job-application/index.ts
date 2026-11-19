@@ -36,6 +36,29 @@ function value(input: unknown, max: number): string {
 function isUuid(input: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input);
 }
+function signedUploadTokenExpiration(token: string): number | null {
+  const parts = token.split(".");
+  if (parts.length !== 3 || !parts[1]) return null;
+
+  try {
+    const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const paddedPayload = payload.padEnd(Math.ceil(payload.length / 4) * 4, "=");
+    const claims = JSON.parse(atob(paddedPayload));
+    const expiration = Number(claims.exp);
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const maximumExpiration = nowSeconds + 24 * 60 * 60;
+
+    if (!Number.isSafeInteger(expiration)
+        || expiration <= nowSeconds
+        || expiration > maximumExpiration) {
+      return null;
+    }
+    return expiration;
+  } catch {
+    return null;
+  }
+}
+
 async function sha256(input: string): Promise<string> {
   const bytes = new TextEncoder().encode(input);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -136,7 +159,22 @@ Deno.serve(async (req: Request) => {
       const applicationId = crypto.randomUUID();
       const objectName = crypto.randomUUID() + "." + fileType.extension;
       const path = businessId + "/" + applicationId + "/" + objectName;
-      const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+      const { data: signed, error: signedError } = await admin.storage
+        .from(BUCKET)
+        .createSignedUploadUrl(path, { upsert: false });
+      if (signedError || !signed) {
+        throw signedError ?? new Error("No se pudo preparar la carga.");
+      }
+
+      // La vigencia del token la decide Storage. Leer su claim exp evita
+      // asumir una duración fija que puede variar según la configuración
+      // del proyecto. La sesión SQL vence cinco minutos después del token,
+      // para que la limpieza nunca retire el objeto mientras el token siga vivo.
+      const tokenExpiration = signedUploadTokenExpiration(signed.token);
+      if (!tokenExpiration) {
+        return reply(503, { error: "No fue posible validar la vigencia de la carga." });
+      }
+      const expiresAt = new Date((tokenExpiration + 5 * 60) * 1000).toISOString();
 
       const { error: sessionError } = await admin.from("job_application_upload_sessions").insert({
         id: applicationId,
@@ -146,14 +184,6 @@ Deno.serve(async (req: Request) => {
         expires_at: expiresAt,
       });
       if (sessionError) throw sessionError;
-
-      const { data: signed, error: signedError } = await admin.storage
-        .from(BUCKET)
-        .createSignedUploadUrl(path, { upsert: false });
-      if (signedError || !signed) {
-        await admin.from("job_application_upload_sessions").delete().eq("id", applicationId);
-        throw signedError ?? new Error("No se pudo preparar la carga.");
-      }
 
       return reply(200, {
         ok: true,
