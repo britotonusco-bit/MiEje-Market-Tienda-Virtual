@@ -258,7 +258,6 @@
       button.addEventListener('click', () => {
         const period = button.dataset.profitPeriod;
         const year = Number(today.slice(0,4));
-        const month = Number(today.slice(5,7));
         if (period === 'day') {
           form.elements.start_date.value = today;
           form.elements.end_date.value = today;
