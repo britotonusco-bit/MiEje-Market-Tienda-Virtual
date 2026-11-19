@@ -410,10 +410,20 @@ Deno.serve(async (req: Request) => {
       if (cursor.error) return reply(400, { error: cursor.error });
       const limitValue = Number(body.limit ?? 51);
       const limit = Number.isInteger(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 51;
+      const searchTerm = typeof body.search === "string" ? body.search.trim().slice(0, 80) : "";
+      if (searchTerm && !/^[\\p{L}\\p{N} _.-]+$/u.test(searchTerm)) {
+        return reply(400, { error: "La búsqueda contiene caracteres no permitidos." });
+      }
+      const activeOnly = body.active_only === true;
       let query = admin.from("businesses")
         .select("id,name,slug,category,status,suspension_reason,public_suspension_message,created_at")
         .order("created_at", { ascending: false }).order("id", { ascending: false })
         .limit(limit);
+      if (searchTerm) {
+        const pattern = `%${searchTerm.replace(/[%_]/g, "")}%`;
+        query = query.or(`name.ilike.${pattern},slug.ilike.${pattern},category.ilike.${pattern}`);
+      }
+      if (activeOnly) query = query.eq("status", "active");
       if (cursor.createdAt && cursor.id) {
         query = query.or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`);
       }
