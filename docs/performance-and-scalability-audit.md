@@ -157,3 +157,14 @@ Se añadió el RPC borrador `get_business_admin_order_financials_page` y se cone
 - La función comprueba sesión, negocio activo, rol `business_admin` y que el cursor llegue completo.
 
 El RPC es un borrador SQL adicional. Debe aplicarse primero en staging, probarse con timestamps repetidos, páginas vacías, más de 50 pedidos, cambios concurrentes y usuarios de dos negocios. La función antigua de hasta 100 registros se conserva por compatibilidad, pero el panel utiliza la nueva función paginada.
+
+
+## 14. Paginación de postulaciones y cancelaciones
+
+En `panel-live.js` se añadieron páginas de 50 registros para:
+- Postulaciones laborales del negocio, incluyendo sus enlaces temporales de CV bajo demanda.
+- Solicitudes de cancelación del negocio, conservando las acciones de aprobar y rechazar.
+
+Ambos listados usan `created_at DESC, id DESC`, cursor compuesto y filtro `business_id`. Se solicita una fila adicional para detectar la página siguiente. Los controles Anterior/Siguiente mantienen el cursor de cada página; los estados vacíos también conservan la navegación hacia la página anterior.
+
+No se ha comprobado aún el rendimiento con un volumen real de CV ni la interacción concurrente entre revisiones/cancelaciones y la navegación. Las pruebas de autorización, RLS y enlaces firmados deben ejecutarse en staging.
