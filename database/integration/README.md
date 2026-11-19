@@ -638,3 +638,8 @@ El listado de publicaciones del administrador del negocio se pagina en bloques d
 
 
 Los movimientos financieros de plataforma y la nómina del panel técnico se consultan por separado en páginas de 50, con cursor compuesto `occurred_at + id` para finanzas y `created_at + id` para nómina. El endpoint valida ambos cursores y conserva la protección del panel técnico y MFA.
+
+
+### Selectores de miembros paginados
+
+Los selectores de cuentas del panel técnico y el selector de destinatarios de solicitudes de bloqueo del administrador consultan páginas de hasta 50 membresías con cursor `created_at + id`. La Edge Function técnica usa una fila centinela para indicar si hay más resultados y solo consulta Auth para las cuentas que realmente devuelve. La prueba de integración debe cubrir negocios con más de 50 miembros y confirmar que el cursor nunca atraviesa el límite de `business_id`. La función actualizada debe desplegarse junto con el código del panel; no se ha desplegado.
