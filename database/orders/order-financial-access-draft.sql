@@ -418,6 +418,7 @@ BEGIN
         SELECT 1 FROM public.financial_transactions paid
         WHERE paid.business_id=p_business_id AND paid.order_id=o.id
           AND paid.transaction_type='payment_received' AND paid.status='completed'
+          AND paid.currency='COP'
       )
   ),
   cost_totals AS (
