@@ -93,6 +93,7 @@ AS $function$
 DECLARE
   v_actor uuid := auth.uid();
   v_order public.orders%ROWTYPE;
+  v_business_id uuid;
   v_provider text := NULLIF(pg_catalog.btrim(p_provider), '');
   v_reference text := NULLIF(pg_catalog.btrim(p_reference), '');
   v_notes text := NULLIF(pg_catalog.btrim(p_notes), '');
@@ -115,13 +116,13 @@ BEGIN
 
   -- Leer primero el negocio sin bloquear. Una cuenta ajena no debe poder
   -- retener locks de pedidos de otra tienda conociendo su identificador.
-  SELECT o.business_id INTO v_order.business_id
+  SELECT o.business_id INTO v_business_id
   FROM public.orders o
   WHERE o.id = p_order_id;
 
   IF NOT FOUND
-     OR NOT private.business_is_active(v_order.business_id)
-     OR NOT private.has_business_role(v_order.business_id, ARRAY['business_admin']::text[]) THEN
+     OR NOT private.business_is_active(v_business_id)
+     OR NOT private.has_business_role(v_business_id, ARRAY['business_admin']::text[]) THEN
     RAISE EXCEPTION 'No se encontró el pedido o no tienes permiso para procesarlo.'
       USING ERRCODE = '42501';
   END IF;
@@ -130,7 +131,7 @@ BEGIN
   SELECT * INTO v_order
   FROM public.orders
   WHERE id = p_order_id
-    AND business_id = v_order.business_id
+    AND business_id = v_business_id
   FOR UPDATE;
 
   IF NOT FOUND
