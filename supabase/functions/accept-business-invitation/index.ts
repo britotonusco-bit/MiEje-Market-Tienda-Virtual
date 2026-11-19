@@ -107,6 +107,10 @@ Deno.serve(async (req: Request) => {
   }
 
   if (Date.parse(invitation.expires_at) <= Date.now()) {
+    const { error: expireError } = await admin.rpc("expire_business_invitation", {
+      p_invitation_id: invitationId,
+    });
+    if (expireError) console.error("Invitation expiry update failed:", expireError);
     return reply(410, { error: "La invitación venció. Solicita al propietario técnico que genere una nueva." });
   }
 
