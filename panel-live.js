@@ -9,6 +9,11 @@
   let isBusinessOwner = false;
   let cachedBusinesses = [];
   let cachedProducts = [];
+  const PANEL_PAGE_SIZE = 50;
+  let employeeOrderCursorStack = [null];
+  let employeeOrderPageIndex = 0;
+  let productCursorStack = [null];
+  let productPageIndex = 0;
   const statusLabels = {
     received: 'Recibido', confirmed: 'Confirmado', preparing: 'En preparación',
     ready: 'Listo', on_the_way: 'En camino', delivered: 'Entregado', cancelled: 'Cancelado'
@@ -95,7 +100,7 @@
       document.querySelector('#businessContentForm')?.addEventListener('submit', saveBusinessContent);
       document.querySelector('#businessAiForm')?.addEventListener('submit', saveBusinessAi);
       document.querySelector('#blockRequestForm')?.addEventListener('submit', submitBlockRequest);
-      document.querySelector('#refreshOrders')?.addEventListener('click', () => panel === 'business_admin' ? loadBusinessOrders() : loadEmployeeOrders());
+      document.querySelector('#refreshOrders')?.addEventListener('click', () => panel === 'business_admin' ? loadBusinessOrders() : loadEmployeeOrders(true));
       document.querySelector('#refreshCancellations')?.addEventListener('click', loadCancellationRequests);
       document.querySelector('#refreshRefunds')?.addEventListener('click', loadRefundableOrders);
 
@@ -747,28 +752,61 @@
     })), true);
   }
 
-  async function loadEmployeeOrders() {
+  async function loadEmployeeOrders(reset = true) {
     const target = document.querySelector('#ordersContainer');
+    if (reset) { employeeOrderCursorStack = [null]; employeeOrderPageIndex = 0; }
     target.innerHTML = '<div class="empty">Cargando pedidos…</div>';
-    const { data, error } = await db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,delivery_tracking,status,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
+    let query = db.from('orders')
+      .select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,delivery_tracking,status,created_at,order_items(product_name,quantity)')
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+      .limit(PANEL_PAGE_SIZE + 1);
+    const cursor = employeeOrderCursorStack[employeeOrderPageIndex];
+    if (cursor) query = query.or('created_at.lt.' + cursor.created_at + ',and(created_at.eq.' + cursor.created_at + ',id.lt.' + cursor.id + ')');
+    const { data, error } = await query;
     if (error) return showError(target, error);
-    renderOrders(target, (data || []).map(o => ({ ...o, items: o.order_items || [] })), false);
+    const rows = data || [];
+    const pageRows = rows.slice(0, PANEL_PAGE_SIZE);
+    renderOrders(target, pageRows.map(o => ({ ...o, items: o.order_items || [] })), false);
+    appendCursorPager(target, {
+      page: employeeOrderPageIndex + 1, canPrevious: employeeOrderPageIndex > 0,
+      hasMore: rows.length > PANEL_PAGE_SIZE,
+      previous: () => { employeeOrderPageIndex--; void loadEmployeeOrders(false); },
+      next: () => {
+        const last = pageRows[pageRows.length - 1];
+        if (!last) return;
+        employeeOrderCursorStack[employeeOrderPageIndex + 1] = { created_at: last.created_at, id: last.id };
+        employeeOrderPageIndex++;
+        void loadEmployeeOrders(false);
+      }
+    });
   }
 
-  async function loadProducts() {
+  async function loadProducts(reset = true) {
     const target = document.querySelector('#productsContainer');
-    const [productsResult, costsResult] = await Promise.all([
-      db.from('products').select('id,name,category,description,price,inventory,image_url,is_active').eq('business_id', businessId).order('name').limit(250),
-      db.from('product_costs').select('product_id,cost_price').eq('business_id', businessId)
-    ]);
+    if (reset) { productCursorStack = [null]; productPageIndex = 0; }
+    target.innerHTML = '<div class="empty">Cargando productos…</div>';
+    let productQuery = db.from('products')
+      .select('id,name,category,description,price,inventory,image_url,is_active,created_at')
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+      .limit(PANEL_PAGE_SIZE + 1);
+    const cursor = productCursorStack[productPageIndex];
+    if (cursor) productQuery = productQuery.or('created_at.lt.' + cursor.created_at + ',and(created_at.eq.' + cursor.created_at + ',id.lt.' + cursor.id + ')');
+    const productsResult = await productQuery;
     if (productsResult.error) return showError(target, productsResult.error);
+    const pageRows = (productsResult.data || []).slice(0, PANEL_PAGE_SIZE);
+    const ids = pageRows.map(product => product.id);
+    const costsResult = ids.length
+      ? await db.from('product_costs').select('product_id,cost_price').eq('business_id', businessId).in('product_id', ids)
+      : { data: [], error: null };
     if (costsResult.error) return showError(target, costsResult.error);
     const costsByProduct = new Map((costsResult.data || []).map(row => [row.product_id, Number(row.cost_price)]));
-    cachedProducts = (productsResult.data || []).map(product => ({
+    cachedProducts = pageRows.map(product => ({
       ...product,
       cost_price: costsByProduct.has(product.id) ? costsByProduct.get(product.id) : null
     }));
-    if (!cachedProducts.length) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene productos registrados. Puedes crear el primero en el formulario.</div>'; return; }
+    if (!cachedProducts.length && productPageIndex === 0) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene productos registrados. Puedes crear el primero en el formulario.</div>'; return; }
     target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Categoría</th><th>Precio</th><th>Costo unitario</th><th>Margen bruto unitario</th><th>Existencias</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>' +
       cachedProducts.map(p => {
         const hasCost = p.cost_price !== null && Number.isFinite(p.cost_price);
@@ -785,6 +823,18 @@
       }).join('') + '</tbody></table></div>';
     target.querySelectorAll('[data-edit-product]').forEach(button => button.addEventListener('click', () => editProduct(button.dataset.editProduct)));
     target.querySelectorAll('[data-toggle-product]').forEach(button => button.addEventListener('click', () => toggleProductStatus(button.dataset.toggleProduct, button)));
+    appendCursorPager(target, {
+      page: productPageIndex + 1, canPrevious: productPageIndex > 0,
+      hasMore: (productsResult.data || []).length > PANEL_PAGE_SIZE,
+      previous: () => { productPageIndex--; void loadProducts(false); },
+      next: () => {
+        const last = pageRows[pageRows.length - 1];
+        if (!last) return;
+        productCursorStack[productPageIndex + 1] = { created_at: last.created_at, id: last.id };
+        productPageIndex++;
+        void loadProducts(false);
+      }
+    });
   }
 
   async function loadInventoryMovements() {
@@ -2152,6 +2202,17 @@
     const target = document.querySelector('#statsGrid');
     target.innerHTML = items.map(([label, value, detail]) => `<article class="stat"><span>${esc(label)}</span><strong>${esc(value)}</strong><small>${esc(detail)}</small></article>`).join('');
   }
+  function appendCursorPager(target, options) {
+    const pager = document.createElement('div');
+    pager.className = 'form-grid';
+    pager.style.alignItems = 'center';
+    pager.style.marginTop = '14px';
+    pager.innerHTML = '<button type="button" class="button secondary" data-page-previous ' + (options.canPrevious ? '' : 'disabled') + '>Anterior</button><span class="muted" style="text-align:center">Página ' + options.page + '</span><button type="button" class="button secondary" data-page-next ' + (options.hasMore ? '' : 'disabled') + '>Siguiente</button>';
+    pager.querySelector('[data-page-previous]').addEventListener('click', options.previous);
+    pager.querySelector('[data-page-next]').addEventListener('click', options.next);
+    target.appendChild(pager);
+  }
+
   function tableHtml(headers, rows) {
     return `<div class="table-wrap"><table><thead><tr>${headers.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${cell === null || cell === undefined ? '—' : cell}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   }
