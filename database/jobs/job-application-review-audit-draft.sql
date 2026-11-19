@@ -13,6 +13,15 @@ GRANT UPDATE (status, admin_notes)
   ON TABLE public.job_applications
   TO authenticated;
 
+REVOKE UPDATE (
+  id, business_id, content_page_id, applicant_name, applicant_contact,
+  applicant_message, form_responses, privacy_consent,
+  privacy_consent_version, privacy_consent_at, resume_path,
+  reviewed_by, reviewed_at, created_at
+) ON TABLE public.job_applications
+  FROM PUBLIC, anon, authenticated;
+
+
 -- Los metadatos de auditoría se generan en PostgreSQL. El cliente no puede
 -- elegir qué usuario aparece como revisor ni falsificar la fecha.
 CREATE OR REPLACE FUNCTION public.set_job_application_review_audit()
