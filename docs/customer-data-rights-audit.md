@@ -294,3 +294,10 @@ La política de retención sigue abierta: la limpieza elimina sesiones temporale
 
 
 **Dependencias adicionales que faltan en el repositorio:** la función Edge invoca `consume_job_application_rate_limit`, pero no se encontró su definición SQL ni un archivo que cree las tres tablas base. El verificador ahora exige que la RPC exista y sea ejecutable solo por `service_role`; esto no reemplaza la necesidad de recuperar su DDL y probar su contador en staging. También se debe confirmar que el proxy de staging suministre `cf-connecting-ip`, ya que el código falla de forma cerrada si falta.
+
+
+### Ajuste del guardado de postulaciones desde el panel
+
+La interfaz del administrador actualizaba `reviewed_by` y `reviewed_at` usando valores construidos en el navegador. Se retiraron esos dos campos del UPDATE: el panel ahora envía únicamente `status` y `admin_notes`, que son los campos operativos previstos para el administrador. La identidad del revisor y la fecha no deben confiarse al cliente; si se requiere conservar esa auditoría, debe implementarse con trigger o RPC en PostgreSQL que obtenga el usuario desde `auth.uid()` y la fecha desde el servidor. El verificador ahora falla si `authenticated` tiene permiso de actualizar directamente `reviewed_by` o `reviewed_at`.
+
+La función de limpieza también devuelve ahora `Cache-Control: no-store`, `Pragma: no-cache` y `X-Content-Type-Options: nosniff` en todas sus respuestas.
