@@ -185,3 +185,15 @@ Se amplió `verify-integration-package.sql` para comprobar:
 - Comprobar que un administrador de negocio no puede leer publicaciones privadas de otro negocio ni datos de moderación globales.
 
 No se ejecutaron migraciones, escrituras SQL ni despliegues.
+
+
+### MOD-03 — La moderación activa no es atómica
+
+La Edge Function desplegada versión 6 sí tiene la acción `moderate_business_content`, pero su implementación:
+1. Lee la publicación.
+2. Actualiza `business_content_pages` directamente.
+3. Inserta el evento en `audit_logs` en una llamada separada.
+
+Si la actualización funciona y el INSERT de auditoría falla, el contenido queda moderado sin evidencia correspondiente. Tampoco usa bloqueo transaccional de la fila mediante la RPC nueva.
+
+La rama reemplaza ese flujo por `moderate_business_content_transactionally`. La función activa tampoco contiene la comprobación AAL2 que ya está preparada en la rama para la función técnica. Por ello no debe considerarse protegida contra llamadas directas con una sesión técnica de nivel AAL1.
