@@ -233,7 +233,7 @@
     renderStats([
       ['Pedidos de hoy', number(todayOrders.length), 'Pedidos creados hoy, sin cancelados'],
       ['Cobros confirmados hoy', money(todayPaidSales), 'Suma de movimientos de pago completados hoy, según la fecha efectiva en hora Colombia'],
-      ['Total actual de pedidos marcados como pagados', money(currentlyPaid), 'Importe de pedidos cuyo estado actual de pago es paid; no representa todos los cobros históricos'],
+      ['Pedidos pagados consultados (máx. 10.000)', money(currentlyPaid), 'Suma de los pedidos pagados devueltos por la consulta limitada a los 10.000 pedidos más recientes; no es un total histórico ni sustituye el informe financiero'],
       ['Pedidos abiertos', number(orders.filter(o => !['delivered','cancelled'].includes(o.status)).length), 'Pendientes de completar'],
       ['Productos con poco stock', number(products.filter(p => p.is_active && Number(p.inventory || 0) <= 5).length), 'Cinco unidades o menos']
     ]);
