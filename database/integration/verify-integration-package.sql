@@ -735,6 +735,10 @@ BEGIN
     RAISE EXCEPTION 'FALLO: las postulaciones no están limitadas por RLS al administrador del negocio activo.';
   END IF;
 
+  IF has_table_privilege('authenticated','public.job_applications','UPDATE') THEN
+    RAISE EXCEPTION 'FALLO: authenticated conserva UPDATE a nivel de tabla en postulaciones; deben existir solo permisos por columna.';
+  END IF;
+
   IF NOT has_column_privilege('authenticated','public.job_applications','status','UPDATE')
      OR NOT has_column_privilege('authenticated','public.job_applications','admin_notes','UPDATE')
      OR has_column_privilege('authenticated','public.job_applications','business_id','UPDATE')
@@ -743,6 +747,25 @@ BEGIN
      OR has_column_privilege('authenticated','public.job_applications','reviewed_by','UPDATE')
      OR has_column_privilege('authenticated','public.job_applications','reviewed_at','UPDATE') THEN
     RAISE EXCEPTION 'FALLO: los permisos de revisión permiten campos incorrectos o no habilitan los campos operativos.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger t
+    JOIN pg_class c ON c.oid=t.tgrelid
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+    JOIN pg_proc p ON p.oid=t.tgfoid
+    WHERE n.nspname='public'
+      AND c.relname='job_applications'
+      AND t.tgname='trg_job_application_review_audit'
+      AND NOT t.tgisinternal
+      AND p.proname='set_job_application_review_audit'
+      AND NOT p.prosecdef
+      AND p.proconfig @> ARRAY['search_path=""']::text[]
+      AND position('auth.uid()' IN pg_get_functiondef(p.oid)) > 0
+      AND position('transaction_timestamp()' IN pg_get_functiondef(p.oid)) > 0
+  ) THEN
+    RAISE EXCEPTION 'FALLO: falta el trigger que genera reviewed_by y reviewed_at desde PostgreSQL.';
   END IF;
 
   IF EXISTS (
