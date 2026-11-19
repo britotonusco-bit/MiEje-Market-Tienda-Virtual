@@ -1936,9 +1936,10 @@
       esc(`#${o.order_number}`),
       money(o.total),
       dateTime(o.created_at),
-      `<button class="small-button" data-register-refund="${esc(o.order_id)}">Registrar reembolso realizado</button>`
+      'Pendiente de devolución',
+      `<button class="small-button" data-register-refund="${esc(o.order_id)}">Registrar devolución realizada</button>`
     ]);
-    target.innerHTML = tableHtml(['Pedido','Importe a devolver','Fecha del pedido','Acción'], rows);
+    target.innerHTML = tableHtml(['Pedido','Importe a devolver','Fecha del pedido','Estado de devolución','Acción'], rows);
     target.querySelectorAll('[data-register-refund]').forEach(button => {
       button.addEventListener('click', () => registerOrderRefund(button.dataset.registerRefund, button));
     });
