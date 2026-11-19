@@ -313,3 +313,12 @@ El panel `panel-live.js` se ajustó para enviar únicamente `status` y `admin_no
 
 
 El paso 20 también agrega la restricción `job_applications_status_allowed_check`, que limita los estados a `pending`, `reviewing`, `contacted`, `accepted` y `rejected`. Antes de crearla, el script comprueba que no existan estados históricos fuera de ese catálogo; si encuentra alguno, se detiene para revisión manual. El panel valida los mismos valores y limita las notas a 3000 caracteres, pero la restricción de PostgreSQL es la protección definitiva frente a solicitudes directas.
+
+
+### Alcance real de la limpieza de archivos huérfanos
+
+La función `cleanup-job-application-data` no recorre el bucket completo buscando objetos sin fila SQL. Obtiene únicamente sesiones vencidas devueltas por `list_expired_job_application_upload_sessions` y valida que cada ruta corresponda al negocio, la sesión y un nombre UUID con extensión permitida. Si existe una postulación vinculada, conserva el objeto y elimina solo la sesión temporal; si no existe, elimina el objeto de esa sesión y después la fila. Si Storage falla, conserva la fila para reintentar.
+
+Por tanto, el alcance probado por lectura de código es **limpieza de objetos asociados a sesiones vencidas**, no detección general de todos los objetos huérfanos del bucket. No se debe ampliar la eliminación a un barrido indiscriminado: cualquier rutina futura debe comparar rutas con postulaciones y sesiones, limitarse a un prefijo validado y registrar cada eliminación. Los objetos sin sesión detectable requieren un proceso separado de conciliación y revisión antes de borrarse.
+
+La migración de permisos del paso 20 se reforzó para revocar dinámicamente las concesiones UPDATE por columna de todas las columnas reales, salvo `status` y `admin_notes`; luego revoca esos dos permisos a todos los roles y los concede únicamente a `authenticated`. Así no depende de que el listado de columnas del esquema base esté completo.
