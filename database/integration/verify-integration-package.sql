@@ -1864,6 +1864,15 @@ BEGIN
     RAISE EXCEPTION 'FALLO: las RPC técnicas no están restringidas a service_role.';
   END IF;
 
+  IF position('decision_reason' IN pg_get_functiondef(
+       'public.set_technical_business_status(uuid,text,text,text,uuid)'::regprocedure
+     )) = 0
+     OR position('v_before.status IS DISTINCT FROM p_status' IN pg_get_functiondef(
+       'public.set_technical_business_status(uuid,text,text,text,uuid)'::regprocedure
+     )) = 0 THEN
+    RAISE EXCEPTION 'FALLO: el cambio de estado no conserva en auditoría el motivo de la decisión, incluida la reactivación.';
+  END IF;
+
   -- Las RPC de administración deben ser SECURITY INVOKER con search_path vacío.
   -- La autorización procede del actor validado por la Edge Function y del
   -- service_role; no deben añadir un segundo bypass SECURITY DEFINER.
