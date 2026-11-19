@@ -665,7 +665,7 @@ Deno.serve(async (req: Request) => {
         console.error("Business membership assignment RPC failed:", error);
         return reply(503, {
           error: invitationSent
-            ? "El correo fue enviado, pero la asignación no pudo finalizarse. No vuelvas a crear otra cuenta: reintenta la misma asignación para completar el acceso."
+            ? "La invitación se envió, pero la asignación no pudo finalizarse. La cuenta ya fue creada. El usuario debe aceptar la invitación y confirmar su correo; después podrás volver a asignar esa misma cuenta. No crees otra cuenta. Si el correo no llega, este panel todavía no tiene una función de reenvío automático y se requiere revisar Auth."
             : "No se pudo completar la asignación. No se modificó la membresía ni su auditoría.",
           invitation_sent: invitationSent,
           retryable: true,
