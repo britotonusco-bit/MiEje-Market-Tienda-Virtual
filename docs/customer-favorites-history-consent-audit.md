@@ -75,3 +75,30 @@ La pantalla muestra un mensaje de error si falla la RPC del historial o la consu
 8. Ejecutar el verificador integral: debe reconocer las cuatro firmas nuevas, los tres hashes de idempotencia y el timestamp generado en PostgreSQL.
 
 Estos casos no se han ejecutado todavía. La verificación realizada hasta ahora es estática sobre los archivos de la rama.
+
+
+## Auditoría de aislamiento entre clientes y negocios (19 nov 2026)
+
+### Resultado de la revisión estática
+
+- **Favoritos:** la tabla usa `user_id` como propietario, una clave única por usuario/producto y RLS para SELECT, INSERT y DELETE. El INSERT exige que el producto esté activo y pertenezca a un negocio activo. No se concede UPDATE, por lo que el cliente no puede reasignar un favorito a otra cuenta.
+- **Historial:** `get_customer_order_history()` exige una sesión, rechaza perfiles inexistentes o bloqueados y filtra los pedidos por `orders.customer_user_id = auth.uid()`. Devuelve como máximo 50 pedidos y sus líneas. No hay una consulta directa del historial desde el navegador: se utiliza la RPC.
+- **Líneas de pedido:** la política `order_items_customer_select_own` usa `private.customer_owns_order(order_id)`, que compara el pedido con `auth.uid()`. Los roles operativos tienen una política separada por membresía activa del negocio.
+- **Pedidos de negocio:** las políticas de lectura y actualización de administradores/empleados exigen membresía del negocio activo. El borrador de permisos no concede al cliente SELECT directo sobre `orders`; el historial se entrega por la RPC.
+- **Catálogo público:** los visitantes anónimos solo leen productos activos de negocios activos. Los datos públicos del negocio tienen grants por columnas; los campos internos no se entregan al directorio público.
+- **Separación de negocios:** los borradores de permisos impiden trasladar productos, gastos, métodos de pago y costos a otro `business_id`; las líneas y pedidos se consultan por el negocio de origen.
+
+### Bloqueo operativo de Data API
+
+La migración de favoritos habilita RLS y grants, pero también advierte que la tabla nueva debe estar expuesta en la configuración de Data API antes de que `client.from("customer_favorites")` funcione. Supabase anunció que las tablas nuevas dejaron de exponerse automáticamente en todos los proyectos desde el 30 de octubre de 2026. Por eso, aunque el SQL y el código estén preparados, hay que comprobar explícitamente la exposición de `public.customer_favorites` en el proyecto de staging. No se debe resolver exponiendo indiscriminadamente otras tablas. <https://supabase.com/changelog/breaking-change-tables-not-exposed-to-data-and-graphql-api-automatically>
+
+### Verificador reforzado
+
+Se amplió `database/integration/verify-integration-package.sql` para revisar también:
+
+- que la RPC de historial sea `SECURITY DEFINER`, use `search_path` vacío y compruebe `auth.uid()`, perfil no bloqueado y propiedad del pedido;
+- que `private.customer_owns_order(uuid)` use `SECURITY DEFINER`, `search_path` vacío y propiedad por `auth.uid()`, con permisos para authenticated y no para anon;
+- que la política de líneas de pedido llame al helper de propiedad;
+- que los predicados RLS de favoritos incluyan la identidad del usuario y la validación de producto/negocio activo.
+
+**Estado:** auditoría estática y verificación de consistencia del código realizadas. Las pruebas A/B, la exposición de Data API, las consultas reales y la evaluación del verificador SQL siguen pendientes en staging. No se ejecutó SQL ni se modificó el proyecto Supabase activo.
