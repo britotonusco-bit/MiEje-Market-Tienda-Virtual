@@ -531,3 +531,12 @@ El verificador ahora comprueba el índice único, los permisos de inserción por
 
 
 En la versión 6 desplegada, la acción de moderación sí existe, pero hace UPDATE de contenido y luego INSERT de auditoría en dos llamadas separadas; no usa la RPC transaccional. La versión activa tampoco valida AAL2 en la Edge Function. La rama ya sustituye el flujo por `moderate_business_content_transactionally` y exige AAL2. No desplegar hasta probar la migración/RPC y la función en staging.
+
+
+### Historial de auditoría `audit_logs` — 19 nov 2026
+
+La revisión de la base activa encontró la tabla sin eventos, sin triggers y con permisos UPDATE/DELETE/TRUNCATE para `service_role`. Su policy SELECT permitía lectura global al propietario técnico. La rama reemplaza la policy por lectura de administradores/actores activos del negocio propio; el panel técnico mantiene lectura global solo por la Edge Function validada.
+
+El borrador `database/security/audit-log-immutability-draft.sql` bloquea UPDATE/DELETE/TRUNCATE, conserva INSERT de servidor, valida acción/entidad, exige objeto JSON de máximo 16 KiB y fija `created_at` desde PostgreSQL. Los formularios de motivos advierten no introducir contraseñas, teléfonos, correos, documentos ni datos personales innecesarios. La Edge Function limita cada consulta a 100 eventos y valida el UUID de negocio.
+
+La retención formal y paginación histórica siguen pendientes. No se debe instalar una purga automática hasta aprobar una política de conservación. La base activa sigue sin cambios; el recuento agregado consultado fue cero eventos.
