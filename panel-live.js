@@ -43,6 +43,8 @@
   let platformFinancePageIndex = 0;
   let platformPayrollCursorStack = [null];
   let platformPayrollPageIndex = 0;
+  let invitationCursorStack = [null];
+  let invitationPageIndex = 0;
   const statusLabels = {
     received: 'Recibido', confirmed: 'Confirmado', preparing: 'En preparación',
     ready: 'Listo', on_the_way: 'En camino', delivered: 'Entregado', cancelled: 'Cancelado'
@@ -108,6 +110,8 @@
       document.querySelector('#refreshTechnicalBtn')?.addEventListener('click', refreshTechnical);
       document.querySelector('#createBusinessForm')?.addEventListener('submit', createBusiness);
       document.querySelector('#inviteMemberForm')?.addEventListener('submit', inviteBusinessMember);
+      document.querySelector('#pendingInvitationsBusinessSelect')?.addEventListener('change', () => loadBusinessInvitations(true));
+      document.querySelector('#refreshInvitationsBtn')?.addEventListener('click', () => loadBusinessInvitations(true));
       document.querySelector('#businessSearch')?.addEventListener('input', () => {
         businessDirectoryRequestId++;
         if (businessDirectorySearchTimer) window.clearTimeout(businessDirectorySearchTimer);
@@ -1063,6 +1067,7 @@
     initBusinessPicker('#assignmentBusinessSelect');
     initBusinessPicker('#suspensionBusinessSelect');
     initBusinessPicker('#inviteBusinessSelect', true);
+    initBusinessPicker('#pendingInvitationsBusinessSelect', false);
     await loadSelectedBusiness('');
     await loadAccessEvents(null, '#accessContainer');
     await loadAuditEvents(null, '#auditContainer');
@@ -1301,10 +1306,122 @@
       const keepBusiness = form.elements.business_id.value;
       form.reset();
       form.elements.business_id.value = keepBusiness;
+      if (result.invitation_pending) {
+        const invitationBusinessSelect = document.querySelector('#pendingInvitationsBusinessSelect');
+        if (invitationBusinessSelect) invitationBusinessSelect.value = keepBusiness;
+        await loadBusinessInvitations(true, keepBusiness);
+      }
     } catch (error) {
       message.className = 'message error';
       message.textContent = error.message || 'No se pudo enviar la invitación.';
     } finally { button.disabled = false; }
+  }
+
+  async function loadBusinessInvitations(reset = true, businessOverride = null) {
+    const select = document.querySelector('#pendingInvitationsBusinessSelect');
+    const container = document.querySelector('#businessInvitationsContainer');
+    const count = document.querySelector('#invitationsCount');
+    const businessId = businessOverride || select?.value || '';
+    if (!container) return;
+    if (!businessId) {
+      container.className = 'empty';
+      container.textContent = 'Selecciona un negocio para consultar sus invitaciones pendientes.';
+      if (count) count.textContent = '';
+      return;
+    }
+    if (reset) {
+      invitationCursorStack = [null];
+      invitationPageIndex = 0;
+    }
+    const cursor = invitationCursorStack[invitationPageIndex];
+    container.className = 'empty';
+    container.textContent = 'Consultando invitaciones pendientes…';
+    try {
+      const result = await callTechnicalFunction({
+        action: 'list_business_invitations',
+        business_id: businessId,
+        status: 'pending',
+        limit: PANEL_PAGE_SIZE,
+        before_created_at: cursor?.created_at || undefined,
+        before_id: cursor?.id || undefined
+      });
+      const invitations = result.invitations || [];
+      if (count) count.textContent = invitations.length ? `Mostrando ${invitations.length} invitaciones · página ${invitationPageIndex + 1}` : 'Sin invitaciones pendientes';
+      if (!invitations.length) {
+        container.className = 'empty';
+        container.textContent = 'Este negocio no tiene invitaciones pendientes.';
+        return;
+      }
+      container.className = 'stack-list';
+      container.innerHTML = invitations.map(invitation => {
+        const roleLabel = invitation.role === 'business_admin' ? 'Administrador del negocio' : 'Empleado';
+        const expiry = invitation.expires_at ? new Date(invitation.expires_at).toLocaleString('es-CO') : 'Sin fecha disponible';
+        return `<article class="list-card">
+          <div class="list-card-main">
+            <strong>${esc(invitation.email_normalized)}</strong>
+            <span class="muted">${esc(roleLabel)} · ${esc(invitation.job_title || 'Sin cargo')}</span>
+            <span class="inline-note">Vence: ${esc(expiry)}</span>
+          </div>
+          <button class="small-button danger" type="button" data-revoke-invitation="${esc(invitation.id)}">Revocar invitación</button>
+        </article>`;
+      }).join('');
+      container.querySelectorAll('[data-revoke-invitation]').forEach(button => {
+        button.addEventListener('click', async () => {
+          const invitationId = button.dataset.revokeInvitation;
+          const reason = window.prompt('Motivo para revocar esta invitación (mínimo 5 caracteres):', '');
+          if (!reason || reason.trim().length < 5) {
+            alert('Escribe un motivo de al menos cinco caracteres. No se realizó ningún cambio.');
+            return;
+          }
+          if (!window.confirm('¿Revocar esta invitación? La cuenta Auth y sus otras membresías se conservarán.')) return;
+          button.disabled = true;
+          try {
+            await callTechnicalFunction({
+              action: 'revoke_invitation',
+              invitation_id: invitationId,
+              reason: reason.trim()
+            });
+            await loadBusinessInvitations(true, businessId);
+          } catch (error) {
+            button.disabled = false;
+            alert(error.message || 'No se pudo revocar la invitación.');
+          }
+        });
+      });
+
+      const pager = document.createElement('div');
+      pager.className = 'toolbar';
+      pager.style.marginTop = '12px';
+      const previous = document.createElement('button');
+      previous.type = 'button';
+      previous.className = 'small-button';
+      previous.textContent = 'Anterior';
+      previous.disabled = invitationPageIndex === 0;
+      previous.addEventListener('click', () => {
+        if (invitationPageIndex > 0) {
+          invitationPageIndex--;
+          void loadBusinessInvitations(false, businessId);
+        }
+      });
+      const next = document.createElement('button');
+      next.type = 'button';
+      next.className = 'small-button';
+      next.textContent = 'Siguiente';
+      next.disabled = !result.has_more || !invitations.length;
+      next.addEventListener('click', () => {
+        if (!result.has_more || !invitations.length) return;
+        const last = invitations[invitations.length - 1];
+        invitationCursorStack[invitationPageIndex + 1] = { created_at: last.created_at, id: last.id };
+        invitationPageIndex++;
+        void loadBusinessInvitations(false, businessId);
+      });
+      pager.append(previous, next);
+      container.append(pager);
+    } catch (error) {
+      container.className = 'empty';
+      container.textContent = error.message || 'No se pudieron consultar las invitaciones.';
+      if (count) count.textContent = '';
+    }
   }
 
   async function changeBusinessStatus(id, isActive, button) {
