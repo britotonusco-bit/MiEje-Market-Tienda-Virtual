@@ -307,3 +307,22 @@ Se sustituyó la descarga completa del directorio de negocios por paginación re
 **Limitación pendiente:** los selectores de negocio usados por filtros, invitaciones, asignaciones y suspensiones todavía se rellenan con la página inicial disponible. Deben convertirse en selectores con búsqueda/paginación propia antes de considerar completo el acceso a negocios fuera de esa primera página. También debe probarse el comportamiento con más de 50 negocios, cambios de estado y refresco.
 
 No se desplegó la Edge Function ni se ejecutaron consultas de escritura en Supabase.
+
+
+## 21. Selectores de negocios con búsqueda y paginación remota
+
+Se amplió la paginación del directorio a los controles que necesitan elegir un negocio:
+
+- Selector general de negocio.
+- Selector de negocio para bloquear/reactivar membresías.
+- Selector de negocio para modificar rol y cargo.
+- Selector de negocio para suspender/reactivar tiendas.
+- Selector de negocio para invitar administradores y empleados; este último consulta únicamente negocios activos.
+
+Cada selector mantiene su propio cursor y su propio estado de búsqueda. Las consultas recuperan hasta 50 filas visibles más una fila centinela, y usan el cursor compuesto `created_at + id`. La búsqueda se ejecuta en servidor sobre nombre, identificador y categoría. La Edge Function limita la longitud y los caracteres admitidos para evitar que el texto se interprete como sintaxis de filtros PostgREST.
+
+El directorio principal también ejecuta la búsqueda en servidor, en lugar de filtrar solo la página que está cargada. Se invalidan respuestas antiguas cuando el usuario cambia rápidamente el texto de búsqueda.
+
+**Verificación realizada:** 16 comprobaciones estáticas sobre el panel y la Edge Function. No equivalen a una prueba de ejecución. Siguen pendientes Deno check, prueba en navegador con más de 50 negocios, verificación de resultados con nombres repetidos, validación del filtro activo y revisión de la consulta combinada de búsqueda/cursor en Supabase staging.
+
+No se desplegó la función ni se modificó la base activa.
