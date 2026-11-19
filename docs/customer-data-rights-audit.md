@@ -291,3 +291,6 @@ El verificador integral también comprueba que:
 - las RPC de registro, rate limit y limpieza sean ejecutables únicamente por `service_role`.
 
 La política de retención sigue abierta: la limpieza elimina sesiones temporales y archivos huérfanos, pero no decide cuándo borrar postulaciones completas o CV ya asociados. Ese plazo requiere una decisión documentada del responsable del tratamiento y revisión jurídica; no se fijó automáticamente.
+
+
+**Dependencias adicionales que faltan en el repositorio:** la función Edge invoca `consume_job_application_rate_limit`, pero no se encontró su definición SQL ni un archivo que cree las tres tablas base. El verificador ahora exige que la RPC exista y sea ejecutable solo por `service_role`; esto no reemplaza la necesidad de recuperar su DDL y probar su contador en staging. También se debe confirmar que el proxy de staging suministre `cf-connecting-ip`, ya que el código falla de forma cerrada si falta.
