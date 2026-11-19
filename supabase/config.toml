@@ -8,6 +8,9 @@ verify_jwt = true
 [functions.resolve-my-access]
 verify_jwt = true
 
+[functions.accept-business-invitation]
+verify_jwt = true
+
 [functions.create-public-order]
 verify_jwt = false
 
