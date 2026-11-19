@@ -8,6 +8,11 @@
   let currentBusinessLogoUrl = null;
   let isBusinessOwner = false;
   let cachedBusinesses = [];
+  let businessListPageIndex = 0;
+  let moderationCursorStack = [null];
+  let moderationPageIndex = 0;
+  let blockRequestCursorStack = [null];
+  let blockRequestPageIndex = 0;
   let cachedProducts = [];
   const PANEL_PAGE_SIZE = 50;
   let employeeOrderCursorStack = [null];
@@ -966,8 +971,24 @@
   }
 
   async function loadTechnical() {
-    const result = await callTechnicalFunction({ action: 'list_businesses' });
-    cachedBusinesses = result.businesses || [];
+    const businessRows = [];
+    let businessCursor = null;
+    while (true) {
+      const result = await callTechnicalFunction({
+        action: 'list_businesses', limit: PANEL_PAGE_SIZE + 1,
+        before_created_at: businessCursor?.created_at || undefined,
+        before_id: businessCursor?.id || undefined
+      });
+      const fetched = result.businesses || [];
+      const pageRows = fetched.slice(0, PANEL_PAGE_SIZE);
+      businessRows.push(...pageRows);
+      if (fetched.length <= PANEL_PAGE_SIZE) break;
+      const last = pageRows[pageRows.length - 1];
+      if (!last) break;
+      businessCursor = { created_at: last.created_at, id: last.id };
+    }
+    cachedBusinesses = businessRows;
+    businessListPageIndex = 0;
     const auditResult = await callTechnicalFunction({ action: 'list_audit_logs', limit: 1 });
     renderStats([
       ['Negocios registrados', number(cachedBusinesses.length), 'Administración de la plataforma'],
@@ -999,7 +1020,16 @@
     if (count) count.textContent = `${filtered.length} de ${cachedBusinesses.length} negocios`;
     if (!cachedBusinesses.length) { target.innerHTML = '<div class="empty">Todavía no hay negocios. Usa el formulario de arriba para crear el primero.</div>'; return; }
     if (!filtered.length) { target.innerHTML = '<div class="empty">No hay negocios que coincidan con la búsqueda.</div>'; return; }
-    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Negocio</th><th>Tipo</th><th>Identificador</th><th>Estado / motivo</th><th>Creado</th><th>Acción</th></tr></thead><tbody>${filtered.map(b => { const active = b.status === 'active'; return `<tr><td><strong>${esc(b.name)}</strong></td><td>${esc(b.business_type || b.category || '—')}</td><td>${esc(b.slug)}</td><td><span class="pill ${active ? 'green':'red'}">${active ? 'Activo':'Suspendido'}</span>${!active ? `<br><small>${esc(b.suspension_reason || 'Motivo pendiente de registrar')}</small>` : ''}</td><td>${dateTime(b.created_at)}</td><td><button class="small-button" data-business-status="${esc(b.id)}" data-active="${active ? 'false':'true'}">${active ? 'Suspender':'Reactivar'}</button></td></tr>`; }).join('')}</tbody></table></div>`;
+    const pageCount = Math.max(1, Math.ceil(filtered.length / PANEL_PAGE_SIZE));
+    businessListPageIndex = Math.min(businessListPageIndex, pageCount - 1);
+    const visible = filtered.slice(businessListPageIndex * PANEL_PAGE_SIZE, (businessListPageIndex + 1) * PANEL_PAGE_SIZE);
+    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Negocio</th><th>Tipo</th><th>Identificador</th><th>Estado / motivo</th><th>Creado</th><th>Acción</th></tr></thead><tbody>${visible.map(b => { const active = b.status === 'active'; return `<tr><td><strong>${esc(b.name)}</strong></td><td>${esc(b.business_type || b.category || '—')}</td><td>${esc(b.slug)}</td><td><span class="pill ${active ? 'green':'red'}">${active ? 'Activo':'Suspendido'}</span>${!active ? `<br><small>${esc(b.suspension_reason || 'Motivo pendiente de registrar')}</small>` : ''}</td><td>${dateTime(b.created_at)}</td><td><button class="small-button" data-business-status="${esc(b.id)}" data-active="${active ? 'false':'true'}">${active ? 'Suspender':'Reactivar'}</button></td></tr>`; }).join('')}</tbody></table></div>`;
+    appendCursorPager(target, {
+      page: businessListPageIndex + 1, canPrevious: businessListPageIndex > 0,
+      hasMore: (businessListPageIndex + 1) * PANEL_PAGE_SIZE < filtered.length,
+      previous: () => { businessListPageIndex--; renderBusinesses(); },
+      next: () => { businessListPageIndex++; renderBusinesses(); }
+    });
     target.querySelectorAll('[data-business-status]').forEach(button => button.addEventListener('click', () => changeBusinessStatus(button.dataset.businessStatus, button.dataset.active === 'true', button)));
   }
 
@@ -1136,8 +1166,22 @@
     target.innerHTML = '<option value="">Cargando cuentas…</option>';
     if (!id) { target.innerHTML = '<option value="">Selecciona primero un negocio</option>'; return; }
     try {
-      const result = await callTechnicalFunction({ action: 'list_business_members', business_id: id });
-      const rows = result.members || [];
+      const rows = [];
+      let cursor = null;
+      while (true) {
+        const result = await callTechnicalFunction({
+          action: 'list_business_members', business_id: id, limit: PANEL_PAGE_SIZE + 1,
+          before_created_at: cursor?.created_at || undefined,
+          before_id: cursor?.id || undefined
+        });
+        const fetched = result.members || [];
+        const pageRows = fetched.slice(0, PANEL_PAGE_SIZE);
+        rows.push(...pageRows);
+        if (fetched.length <= PANEL_PAGE_SIZE) break;
+        const last = pageRows[pageRows.length - 1];
+        if (!last) break;
+        cursor = { created_at: last.created_at, id: last.id };
+      }
       target.innerHTML = '<option value="">Selecciona una cuenta</option>' + rows.map(m => `<option value="${esc(m.id)}" data-role="${esc(m.role)}" data-job-title="${esc(m.job_title || '')}">${esc(m.profiles?.display_name || shortId(m.user_id))} · ${esc(m.email || 'sin correo')} · ${m.role === 'business_admin' ? 'Administrador' : 'Empleado'} · ${esc(m.job_title || 'Cargo no registrado')}${m.status !== 'active' ? ' · Suspendido' : ''}</option>`).join('');
     } catch (error) {
       target.innerHTML = `<option value="">Error al cargar las cuentas: ${esc(error.message || 'Error de consulta')}</option>`;
@@ -1909,20 +1953,38 @@
     }
   }
 
-  async function loadContentModeration() {
+  async function loadContentModeration(reset = true) {
     const target = document.querySelector('#contentModerationContainer');
     if (!target) return;
+    if (reset) { moderationCursorStack = [null]; moderationPageIndex = 0; }
+    const cursor = moderationCursorStack[moderationPageIndex];
     target.innerHTML = '<div class="empty">Cargando publicaciones para revisión…</div>';
     try {
-      // La moderación técnica usa la Edge Function privilegiada; no abre
-      // lectura global de business_content_pages mediante el Data API/RLS.
-      const result = await callTechnicalFunction({ action: 'list_content_moderation', limit: 100 });
-      const rows = result.contents || [];
-      if (!rows.length) {
+      const result = await callTechnicalFunction({
+        action: 'list_content_moderation', limit: PANEL_PAGE_SIZE + 1,
+        before_created_at: cursor?.created_at || undefined,
+        before_id: cursor?.id || undefined
+      });
+      const fetched = result.contents || [];
+      const rows = fetched.slice(0, PANEL_PAGE_SIZE);
+      if (!rows.length && moderationPageIndex === 0) {
         target.innerHTML = '<div class="empty">No hay publicaciones enviadas por los negocios.</div>';
         return;
       }
+      if (!rows.length) target.innerHTML = '<div class="empty">No hay más publicaciones en esta página.</div>';
       target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Negocio</th><th>Tipo</th><th>Título y contenido</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${rows.map(r => `<tr><td>${dateTime(r.created_at)}</td><td>${esc(r.businesses?.name || shortId(r.business_id))}</td><td>${esc(r.content_type)}</td><td><strong>${esc(r.title)}</strong><br>${esc(r.body)}</td><td>${esc(r.moderation_status || 'pending')}</td><td>${r.moderation_status !== 'approved' ? `<button class="small-button" data-moderate-content="${esc(r.id)}" data-decision="approved">Aprobar</button>` : ''} ${r.moderation_status !== 'rejected' ? `<button class="small-button" data-moderate-content="${esc(r.id)}" data-decision="rejected">Rechazar</button>` : '—'}</td></tr>`).join('')}</tbody></table></div>`;
+      appendCursorPager(target, {
+        page: moderationPageIndex + 1, canPrevious: moderationPageIndex > 0,
+        hasMore: fetched.length > PANEL_PAGE_SIZE,
+        previous: () => { moderationPageIndex--; void loadContentModeration(false); },
+        next: () => {
+          const last = rows[rows.length - 1];
+          if (!last) return;
+          moderationCursorStack[moderationPageIndex + 1] = { created_at: last.created_at, id: last.id };
+          moderationPageIndex++;
+          void loadContentModeration(false);
+        }
+      });
       target.querySelectorAll('[data-moderate-content]').forEach(btn => btn.addEventListener('click', async () => {
         const note = window.prompt('Nota de revisión (opcional):', '') || '';
         btn.disabled = true;
@@ -1946,18 +2008,38 @@
     }
   }
 
-  async function loadBlockRequests() {
+  async function loadBlockRequests(reset = true) {
     const target = document.querySelector('#blockRequestsContainer');
     if (!target) return;
+    if (reset) { blockRequestCursorStack = [null]; blockRequestPageIndex = 0; }
+    const cursor = blockRequestCursorStack[blockRequestPageIndex];
     target.innerHTML = '<div class="empty">Cargando solicitudes de bloqueo…</div>';
     try {
-      const result = await callTechnicalFunction({ action: 'list_block_requests' });
-      const rows = result.requests || [];
-      if (!rows.length) {
+      const result = await callTechnicalFunction({
+        action: 'list_block_requests', limit: PANEL_PAGE_SIZE + 1,
+        before_created_at: cursor?.created_at || undefined,
+        before_id: cursor?.id || undefined
+      });
+      const fetched = result.requests || [];
+      const rows = fetched.slice(0, PANEL_PAGE_SIZE);
+      if (!rows.length && blockRequestPageIndex === 0) {
         target.innerHTML = '<div class="empty">No hay solicitudes de bloqueo registradas.</div>';
         return;
       }
+      if (!rows.length) target.innerHTML = '<div class="empty">No hay más solicitudes en esta página.</div>';
       target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Negocio</th><th>Solicitante</th><th>Cuenta solicitada</th><th>Motivo</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${rows.map(r => `<tr><td>${dateTime(r.created_at)}</td><td>${esc(r.businesses?.name || shortId(r.business_id))}</td><td>${esc(r.requested_by_name || shortId(r.requested_by))}</td><td>${esc(r.target_user_name || shortId(r.target_user_id))}</td><td>${esc(r.reason)}</td><td>${esc(r.status)}</td><td>${r.status === 'pending' ? `<button class="small-button" data-request-resolve="${esc(r.id)}" data-decision="approved">Bloquear acceso</button> <button class="small-button" data-request-resolve="${esc(r.id)}" data-decision="rejected">Rechazar</button>` : esc(r.technician_note || 'Resuelta')}</td></tr>`).join('')}</tbody></table></div>`;
+      appendCursorPager(target, {
+        page: blockRequestPageIndex + 1, canPrevious: blockRequestPageIndex > 0,
+        hasMore: fetched.length > PANEL_PAGE_SIZE,
+        previous: () => { blockRequestPageIndex--; void loadBlockRequests(false); },
+        next: () => {
+          const last = rows[rows.length - 1];
+          if (!last) return;
+          blockRequestCursorStack[blockRequestPageIndex + 1] = { created_at: last.created_at, id: last.id };
+          blockRequestPageIndex++;
+          void loadBlockRequests(false);
+        }
+      });
       target.querySelectorAll('[data-request-resolve]').forEach(button => button.addEventListener('click', async () => {
         const decision = button.dataset.decision;
         const note = window.prompt('Nota del servicio técnico (opcional):', '') || '';
