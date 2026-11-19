@@ -447,3 +447,6 @@ El flujo de anulación de gastos ahora solo admite registros pendientes. Los gas
 ### Costos históricos incompletos en reportes
 
 El RPC `get_business_admin_profit_report` ahora devuelve `NULL` en las estimaciones de ganancia bruta y neta si falta el costo histórico de una o más líneas de pedido. Se mantienen `missing_cost_lines` y `complete_cost_data` para identificar la causa. Los componentes de interfaz deben mostrar “Costos incompletos: no se puede calcular la ganancia” cuando esos campos sean nulos, en vez de convertirlos a cero.
+
+
+**Protección del costo histórico:** el paso 2 también instala `order_item_costs_immutable` y revoca UPDATE, DELETE y TRUNCATE a `service_role` sobre los snapshots de costo. El checkout crea el snapshot mediante INSERT; ningún flujo normal debe reescribirlo o borrarlo.
