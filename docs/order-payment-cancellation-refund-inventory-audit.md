@@ -245,3 +245,17 @@ La Edge Function `create-public-order` ahora limita el cuerpo a 64 KB, exige un 
 La referencia `delivery_tracking` sigue siendo texto libre que el negocio introduce y que se muestra al titular del token. La limpieza técnica elimina caracteres de control, pero no puede detectar con fiabilidad teléfonos, direcciones u otros datos personales. El panel advierte que no deben introducirse esos datos; falta una prueba de uso y una política operativa para evitar su publicación.
 
 **Estado de validación:** se verificó el esquema activo solo mediante SELECT y se hicieron cambios estáticos en la rama. No se ejecutó SQL, no se desplegaron funciones y no se hicieron pruebas de abuso, caché o carga en staging.
+
+
+### 20. Autorización previa a bloqueos en operaciones de pedidos
+
+La revisión de aislamiento encontró que tres funciones privilegiadas recibían un identificador de pedido o solicitud, adquirían el bloqueo de fila y comprobaban después si el usuario era administrador del negocio. Aunque las funciones sí validaban el rol antes de modificar información, el orden permitía que una cuenta autenticada de otra tienda intentara retener temporalmente el bloqueo de una operación ajena y distinguir algunos identificadores existentes de los inexistentes.
+
+Se corrigió el orden en los borradores:
+- `mark_order_payment_received`: obtiene primero el `business_id` sin bloquear, valida que el negocio esté activo y que el usuario sea su administrador, luego bloquea el pedido y repite la validación.
+- `complete_order_refund`: aplica el mismo patrón antes de bloquear y registrar el reembolso.
+- `decide_order_cancellation`: obtiene primero el negocio asociado a la solicitud, autoriza al administrador, después bloquea pedido y solicitud en el orden estable acordado y vuelve a validar el permiso.
+
+El verificador de integración ahora exige que cada función contenga la autorización antes del primer `FOR UPDATE` y una segunda comprobación después del bloqueo. Esto reduce el riesgo de bloqueo cruzado entre negocios, pero no sustituye las pruebas concurrentes con dos negocios y sesiones independientes.
+
+**Estado:** cambios realizados únicamente en `correcciones-funcionales`. No se ejecutó SQL, no se modificó Supabase activo, no se desplegaron funciones y no se ejecutaron pruebas en staging.
