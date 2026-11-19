@@ -253,6 +253,18 @@ BEGIN
      OR to_regprocedure('public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)') IS NULL THEN
     RAISE EXCEPTION 'FALLO: faltan RPCs de idempotencia del checkout.';
   END IF;
+  IF position('privacy_consent' IN lower(pg_get_functiondef(
+       'public.get_public_order_idempotent(uuid,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)'::regprocedure
+     ))) = 0
+     OR position('privacy_consent' IN lower(pg_get_functiondef(
+       'public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)'::regprocedure
+     ))) = 0
+     OR position('privacy_consent' IN lower(pg_get_functiondef(
+       'public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: la aceptación/version del aviso no forma parte de las tres huellas de idempotencia.';
+  END IF;
+
 
   IF to_regprocedure('public.get_business_admin_order_financials(uuid,boolean,integer)') IS NULL
      OR to_regprocedure('public.mark_order_payment_received(uuid,text,text,text)') IS NULL
