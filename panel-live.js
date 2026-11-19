@@ -116,7 +116,18 @@
       document.querySelector('#businessSelect')?.addEventListener('change', event => loadSelectedBusiness(event.currentTarget.value));
       document.querySelector('#suspensionForm')?.addEventListener('submit', saveSuspension);
       document.querySelector('#memberStatusForm')?.addEventListener('submit', saveMemberStatus);
-      document.querySelector('#assignmentBusinessSelect')?.addEventListener('change', event => loadTechnicalMembers(event.currentTarget.value, '#assignmentMemberSelect'));
+      document.querySelector('#assignmentBusinessSelect')?.addEventListener('change', event => {
+        const target = document.querySelector('#assignmentMemberSelect');
+        const form = document.querySelector('#memberAssignmentForm');
+        if (target) target.value = '';
+        if (form) {
+          form.elements.role.value = 'employee';
+          form.elements.job_title.value = '';
+        }
+        const message = document.querySelector('#memberAssignmentMessage');
+        if (message) { message.textContent = ''; message.className = 'message'; }
+        loadTechnicalMembers(event.currentTarget.value, '#assignmentMemberSelect');
+      });
       document.querySelector('#assignmentMemberSelect')?.addEventListener('change', fillMemberAssignment);
       document.querySelector('#memberAssignmentForm')?.addEventListener('submit', saveMemberAssignment);
       document.querySelector('#memberBusinessSelect')?.addEventListener('change', event => {
@@ -1337,11 +1348,15 @@
     }
     memberSelectStates.set(targetSelector, state);
     target.disabled = true;
+    const parentForm = target.closest('form');
+    const submitButton = parentForm?.querySelector('button[type="submit"]');
+    if (submitButton) submitButton.disabled = true;
     target.innerHTML = '<option value="">Cargando cuentas…</option>';
     if (!id) {
       target.innerHTML = '<option value="">Selecciona primero un negocio</option>';
       renderMemberSelectPager(target, state, () => {});
       target.disabled = false;
+      if (submitButton) submitButton.disabled = false;
       return;
     }
     try {
@@ -1358,7 +1373,7 @@
         const globallyBlocked = m.profiles?.is_blocked === true;
         const localStatus = m.status === 'active' ? 'Activa' : 'Suspendida';
         const globalStatus = globallyBlocked ? ' · Bloqueada globalmente' : '';
-        return `<option value="${esc(m.id)}" data-role="${esc(m.role)}" data-job-title="${esc(m.job_title || '')}" data-status="${esc(m.status)}" data-global-blocked="${globallyBlocked ? 'true' : 'false'}">${esc(m.profiles?.display_name || shortId(m.user_id))} · ${m.role === 'business_admin' ? 'Administrador' : 'Empleado'} · ${esc(m.job_title || 'Cargo no registrado')} · ${localStatus}${globalStatus}</option>`;
+        return `<option value="${esc(m.id)}" data-business-id="${esc(m.business_id)}" data-role="${esc(m.role)}" data-job-title="${esc(m.job_title || '')}" data-status="${esc(m.status)}" data-global-blocked="${globallyBlocked ? 'true' : 'false'}">${esc(m.profiles?.display_name || shortId(m.user_id))} · ${m.role === 'business_admin' ? 'Administrador' : 'Empleado'} · ${esc(m.job_title || 'Cargo no registrado')} · ${localStatus}${globalStatus}</option>`;
       }).join('');
       state.hasMore = Boolean(result.has_more);
       state.last = rows[rows.length - 1] || null;
@@ -1375,7 +1390,10 @@
       target.innerHTML = `<option value="">Error al cargar las cuentas: ${esc(error.message || 'Error de consulta')}</option>`;
       renderMemberSelectPager(target, state, () => {});
     } finally {
-      if (requestId === state.requestId) target.disabled = false;
+      if (requestId === state.requestId) {
+        target.disabled = false;
+        if (submitButton) submitButton.disabled = false;
+      }
     }
   }
 
@@ -1398,7 +1416,12 @@
   function fillMemberAssignment() {
     const form = document.querySelector('#memberAssignmentForm');
     const selected = form?.elements.membership_id?.selectedOptions?.[0];
-    if (!form || !selected) return;
+    if (!form) return;
+    if (!selected?.value) {
+      form.elements.role.value = 'employee';
+      form.elements.job_title.value = '';
+      return;
+    }
     form.elements.role.value = selected.dataset.role || 'employee';
     form.elements.job_title.value = selected.dataset.jobTitle || '';
   }
@@ -1413,8 +1436,9 @@
       role: form.elements.role.value,
       job_title: form.elements.job_title.value.trim()
     };
-    if (!payload.membership_id || payload.job_title.length < 2) {
-      message.textContent = 'Selecciona una cuenta y escribe el cargo.';
+    const selected = form.elements.membership_id.selectedOptions[0];
+    if (!payload.membership_id || selected?.dataset.businessId !== form.elements.business_id.value || payload.job_title.length < 2) {
+      message.textContent = 'Selecciona una cuenta del negocio elegido y escribe un cargo válido.';
       message.className = 'message error';
       return;
     }
@@ -1435,6 +1459,12 @@
     const form = event.currentTarget, message = document.querySelector('#memberStatusMessage');
     const suspended = form.elements.is_blocked.value === 'true';
     const reason = form.elements.reason.value.trim();
+    const selected = form.elements.membership_id.selectedOptions[0];
+    if (!selected?.value || selected.dataset.businessId !== form.elements.business_id.value) {
+      message.textContent = 'Selecciona una cuenta perteneciente al negocio elegido.';
+      message.className = 'message error';
+      return;
+    }
     if (reason.length < 5) {
       message.textContent = 'Escribe un motivo de al menos 5 caracteres para dejar constancia en auditoría.';
       message.className = 'message error';
