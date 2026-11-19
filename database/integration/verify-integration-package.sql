@@ -1338,6 +1338,33 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'FALLO: faltan los triggers que registran movimientos de inventario.';
   END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgrelid='public.inventory_movements'::regclass
+      AND tgname='inventory_movements_immutable'
+      AND NOT tgisinternal
+      AND (tgtype & 16) = 16
+      AND (tgtype & 8) = 8
+  ) OR to_regprocedure('private.prevent_inventory_movement_mutation()') IS NULL THEN
+    RAISE EXCEPTION 'FALLO: el historial de inventario no tiene protección contra UPDATE/DELETE.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid='public.inventory_movements'::regclass
+      AND conname='inventory_movements_direction_check'
+      AND contype='c'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: falta la restricción que valida el sentido de cada movimiento de inventario.';
+  END IF;
+
+  IF has_table_privilege('service_role','public.inventory_movements','INSERT')
+     OR has_table_privilege('service_role','public.inventory_movements','UPDATE')
+     OR has_table_privilege('service_role','public.inventory_movements','DELETE')
+     OR has_table_privilege('service_role','public.inventory_movements','TRUNCATE') THEN
+    RAISE EXCEPTION 'FALLO: service_role conserva escritura directa sobre el historial inmutable de inventario.';
+  END IF;
+
   IF NOT has_function_privilege('authenticated','public.adjust_business_inventory(uuid,uuid,integer,integer,text)','EXECUTE')
      OR has_function_privilege('anon','public.adjust_business_inventory(uuid,uuid,integer,integer,text)','EXECUTE')
      OR NOT has_table_privilege('authenticated','public.inventory_movements','SELECT')
