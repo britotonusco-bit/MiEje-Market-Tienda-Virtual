@@ -601,3 +601,8 @@ No se aplicaron índices ni se modificaron políticas o consultas en el proyecto
 
 
 El catálogo público también agrupa los productos por `business_id` en un `Map`, evitando filtrar toda la colección una vez por cada negocio. Los topes globales de carga del storefront siguen pendientes; ver el informe de rendimiento para la estrategia de carga por tienda.
+
+
+### Pedidos administrativos con paginación financiera
+
+El panel administrativo utiliza el RPC borrador `get_business_admin_order_financials_page` para obtener páginas de 50 pedidos más una fila de comprobación. El cursor es `created_at + order_id`; los datos operativos se consultan únicamente para esos IDs y el negocio activo. El SQL debe probarse en staging antes de aplicar en el proyecto activo. Ver `docs/performance-and-scalability-audit.md`.
