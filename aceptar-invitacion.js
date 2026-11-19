@@ -28,6 +28,10 @@
 
       const { data, error } = await client.auth.getSession();
       if (error || !data.session) throw new Error('El enlace de invitación no es válido o ya expiró. Solicita una nueva invitación al propietario de MiEje Market.');
+      if (!data.session.user?.email_confirmed_at) {
+        await client.auth.signOut({ scope: 'local' });
+        throw new Error('El correo de esta cuenta todavía no aparece confirmado. Solicita una nueva invitación o revisa el enlace recibido.');
+      }
 
       // Supabase ya intercambió/verificó el enlace. Retira códigos y tokens de la barra
       // de direcciones para que no queden expuestos al copiar o compartir la URL.
