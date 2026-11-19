@@ -1341,6 +1341,7 @@
     if (!id) {
       target.innerHTML = '<option value="">Selecciona primero un negocio</option>';
       renderMemberSelectPager(target, state, () => {});
+      target.disabled = false;
       return;
     }
     try {
