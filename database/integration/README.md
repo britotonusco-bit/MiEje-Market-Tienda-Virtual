@@ -40,13 +40,15 @@ Cada archivo es una unidad independiente. Ejecutar uno a uno, revisar el resulta
 | 15 | `database/orders/refund-flow-draft.sql` | Después de cancelaciones y finanzas; registra el reembolso externo ya realizado, no transfiere dinero. |
 | 16 | `database/finance/expense-receipts-storage-draft.sql` | Crea el bucket privado requerido por la RPC de comprobantes. |
 | 17 | `database/finance/business-expense-audit-draft.sql` | Después del paso 16 y de los límites de negocio; sustituye escrituras directas por RPC auditadas. |
-| 18 | `database/jobs/job-application-consent-draft.sql` | Añade versión y fecha de aceptación a postulaciones existentes; requiere que el esquema base de vacantes ya esté instalado. |\n| 19 | `database/maintenance/job-application-cleanup-draft.sql` | Después del paso 18; actualiza la RPC de registro con consentimiento versionado y prepara la limpieza de sesiones vencidas. |
+| 18 | `database/jobs/job-application-consent-draft.sql` | Añade versión y fecha de aceptación a postulaciones existentes; requiere que el esquema base de vacantes ya esté instalado. |
+| 19 | `database/maintenance/job-application-cleanup-draft.sql` | Después del paso 18; actualiza la RPC de registro con consentimiento versionado y prepara la limpieza de sesiones vencidas. |
+| 20 | `database/jobs/job-application-review-audit-draft.sql` | Después del esquema base de vacantes; limita UPDATE del administrador a estado/notas y genera revisor/fecha mediante trigger en PostgreSQL. |
 
 La normalización histórica de estados y la función `private.enforce_order_status_transition()` quedan centralizadas en el paso 2 (`business-admin-boundaries.sql`). El paso 11 solo sustituye el checkout y registra movimientos de venta; no vuelve a definir el trigger ni repite la conversión. La normalización se ejecuta en una transacción y desactiva el trigger anterior únicamente durante esa conversión.
 
 El paso 8 (`customer-account-migration.sql`) es la única fuente de verdad para `orders.customer_user_id`, su índice y la tabla `customer_favorites`. El paso 12 solo configura las políticas de favoritos y las políticas de lectura necesarias para el historial; ya no vuelve a crear columnas, índices ni la tabla.
 
-Los pasos 1, 3, 4, 5, 6, 7 y 18 son módulos independientes en cuanto a tablas, pero se ordenan aquí para que los helpers y contratos de permisos estén disponibles antes de conectar sus Edge Functions/paneles. El paso 10 debe preceder a la habilitación del flujo de checkout definitivo.
+Los pasos 1, 3, 4, 5, 6, 7, 18 y 20 son módulos independientes en cuanto a tablas, pero se ordenan aquí para que los helpers y contratos de permisos estén disponibles antes de conectar sus Edge Functions/paneles. El paso 10 debe preceder a la habilitación del flujo de checkout definitivo.
 
 
 ### Endurecimiento MFA del propietario: etapa separada y condicionada
@@ -409,3 +411,6 @@ El verificador integral comprueba RLS, grants, políticas de administrador por n
 
 
 El limitador de `create-job-application` usa solo `cf-connecting-ip`, encabezado establecido por el proxy de borde. La función rechaza la petición si no está disponible; no debe reintroducirse un fallback al primer valor de `X-Forwarded-For` sin demostrar que el proxy lo sanea. El verificador exige que `consume_job_application_rate_limit` sea ejecutable solo por `service_role`.
+
+
+El paso 20 de vacantes revoca UPDATE a nivel de tabla para `PUBLIC`, `anon` y `authenticated`, concede a `authenticated` únicamente UPDATE de `status` y `admin_notes`, y genera `reviewed_by` desde `auth.uid()` y `reviewed_at` desde PostgreSQL mediante trigger. El panel no envía esos metadatos desde el navegador. Aplicar solo después de verificar que la tabla base contiene las columnas esperadas y que la policy RLS `job_applications_business_admin_update` limita la fila al administrador del negocio activo.
