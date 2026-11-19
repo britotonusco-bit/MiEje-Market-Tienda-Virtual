@@ -427,3 +427,8 @@ El paso 20 de vacantes revoca UPDATE a nivel de tabla para `PUBLIC`, `anon` y `a
 ### Verificación reforzada de inventario — 19 nov 2026
 
 El verificador integral ahora comprueba que `authenticated` y `anon` no puedan escribir directamente en `inventory_movements` ni modificar `products.inventory`; que `adjust_business_inventory` sea `SECURITY DEFINER` con `search_path` vacío; y que la política de lectura del historial limite el acceso a administradores de negocios activos. Ejecutar estas comprobaciones únicamente en staging antes de aprobar las migraciones de inventario.
+
+
+### Comprobaciones de concurrencia de inventario — 19 nov 2026
+
+El verificador integral también inspecciona las definiciones de `create_public_order` y `decide_order_cancellation`. Comprueba el orden determinista de bloqueos, el descuento de inventario en checkout y la restitución completa durante una cancelación aprobada. Ejecutar en staging y complementar con pruebas concurrentes de carritos y cancelaciones antes de producción.
