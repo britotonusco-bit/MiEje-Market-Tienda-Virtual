@@ -168,3 +168,20 @@ En `panel-live.js` se añadieron páginas de 50 registros para:
 Ambos listados usan `created_at DESC, id DESC`, cursor compuesto y filtro `business_id`. Se solicita una fila adicional para detectar la página siguiente. Los controles Anterior/Siguiente mantienen el cursor de cada página; los estados vacíos también conservan la navegación hacia la página anterior.
 
 No se ha comprobado aún el rendimiento con un volumen real de CV ni la interacción concurrente entre revisiones/cancelaciones y la navegación. Las pruebas de autorización, RLS y enlaces firmados deben ejecutarse en staging.
+
+
+## 15. Paginación de gastos, inventario y favoritos
+
+Se ampliaron los listados:
+- Gastos del administrador: 50 por página, cursor `expense_date + id`, filtro de negocio. El texto de la interfaz ya no presenta 250 como si fuera el historial completo.
+- Movimientos de inventario: 50 por página, cursor `created_at + id`, filtro de negocio. Los nombres de productos se consultan solo para los productos incluidos en la página, también limitados al negocio.
+- Favoritos del cliente: 50 por página, cursor `created_at + id`, filtro por `user_id`. Se conserva la eliminación del favorito y al volver a cargar se regresa a la primera página.
+
+Pendientes de rendimiento/paginación:
+- Historial de pedidos del cliente: la RPC actual devuelve los últimos 50; falta crear una variante paginada.
+- Eventos de auditoría: el endpoint técnico y la consulta administrativa aún tienen tope de 100.
+- El listado de reembolsos conserva el RPC anterior con tope de 100.
+- El catálogo público conserva límites globales; necesita carga por tienda y categoría.
+- Publicaciones del negocio y listas técnicas de negocios/usuarios requieren revisar paginación de extremo a extremo.
+
+No se ha probado en navegador ni staging. Los cambios de cuenta/favoritos dependen de que la migración de clientes esté instalada y la tabla esté expuesta por Data API.
