@@ -417,6 +417,28 @@ EXECUTE FUNCTION private.guard_last_active_business_admin();
 REVOKE ALL ON FUNCTION private.guard_last_active_business_admin() FROM PUBLIC, anon, authenticated;
 
 
+-- El propietario técnico consulta la auditoría global exclusivamente mediante
+-- la Edge Function validada. La lectura directa se limita a miembros activos
+-- del negocio: business_admin ve sus eventos; cada miembro ve solo los propios.
+DROP POLICY IF EXISTS audit_logs_owner_or_business_admin_select ON public.audit_logs;
+DROP POLICY IF EXISTS audit_logs_business_admin_or_actor_select ON public.audit_logs;
+
+CREATE POLICY audit_logs_business_admin_or_actor_select
+ON public.audit_logs
+FOR SELECT
+TO authenticated
+USING (
+  business_id IS NOT NULL
+  AND private.business_is_active(business_id)
+  AND (
+    private.has_business_role(business_id, ARRAY['business_admin']::text[])
+    OR (
+      actor_id = (SELECT auth.uid())
+      AND private.has_business_role(business_id, ARRAY['business_admin','employee']::text[])
+    )
+  )
+);
+
 -- Separar también el contenido comercial, costos internos y solicitudes
 -- de personal/pedidos del acceso global del propietario técnico.
 -- El técnico conserva la auditoría global y la gestión de cuentas,
