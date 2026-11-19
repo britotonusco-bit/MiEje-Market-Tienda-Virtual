@@ -524,7 +524,7 @@ Deno.serve(async (req: Request) => {
       const limitValue = Number(body.limit ?? 51);
       const limit = Number.isInteger(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 51;
       let query = admin.from("business_memberships")
-        .select("id,business_id,user_id,role,status,job_title,blocked_reason,created_at,profiles(display_name)")
+        .select("id,business_id,user_id,role,status,job_title,blocked_reason,created_at,profiles(display_name,is_blocked)")
         .eq("business_id", businessId)
         .order("created_at", { ascending: false }).order("id", { ascending: false })
         .limit(limit);
