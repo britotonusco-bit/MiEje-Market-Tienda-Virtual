@@ -1406,8 +1406,10 @@
       const status = target.querySelector('[data-application-status="' + id + '"]')?.value;
       const notes = target.querySelector('[data-application-notes="' + id + '"]')?.value || '';
       button.disabled = true;
+      // Solo se actualizan campos operativos autorizados por RLS/GRANT.
+      // La identidad y la fecha de revisión no deben venir del navegador.
       const { error: updateError } = await db.from('job_applications').update({
-        status, admin_notes: notes, reviewed_by: currentUser.id, reviewed_at: new Date().toISOString()
+        status, admin_notes: notes
       }).eq('id', id).eq('business_id', businessId);
       if (updateError) alert('No se pudo actualizar la postulación: ' + updateError.message);
       else alert('Postulación actualizada.');
