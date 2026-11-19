@@ -395,6 +395,14 @@ BEGIN
       USING ERRCODE = '42501';
   END IF;
 
+  IF NOT EXISTS (
+    SELECT 1 FROM public.profiles p
+    WHERE p.id = p_user_id AND p.is_blocked IS FALSE
+  ) THEN
+    RAISE EXCEPTION 'La cuenta está bloqueada o ya no tiene un perfil activo.'
+      USING ERRCODE = '42501';
+  END IF;
+
   IF v_invitation.expires_at <= pg_catalog.now() THEN
     UPDATE public.business_invitations
     SET status = 'expired', updated_at = pg_catalog.now()
