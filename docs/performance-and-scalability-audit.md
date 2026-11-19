@@ -249,3 +249,12 @@ El listado de accesos también usa cursor `created_at + id`, con 50 filas visibl
 ## 20. Publicaciones del administrador del negocio
 
 El listado privado de publicaciones del negocio dejó el tope fijo de 100. Ahora consulta 51 filas por solicitud, muestra 50 y usa cursor compuesto `created_at + id`. El filtro obligatorio `business_id` se mantiene en cada página; las acciones de despublicación siguen filtrando por el negocio actual y conservan las postulaciones relacionadas.
+
+
+## 21. Finanzas y nómina del panel técnico
+
+Los movimientos financieros de plataforma y los registros de nómina dejaron el límite fijo de 100. La Edge Function ahora devuelve hasta 51 filas por consulta en cada conjunto, con cursores independientes:
+- Finanzas: `occurred_at + id`.
+- Nómina: `created_at + id`.
+
+El panel muestra 50 filas por página en cada tabla y mantiene independientes los cursores para avanzar por finanzas sin mover nómina, y viceversa. El endpoint valida pares completos de cursor, fecha ISO parseable e ID UUID, y conserva la autorización técnica/MFA ya existente.
