@@ -320,3 +320,30 @@ El token debe generarse con un generador criptográficamente seguro, incluirse e
 - No se deben usar `user_metadata` como fuente de autorización: es información editable por el usuario.
 
 **Decisión de implementación:** no crear una simple columna booleana `onboarding_completed` en `profiles` ni bloquear toda la cuenta por invitación. El estado debe ser por invitación y membresía para soportar varios negocios, invitaciones concurrentes y revocación aislada.
+
+
+## ACC-08 — Primer borrador del esquema de invitaciones individuales — 19 nov 2026
+
+Se añadió `database/security/business-invitations-draft.sql` en la rama `correcciones-funcionales`. Es un borrador de implementación; todavía no se ejecuta en Supabase y no sustituye el flujo de invitación actual.
+
+### Qué incorpora el borrador
+
+- Tabla `business_invitations` con estado por invitación, negocio, usuario, correo normalizado, rol, cargo, vencimiento, actor y fechas de aceptación/revocación.
+- SHA-256 del token de invitación; nunca guarda el token original.
+- RLS habilitada y privilegios de tabla limitados a `service_role`.
+- Índices únicos para impedir invitaciones pendientes duplicadas por negocio/correo y negocio/usuario.
+- RPC para preparar invitación, vincular usuario Auth, marcar envío fallido, aceptar y revocar.
+- La membresía se crea como `suspended` con una marca exacta de invitación pendiente. La función `private.has_business_role` observada en Supabase activo exige `m.status = 'active'`, por lo que ese estado no concede permisos. El resolver de acceso de la rama también filtra membresías `active`.
+- La aceptación activa solo la membresía asociada al token, tras validación de la Edge Function.
+- La revocación conserva la fila histórica de membresía como `suspended` con marca `Invitación revocada`, conserva la cuenta Auth y no modifica otras membresías.
+- Aceptación y revocación bloquean negocio e invitación para serializar operaciones concurrentes.
+
+### Dependencias que todavía faltan
+
+1. Modificar `technical-business-management` para generar un token aleatorio criptográficamente seguro, guardar su hash mediante `prepare_business_invitation`, enviar el enlace con `redirectTo` y después vincular la cuenta devuelta por Auth.
+2. Crear una Edge Function privada de aceptación que valide JWT con `getUser`, compare el correo autenticado con el correo invitado, exija correo confirmado, actualice la contraseña mediante Auth Admin y llame a `accept_business_invitation`.
+3. Añadir a la interfaz técnica la lista de invitaciones pendientes y la acción de revocación con motivo.
+4. Cambiar `aceptar-invitacion.js` para enviar el token individual y completar la activación solo después de guardar la contraseña.
+5. Añadir pruebas de concurrencia, expiración, reintento, correo equivocado, dos negocios y conservación de membresías históricas.
+
+**No se debe desplegar ni aplicar este SQL todavía.** Las funciones actuales de invitación siguen usando el flujo anterior y aún no escriben en `business_invitations`; por tanto, el borrador no está conectado a la aplicación. La verificación del paquete se amplió para exigir tabla, RLS, permisos, RPC, helper de roles e índices cuando se ejecute en un entorno de ensayo.
