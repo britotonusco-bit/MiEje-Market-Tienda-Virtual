@@ -301,3 +301,12 @@ La política de retención sigue abierta: la limpieza elimina sesiones temporale
 La interfaz del administrador actualizaba `reviewed_by` y `reviewed_at` usando valores construidos en el navegador. Se retiraron esos dos campos del UPDATE: el panel ahora envía únicamente `status` y `admin_notes`, que son los campos operativos previstos para el administrador. La identidad del revisor y la fecha no deben confiarse al cliente; si se requiere conservar esa auditoría, debe implementarse con trigger o RPC en PostgreSQL que obtenga el usuario desde `auth.uid()` y la fecha desde el servidor. El verificador ahora falla si `authenticated` tiene permiso de actualizar directamente `reviewed_by` o `reviewed_at`.
 
 La función de limpieza también devuelve ahora `Cache-Control: no-store`, `Pragma: no-cache` y `X-Content-Type-Options: nosniff` en todas sus respuestas.
+
+
+### Migración propuesta para auditoría de revisión
+
+Se creó `database/jobs/job-application-review-audit-draft.sql` (paso 20). Revoca UPDATE a nivel de tabla y los permisos por columna sobre datos de identidad, contacto, respuestas, CV y metadatos de auditoría. Solo concede al rol `authenticated` UPDATE de `status` y `admin_notes`. Un trigger BEFORE UPDATE genera `reviewed_by` mediante `auth.uid()` y `reviewed_at` con `pg_catalog.transaction_timestamp()`.
+
+El panel `panel-live.js` se ajustó para enviar únicamente `status` y `admin_notes`. Ya no confía en el navegador para indicar quién revisó la postulación ni cuándo. El verificador integral comprueba que no exista UPDATE a nivel de tabla para `authenticated`, que no pueda modificar directamente los metadatos y que el trigger esté instalado.
+
+**Orden requerido:** aplicar el esquema base aprobado de vacantes, luego los pasos 18 y 19 según el README, y finalmente el paso 20. La migración es un borrador y no se ha ejecutado en Supabase. Confirmar también que la policy RLS de UPDATE continúa limitando cada fila al administrador del negocio activo.
