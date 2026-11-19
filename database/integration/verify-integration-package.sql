@@ -750,6 +750,20 @@ BEGIN
   END IF;
 
   IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid='public.job_applications'::regclass
+      AND conname='job_applications_status_allowed_check'
+      AND contype='c'
+      AND pg_get_constraintdef(oid) ILIKE '%pending%'
+      AND pg_get_constraintdef(oid) ILIKE '%reviewing%'
+      AND pg_get_constraintdef(oid) ILIKE '%contacted%'
+      AND pg_get_constraintdef(oid) ILIKE '%accepted%'
+      AND pg_get_constraintdef(oid) ILIKE '%rejected%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: el estado de las postulaciones no tiene la restricción de valores permitidos.';
+  END IF;
+
+  IF NOT EXISTS (
     SELECT 1
     FROM pg_trigger t
     JOIN pg_class c ON c.oid=t.tgrelid
