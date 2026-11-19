@@ -162,3 +162,22 @@ Ahora:
 Este ajuste reconcilia la membresía cuando la invitación original sí fue creada. No reenvía correos ni renueva enlaces vencidos. Para eso se necesita definir y probar un canal de correo transaccional y un flujo explícito con límites de frecuencia y auditoría. Supabase documenta que `inviteUserByEmail` crea un usuario no confirmado cuando el correo no existe; `generateLink` genera el enlace pero no lo envía por sí mismo, y `resend` está documentado para confirmaciones de signup, no como reenvío administrativo genérico de invitaciones. No se debe tratar esos métodos como intercambiables.
 
 No se desplegó la Edge Function ni se modificó Auth o la base activa. La comprobación realizada es estática; quedan pendientes Deno check, prueba de invitación real, fallo simulado de RPC, reintento y aceptación del correo en staging.
+
+
+## Revisión del selector de usuarios y estados de acceso — 19 nov 2026
+
+Se revisó la gestión de membresías y la diferencia entre un bloqueo local y uno global.
+
+- La Edge Function ahora incluye `profiles.is_blocked` al listar miembros para el panel técnico.
+- El selector distingue membresías activas y suspendidas, y señala las cuentas bloqueadas globalmente.
+- Al cambiar de negocio, se limpia la selección anterior para evitar operar sobre una cuenta del negocio previo.
+- El formulario propone suspender si la membresía está activa y reactivar si está suspendida.
+- Si la cuenta está bloqueada globalmente, el panel explica que reactivar la membresía no elimina el bloqueo global.
+- Se añadieron identificadores de solicitud para que una respuesta lenta de un negocio anterior no reemplace los resultados del negocio seleccionado después.
+- Se corrigió el estado deshabilitado del selector cuando se limpia la selección de negocio.
+
+### Unicidad de membresías
+
+Una consulta SQL estrictamente de solo lectura a Supabase activo confirmó la restricción validada `UNIQUE (business_id, user_id)`. Esto impide que una misma cuenta tenga dos membresías para el mismo negocio. El borrador de verificación ahora exige que esa restricción exista y esté validada, y comprueba la columna `profiles.is_blocked`.
+
+No se modificó la base activa. No se desplegó la Edge Function. Se realizaron 12 comprobaciones estáticas; siguen pendientes las pruebas de navegador, Deno check y pruebas concurrentes en staging.
