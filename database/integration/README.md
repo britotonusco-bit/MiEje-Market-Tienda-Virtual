@@ -598,3 +598,6 @@ No se aplicaron índices ni se modificaron políticas o consultas en el proyecto
 ### Paginación inicial de paneles
 
 `panel-live.js` implementa páginas de 50 productos para el administrador y 50 pedidos para el empleado mediante cursor compuesto `created_at + id`, con filtro de negocio y orden estable. Los costos de producto se consultan solo para los IDs de la página actual. Los pedidos del administrador y otras listas aún conservan límites anteriores; revisar `docs/performance-and-scalability-audit.md`. Esta implementación no se ha probado en navegador ni staging.
+
+
+El catálogo público también agrupa los productos por `business_id` en un `Map`, evitando filtrar toda la colección una vez por cada negocio. Los topes globales de carga del storefront siguen pendientes; ver el informe de rendimiento para la estrategia de carga por tienda.
