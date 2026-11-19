@@ -523,6 +523,16 @@ BEGIN
     RAISE EXCEPTION 'La membresía cambió durante la operación.' USING ERRCODE = '40001';
   END IF;
 
+  -- Las asignaciones de invitación solo pueden activarse por accept_business_invitation.
+  -- La reactivación administrativa genérica no debe saltarse el onboarding ni una revocación.
+  IF v_before.blocked_reason IN (
+    'Invitación pendiente de aceptación',
+    'Invitación revocada'
+  ) THEN
+    RAISE EXCEPTION 'Esta membresía requiere completar o renovar el flujo de invitación; no puede reactivarse manualmente.'
+      USING ERRCODE = '42501';
+  END IF;
+
   -- Serializa la reactivación con un bloqueo global concurrente del perfil.
   -- Si el bloqueo global gana primero, esta operación lo verá y rechazará.
   -- Si la reactivación gana primero, el bloqueo global posterior seguirá
