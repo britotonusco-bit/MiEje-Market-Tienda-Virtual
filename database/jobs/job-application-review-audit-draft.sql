@@ -4,6 +4,34 @@
 -- Aplicar después de instalar y verificar el esquema base de vacantes.
 -- No despliega Edge Functions ni modifica postulaciones históricas.
 
+-- El estado solo puede usar los valores que ofrece el flujo del panel.
+-- El preflight evita convertir silenciosamente datos históricos desconocidos.
+DO $migration$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM public.job_applications
+    WHERE status IS NOT NULL
+      AND status NOT IN ('pending','reviewing','contacted','accepted','rejected')
+  ) THEN
+    RAISE EXCEPTION 'Hay estados históricos de postulaciones fuera del catálogo permitido. Revisarlos antes de continuar.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid='public.job_applications'::regclass
+      AND conname='job_applications_status_allowed_check'
+  ) THEN
+    ALTER TABLE public.job_applications
+      ADD CONSTRAINT job_applications_status_allowed_check
+      CHECK (status IN ('pending','reviewing','contacted','accepted','rejected'))
+      NOT VALID;
+  END IF;
+END;
+$migration$;
+
+ALTER TABLE public.job_applications
+  VALIDATE CONSTRAINT job_applications_status_allowed_check;
+
 -- Evita que un permiso UPDATE a nivel de tabla permita modificar columnas
 -- sensibles aunque exista una concesión más limitada por columna.
 REVOKE UPDATE ON TABLE public.job_applications
