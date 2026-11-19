@@ -23,7 +23,7 @@ function parsePageCursor(body: Record<string, unknown>) {
   const createdAt = typeof body.before_created_at === "string" ? body.before_created_at : "";
   const id = textValue(body.before_id, 80);
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const timestampPattern = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|[+-]\\d{2}:\\d{2})$/;
+  const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
   if (Boolean(createdAt) !== Boolean(id) ||
       (createdAt && (!timestampPattern.test(createdAt) || !Number.isFinite(Date.parse(createdAt)))) ||
       (id && !uuidPattern.test(id))) {
