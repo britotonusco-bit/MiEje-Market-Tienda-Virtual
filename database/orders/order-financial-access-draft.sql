@@ -51,7 +51,17 @@ BEGIN
   WHERE o.business_id = p_business_id
     AND (
       NOT p_refundable_only
-      OR (o.status = 'cancelled' AND o.payment_status = 'paid')
+      OR (
+        o.status = 'cancelled'
+        AND o.payment_status = 'paid'
+        AND EXISTS (
+          SELECT 1
+          FROM public.order_cancellation_requests cr
+          WHERE cr.business_id = o.business_id
+            AND cr.order_id = o.id
+            AND cr.status = 'approved'
+        )
+      )
     )
   ORDER BY o.created_at DESC
   LIMIT v_limit;
