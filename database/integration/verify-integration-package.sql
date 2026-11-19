@@ -1459,6 +1459,82 @@ BEGIN
     RAISE EXCEPTION 'FALLO: falta la política de solicitud de bloqueo limitada al administrador del negocio.';
   END IF;
 
+  -- La solicitud no debe poder duplicarse mientras exista otra pendiente
+  -- para el mismo usuario dentro del mismo negocio.
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_indexes
+    WHERE schemaname='public'
+      AND tablename='access_block_requests'
+      AND indexname='access_block_requests_one_pending_per_member_idx'
+      AND indexdef ILIKE '%UNIQUE INDEX%'
+      AND indexdef ILIKE '%business_id%'
+      AND indexdef ILIKE '%target_user_id%'
+      AND indexdef ILIKE '%status = ''pending''%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: falta el índice único de solicitudes pendientes por usuario y negocio.';
+  END IF;
+
+  -- Solo se pueden insertar los cuatro campos de solicitud; no se permite
+  -- fijar desde el navegador estado, resolución, actor ni marcas de tiempo.
+  IF NOT has_column_privilege('authenticated','public.access_block_requests','business_id','INSERT')
+     OR NOT has_column_privilege('authenticated','public.access_block_requests','requested_by','INSERT')
+     OR NOT has_column_privilege('authenticated','public.access_block_requests','target_user_id','INSERT')
+     OR NOT has_column_privilege('authenticated','public.access_block_requests','reason','INSERT')
+     OR has_column_privilege('authenticated','public.access_block_requests','status','INSERT')
+     OR has_column_privilege('authenticated','public.access_block_requests','resolved_by','INSERT')
+     OR has_column_privilege('authenticated','public.access_block_requests','resolved_at','INSERT')
+     OR has_column_privilege('authenticated','public.access_block_requests','technician_note','INSERT') THEN
+    RAISE EXCEPTION 'FALLO: authenticated puede escribir campos de resolución de solicitudes.';
+  END IF;
+
+  -- La RPC de resolución debe validar al propietario, bloquear la solicitud,
+  -- proteger al último administrador y auditar en la misma transacción.
+  IF EXISTS (
+    SELECT 1
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='public'
+      AND p.proname='resolve_access_block_request'
+      AND (
+        p.prosecdef
+        OR NOT (COALESCE(p.proconfig,ARRAY[]::text[]) @> ARRAY['search_path=""']::text[])
+      )
+  ) OR position('FOR UPDATE' IN upper(pg_get_functiondef(
+         'public.resolve_access_block_request(uuid,text,text,uuid)'::regprocedure
+       ))) = 0
+     OR position('platform_owner' IN pg_get_functiondef(
+         'public.resolve_access_block_request(uuid,text,text,uuid)'::regprocedure
+       )) = 0
+     OR position('business_admin' IN pg_get_functiondef(
+         'public.resolve_access_block_request(uuid,text,text,uuid)'::regprocedure
+       )) = 0
+     OR position('audit_logs' IN pg_get_functiondef(
+         'public.resolve_access_block_request(uuid,text,text,uuid)'::regprocedure
+       )) = 0
+     OR position('último administrador activo' IN pg_get_functiondef(
+         'public.resolve_access_block_request(uuid,text,text,uuid)'::regprocedure
+       )) = 0 THEN
+    RAISE EXCEPTION 'FALLO: la RPC de bloqueo no aplica las protecciones transaccionales esperadas.';
+  END IF;
+
+  -- La moderación debe bloquear la fila, autorizar al propietario y registrar
+  -- cada cambio real en la misma transacción.
+  IF position('FOR UPDATE' IN upper(pg_get_functiondef(
+       'public.moderate_business_content_transactionally(uuid,text,text,uuid)'::regprocedure
+     ))) = 0
+     OR position('audit_logs' IN pg_get_functiondef(
+       'public.moderate_business_content_transactionally(uuid,text,text,uuid)'::regprocedure
+     )) = 0
+     OR position('moderation_status' IN pg_get_functiondef(
+       'public.moderate_business_content_transactionally(uuid,text,text,uuid)'::regprocedure
+     )) = 0
+     OR position('platform_owner' IN pg_get_functiondef(
+       'public.moderate_business_content_transactionally(uuid,text,text,uuid)'::regprocedure
+     )) = 0 THEN
+    RAISE EXCEPTION 'FALLO: la RPC de moderación no bloquea, autoriza y registra el cambio.';
+  END IF;
+
   -- Inventario: tabla, RLS, trigger de altas/cambios y RPC de ajuste.
   IF to_regclass('public.inventory_movements') IS NULL
      OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid='public.inventory_movements'::regclass)
