@@ -2269,6 +2269,7 @@ BEGIN
      OR has_function_privilege('authenticated','public.expire_business_invitation(uuid)','EXECUTE')
      OR has_function_privilege('authenticated','public.revoke_business_invitation(uuid,uuid,text)','EXECUTE')
      OR NOT has_function_privilege('service_role','public.accept_business_invitation(uuid,uuid,text)','EXECUTE')
+     OR NOT has_function_privilege('service_role','public.expire_business_invitation(uuid)','EXECUTE')
      OR NOT has_function_privilege('service_role','public.revoke_business_invitation(uuid,uuid,text)','EXECUTE') THEN
     RAISE EXCEPTION 'FALLO: RPCs de invitación expuestas a clientes o no disponibles al servidor.';
   END IF;
