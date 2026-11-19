@@ -329,3 +329,15 @@ Resultado:
 - No aparecieron triggers append-only en `audit_logs` para impedir UPDATE, DELETE o TRUNCATE.
 
 Esto confirma que las protecciones del borrador de rama no están instaladas en la base activa. El código de rama contiene la lógica de protección y el verificador exige su instalación, pero no se debe considerar protegida la base de producción hasta ejecutar el paquete en staging, validar los resultados y autorizar su aplicación. No se realizó ninguna escritura ni cambio de configuración.
+
+
+## Alcance real del bloqueo global de perfiles — 19 nov 2026
+
+Se comprobó que el panel técnico puede suspender o reactivar una membresía individual, pero no ofrece una acción para establecer o retirar `profiles.is_blocked` globalmente.
+
+- La Edge Function `technical-business-management` no expone una acción de bloqueo/desbloqueo global de perfiles.
+- Una consulta SQL estrictamente de solo lectura a Supabase activo no encontró RPC públicas de bloqueo global, desbloqueo global ni gestión de bloqueos de cuenta.
+- La interfaz sí puede detectar `profiles.is_blocked`, pero su formulario gestiona únicamente la membresía del negocio.
+- Se cambió el aviso para decir expresamente que no existe todavía un flujo de desbloqueo global en el panel. Reactivar una membresía no debe presentarse como solución a un bloqueo global.
+
+Esto es una brecha funcional pendiente, no una operación que deba resolverse modificando directamente la tabla `profiles`. Antes de implementar el flujo global se requiere definir alcance, motivo obligatorio, auditoría transaccional, control de último propietario técnico y revocación/renovación de sesiones. No se modificó la base activa.
