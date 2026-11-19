@@ -52,18 +52,30 @@ BEGIN
     RAISE EXCEPTION 'Las notas no pueden superar 2000 caracteres.' USING ERRCODE = '22023';
   END IF;
 
+  -- Autorizar el negocio antes de adquirir el bloqueo del pedido para
+  -- impedir que usuarios de otras tiendas bloqueen operaciones ajenas.
+  SELECT o.business_id INTO v_order.business_id
+  FROM public.orders o
+  WHERE o.id = p_order_id;
+
+  IF NOT FOUND
+     OR NOT private.business_is_active(v_order.business_id)
+     OR NOT private.has_business_role(v_order.business_id, ARRAY['business_admin']::text[]) THEN
+    RAISE EXCEPTION 'No se encontró el pedido o no tienes permiso para procesarlo.'
+      USING ERRCODE = '42501';
+  END IF;
+
   SELECT * INTO v_order
   FROM public.orders
   WHERE id = p_order_id
+    AND business_id = v_order.business_id
   FOR UPDATE;
 
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'No se encontró el pedido.' USING ERRCODE = 'P0002';
-  END IF;
-
-  IF NOT private.business_is_active(v_order.business_id)
+  IF NOT FOUND
+     OR NOT private.business_is_active(v_order.business_id)
      OR NOT private.has_business_role(v_order.business_id, ARRAY['business_admin']::text[]) THEN
-    RAISE EXCEPTION 'Solo el administrador activo del negocio puede registrar reembolsos.' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'El pedido cambió o ya no tienes permiso para procesarlo.'
+      USING ERRCODE = '42501';
   END IF;
 
   IF v_order.status <> 'cancelled' THEN
