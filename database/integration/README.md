@@ -508,3 +508,14 @@ La duración máxima de sesión, timeout de inactividad y sesión única no se p
 
 
 El panel escucha `SIGNED_OUT`, `TOKEN_REFRESHED` y `USER_UPDATED`: redirige al login al cerrar sesión y revalida permisos después de una renovación o actualización de usuario. Las consultas se difieren fuera del callback de Auth. Se conservan el intervalo de 30 segundos y la revalidación al volver a primer plano.
+
+
+## Operaciones administrativas y auditoría inmutable — 19 nov 2026
+
+Informe: `docs/administrative-operations-security-audit.md`.
+
+La función `technical-business-management` activa sigue en versión 6 y usa escrituras directas no atómicas para negocios y membresías; las RPC transaccionales de la rama no existen todavía en ningún esquema del proyecto activo. Tampoco se observó el trigger que protege al último administrador activo. Las políticas activas conservan bypass `is_platform_owner()` en perfiles, membresías y negocios.
+
+La tabla activa `audit_logs` permite UPDATE/DELETE/TRUNCATE a `service_role` y no tiene trigger de inmutabilidad. Se añadió el borrador `database/security/audit-log-immutability-draft.sql` y se amplió `verify-integration-package.sql` para comprobar RPC invoker/search_path/grants, trigger del último administrador y protección append-only del registro de auditoría.
+
+La tabla `access_block_requests` tampoco aparece en la base activa. No se ejecutó SQL de escritura ni se desplegó código. Requiere staging y autorización antes de aplicar migraciones o funciones.
