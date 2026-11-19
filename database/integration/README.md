@@ -393,3 +393,6 @@ La interfaz de cliente está en `cuenta.html` + `cuenta.js`: implementa registro
 ## Aislamiento de clientes y favoritos
 
 La migración `customer-account-migration.sql` requiere comprobar la exposición de `public.customer_favorites` en Data API: RLS y GRANT no exponen automáticamente tablas nuevas. En staging, habilitar solo la tabla necesaria y verificar que sus políticas de SELECT/INSERT/DELETE limitan las filas a `auth.uid()`. El verificador integral ahora inspecciona las definiciones de `get_customer_order_history()`, `private.customer_owns_order(uuid)`, la política de `order_items` y los predicados de favoritos. La auditoría estática está en `docs/customer-favorites-history-consent-audit.md`; las pruebas con clientes A/B y negocios A/B continúan pendientes.
+
+
+El endpoint `track-public-order` solo debe publicar estado y datos mínimos de seguimiento; actualmente devuelve también `delivery_tracking`, un texto libre introducido desde el panel. Tratarlo como campo público, no introducir datos personales y definir validación de formato antes de cerrar la auditoría. Verificar además la generación impredecible del token de seguimiento en staging.
