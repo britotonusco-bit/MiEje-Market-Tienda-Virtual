@@ -487,3 +487,12 @@ La función `get-public-storefront` activa no selecciona `id` de los métodos de
 No se encontró `pg_cron` instalado ni las relaciones `cron.job` y `cron.job_run_details`. Por ello, la limpieza de sesiones y archivos temporales no tiene un programador SQL activo demostrado. El secreto `JOB_APPLICATION_CLEANUP_SECRET` debe configurarse fuera del repositorio y usarse desde un scheduler privado; nunca insertar su valor literal en una migración o en el frontend.
 
 Durante esta revisión se limitaron a 64 KB los cuerpos JSON de `technical-business-management` y `create-job-application` y se exige que sean objetos JSON. Estos cambios solo están en la rama; no se desplegaron. El informe detalla las pruebas requeridas en staging, el estado de auditoría de `audit_logs` y los riesgos residuales de rate limiting y retención.
+
+
+## Invitaciones y recuperación — actualización 19 nov 2026
+
+Informe: `docs/account-recovery-invitations-audit.md`.
+
+La función técnica de la rama ahora bloquea con HTTP 409 la asignación a una cuenta de Auth preexistente cuyo correo no está confirmado; no crea una membresía nueva ni reenvía automáticamente el correo. Las cuentas nuevas continúan por `inviteUserByEmail`. La página `aceptar-invitacion.js` también exige que la sesión resultante indique `email_confirmed_at` antes de permitir establecer la contraseña.
+
+Siguen pendientes un registro propio del ciclo de invitación, reenvío con límite de frecuencia, expiración/revocación coordinada y reconciliación cuando Auth envía el correo pero falla la RPC de membresía. No se han probado entregas SMTP ni enlaces reales. No enviar invitaciones reales ni modificar Auth en el proyecto activo durante la auditoría.
