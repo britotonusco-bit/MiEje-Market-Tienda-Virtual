@@ -334,3 +334,8 @@ Se amplió `verify-integration-package.sql` para comprobar en staging que: ning�
 ### Comprobación estática de checkout y cancelaciones — 19 nov 2026
 
 Se amplió el verificador de integración para revisar el contenido de las RPC instaladas en staging: el checkout debe ordenar los productos por UUID antes de bloquearlos, usar bloqueo de fila y descontar inventario; la aprobación de cancelación debe bloquear productos en orden estable, sumar las cantidades de las líneas y comprobar que se restituyeron todos los productos esperados. Esto no sustituye pruebas concurrentes reales ni confirma que las funciones ya estén desplegadas.
+
+
+### Conciliación de moneda en reportes y reembolsos — 19 nov 2026
+
+El borrador del reporte de ganancias ahora filtra explícitamente en COP tanto los pagos como los reembolsos, evitando sumar movimientos de otra moneda como si fueran pesos colombianos. El verificador de integración inspecciona la RPC de reembolso para exigir bloqueo del pedido, estado cancelado, estado de pago pagado, exactamente un pago completado por el total, moneda COP y solicitud aprobada. También comprueba que el reporte financiero filtre COP. Son comprobaciones del código del borrador y del verificador; no certifican que la base activa tenga estas definiciones.
