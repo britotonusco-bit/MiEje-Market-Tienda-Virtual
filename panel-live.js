@@ -35,6 +35,8 @@
   let employeeOrderPageIndex = 0;
   let productCursorStack = [null];
   let productPageIndex = 0;
+  let businessContentCursorStack = [null];
+  let businessContentPageIndex = 0;
   const statusLabels = {
     received: 'Recibido', confirmed: 'Confirmado', preparing: 'En preparación',
     ready: 'Listo', on_the_way: 'En camino', delivered: 'Entregado', cancelled: 'Cancelado'
@@ -1549,15 +1551,23 @@
     }
   }
 
-  async function loadBusinessContent() {
+  async function loadBusinessContent(reset = true) {
     const target = document.querySelector('#businessContentList');
     if (!target) return;
-    const { data, error } = await db.from('business_content_pages')
+    if (reset) { businessContentCursorStack = [null]; businessContentPageIndex = 0; }
+    const cursor = businessContentCursorStack[businessContentPageIndex];
+    let query = db.from('business_content_pages')
       .select('id,content_type,title,body,is_published,moderation_status,moderation_note,created_at')
-      .eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+      .limit(PANEL_PAGE_SIZE + 1);
+    if (cursor) query = query.or('created_at.lt.' + cursor.created_at + ',and(created_at.eq.' + cursor.created_at + ',id.lt.' + cursor.id + ')');
+    const { data, error } = await query;
     if (error) { showError(target, error); return; }
-    const rows = data || [];
-    if (!rows.length) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene publicaciones.</div>'; return; }
+    const fetchedRows = data || [];
+    const rows = fetchedRows.slice(0, PANEL_PAGE_SIZE);
+    if (!rows.length && businessContentPageIndex === 0) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene publicaciones.</div>'; return; }
+    if (!rows.length) target.innerHTML = '<div class="empty">No hay más publicaciones en esta página.</div>';
     const labels = { promotion: 'Promoción', job_form: 'Empleo', announcement: 'Anuncio', contact: 'Información' };
     target.innerHTML = tableHtml(
       ['Tipo', 'Título', 'Estado de revisión', 'Visible', 'Fecha', 'Acción'],
@@ -1572,6 +1582,19 @@
           : '<span class="muted">No publicada</span>'
       ])
     );
+    appendCursorPager(target, {
+      page: businessContentPageIndex + 1,
+      canPrevious: businessContentPageIndex > 0,
+      hasMore: fetchedRows.length > PANEL_PAGE_SIZE,
+      previous: () => { businessContentPageIndex--; void loadBusinessContent(false); },
+      next: () => {
+        const last = rows[rows.length - 1];
+        if (!last) return;
+        businessContentCursorStack[businessContentPageIndex + 1] = { created_at: last.created_at, id: last.id };
+        businessContentPageIndex++;
+        void loadBusinessContent(false);
+      }
+    });
     target.querySelectorAll('[data-archive-content]').forEach(button => button.addEventListener('click', async () => {
       const id = button.dataset.archiveContent;
       if (!window.confirm('¿Despublicar esta publicación? Se ocultará al público, pero se conservarán la vacante y todas sus postulaciones.')) return;
