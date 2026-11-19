@@ -432,3 +432,8 @@ El verificador integral ahora comprueba que `authenticated` y `anon` no puedan e
 ### Comprobaciones de concurrencia de inventario — 19 nov 2026
 
 El verificador integral también inspecciona las definiciones de `create_public_order` y `decide_order_cancellation`. Comprueba el orden determinista de bloqueos, el descuento de inventario en checkout y la restitución completa durante una cancelación aprobada. Ejecutar en staging y complementar con pruebas concurrentes de carritos y cancelaciones antes de producción.
+
+
+### Conciliación financiera en COP — 19 nov 2026
+
+El reporte de ganancias filtra pagos y reembolsos completados por `currency='COP'`. El verificador también inspecciona `complete_order_refund` para confirmar que bloquee el pedido, exija pedido cancelado y pago pagado, concilie un único pago completado por el total, exija moneda COP y una solicitud de cancelación aprobada. Ejecutar el verificador en staging después de aplicar el paquete SQL en el orden documentado.
