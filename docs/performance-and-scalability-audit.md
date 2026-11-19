@@ -1,0 +1,121 @@
+# Auditoría de rendimiento y capacidad de crecimiento
+
+**Proyecto:** MiEje Market Independiente  
+**Supabase project ref:** `cqixlrwbqatbhzmpygiz`  
+**Rama:** `correcciones-funcionales`  
+**Fecha:** 19 de noviembre de 2026  
+**Alcance:** asesor de rendimiento, estadísticas PostgreSQL, índices, consultas de interfaz y límites de carga. Todas las consultas sobre Supabase fueron de solo lectura.
+
+## 1. Dictamen
+
+El proyecto aún no tiene una carga comercial representativa para certificar su rendimiento bajo concurrencia. La base activa muestra prácticamente todas las tablas comerciales vacías, por lo que no sería correcto afirmar que la aplicación ya soporta miles de productos o pedidos.
+
+El asesor de rendimiento detectó:
+- 16 claves foráneas sin índices de cobertura.
+- 16 índices que no registran uso en las estadísticas actuales.
+- 1 advertencia por políticas RLS permisivas múltiples en `business_content_pages`.
+
+El asesor de salud no devolvió hallazgos. Esto no sustituye pruebas de carga.
+
+## 2. Estado de datos y estadísticas
+
+Consulta de solo lectura al proyecto activo:
+- PostgreSQL 17.11.0.003.
+- `profiles`: 1 fila estimada.
+- `businesses`, `business_memberships`, `products`, `orders`, `order_items`, `financial_transactions`, `refund_details`, `job_applications`, `business_expenses`, `audit_logs`, `product_costs` y `order_item_costs`: 0 filas estimadas en la consulta.
+- Las tablas comerciales principales ocupan entre 8 KB y 80 KB en la medición consultada.
+
+Las estadísticas `pg_stat_user_tables` y `pg_stat_user_indexes` son acumuladas desde el último reinicio/reset relevante y dependen del tráfico que haya ocurrido. Un índice con cero lecturas en una base casi vacía no es prueba de que sea innecesario.
+
+## 3. Claves foráneas sin índice
+
+El asesor encontró 16 relaciones sin índice que cubra las columnas de la clave foránea. Los grupos afectados son:
+- `business_content_pages`: `created_by`, `moderated_by`, `updated_by`.
+- `business_expenses`: `created_by`, `voided_by`.
+- `financial_transactions`: relación compuesta con cancelación y `cancellation_request_id`.
+- `job_application_upload_sessions`: `business_id` y relación con página de contenido.
+- `job_applications`: relación negocio/página y `reviewed_by`.
+- `order_item_costs`: relación negocio/pedido y pedido/línea.
+- `product_costs`: relación negocio/producto.
+- `refund_details`: relación negocio/pedido y transacción financiera.
+
+Se preparó `database/performance/index-optimization-draft.sql` con 14 índices candidatos. La diferencia entre 16 hallazgos y 14 índices se debe a que algunos índices compuestos propuestos cubren también claves foráneas simples o compuestas cuyo conjunto de columnas es un prefijo izquierdo del mismo índice.
+
+Estos índices pueden reducir búsquedas completas al validar/eliminar/actualizar filas referenciadas y acelerar joins de negocio. No se aplicaron. Deben probarse en staging y medirse; cada índice también consume espacio y aumenta el costo de INSERT/UPDATE/DELETE.
+
+## 4. Índices marcados como no utilizados
+
+El asesor enumeró 16 índices sin lecturas registradas, incluyendo índices de:
+- membresías por usuario;
+- productos por negocio/estado;
+- pedidos por negocio/fecha;
+- líneas de pedido;
+- auditoría;
+- solicitudes de cancelación;
+- transacciones financieras;
+- gastos;
+- moderación de contenido;
+- expiración de sesiones de carga.
+
+**No se recomienda borrarlos ahora.** La plataforma no tiene volumen comercial y varios índices corresponden a rutas críticas que todavía no han tenido tráfico real. Antes de considerar eliminar alguno, se debe medir durante una ventana representativa después de pruebas de carga y revisar sus restricciones/consultas dependientes.
+
+## 5. Políticas RLS y costo de consulta
+
+El asesor marcó una advertencia en `business_content_pages`: dos políticas permisivas de SELECT para `authenticated`, `business_content_pages_admin_read` y `business_content_pages_public_read`.
+
+PostgreSQL combina políticas permisivas con OR; varias expresiones pueden evaluarse en cada consulta. Sin embargo, fusionarlas sin revisar el comportamiento público y del administrador puede cambiar qué filas son visibles. No se modificaron las políticas. Se debe resolver en una revisión de seguridad/RLS separada y comprobar el mismo resultado con usuarios anónimos, administradores y otros miembros.
+
+## 6. Carga, límites y paginación en la interfaz
+
+Revisión estática de la rama:
+- Página pública: carga hasta 200 negocios, 1.000 productos y 500 piezas de contenido en solicitudes amplias. No se observó paginación incremental en esos bloques.
+- Panel del negocio: pedidos hasta 100, productos hasta 250, gastos hasta 250, postulaciones hasta 100, movimientos de inventario hasta 100 y auditoría hasta 100.
+- Historial del cliente: la RPC revisada limita la consulta a los últimos 50 pedidos.
+- Favoritos: la consulta de cuenta no muestra paginación explícita.
+- El panel de empleado reutiliza la carga operativa de pedidos, limitada a 100 en la consulta observada.
+
+Los límites evitan descargar tablas completas, pero generan un límite funcional: cuando un negocio supere esos topes, los registros más antiguos o los productos posteriores al corte no se mostrarán en esa carga. No se debe presentar ese resultado como historial completo.
+
+**Recomendación:** implementar paginación por cursor (keyset) basada en una ordenación estable, por ejemplo `created_at DESC, id DESC`, y filtrar siempre por `business_id`. Evitar `OFFSET` grande para historiales que crezcan mucho. Para catálogos públicos, cargar por negocio/categoría y recuperar páginas conforme el cliente navega.
+
+## 7. Consultas observadas
+
+`pg_stat_statements` está disponible y devolvió consultas de introspección/administración del esquema entre las de mayor costo acumulado. No se identificó una muestra representativa de consultas comerciales lentas; las tablas de pedidos y productos están vacías. Por tanto:
+- No se atribuyen esos tiempos a lentitud de MiEje Market.
+- No se cambia una consulta sin un plan `EXPLAIN (ANALYZE, BUFFERS)` ejecutado con datos representativos en staging.
+- No se ejecuta `pg_stat_statements_reset()` durante la auditoría, porque borraría estadísticas útiles.
+
+## 8. Plan de pruebas de rendimiento
+
+En staging, con datos sintéticos que no contengan información personal:
+1. Cargar varios negocios aislados, productos, pedidos y líneas de pedido en cantidades crecientes.
+2. Medir catálogo público por negocio/categoría, búsqueda, detalle y carrito.
+3. Medir pedidos por estado y fecha, historial, gastos, auditoría y vacantes.
+4. Probar checkout concurrente sobre el mismo producto y productos distintos; confirmar inventario correcto y ausencia de sobreventa.
+5. Probar cancelaciones concurrentes y conciliación de inventario.
+6. Medir consultas con `EXPLAIN (ANALYZE, BUFFERS)` y estadísticas antes/después.
+7. Comparar latencia p50/p95/p99, throughput, errores y uso de conexiones bajo carga.
+8. Probar paginación más allá de 1.000 productos y 100 pedidos por negocio.
+9. Verificar que RLS mantenga aislamiento entre negocios durante las pruebas.
+10. Repetir pruebas después de aplicar los índices candidatos y revisar el asesor de rendimiento.
+
+No fijar objetivos de latencia ni concurrencia sin acordar antes el volumen esperado y la capacidad del plan de Supabase.
+
+## 9. Cambios realizados en la rama
+
+Se añadió `database/performance/index-optimization-draft.sql`, con 14 índices candidatos y una consulta de verificación comentada. El archivo está marcado expresamente como borrador para staging; no ejecutarlo en el proyecto activo durante esta auditoría.
+
+No se eliminaron índices, no se modificaron políticas RLS, no se alteraron consultas de producción y no se ejecutó ninguna migración.
+
+## 10. Pendientes para cerrar
+
+- [ ] Aplicar índices candidatos en staging y revisar asesor.
+- [ ] Medir rendimiento antes/después con datos representativos.
+- [ ] Resolver la política RLS múltiple sin cambiar permisos.
+- [ ] Implementar paginación por cursor en catálogo, pedidos, favoritos y listados administrativos.
+- [ ] Verificar comportamiento de carga en dispositivos móviles y conexiones lentas.
+- [ ] Definir objetivos de rendimiento y concurrencia.
+- [ ] Ejecutar pruebas de carga y concurrencia de checkout/cancelación.
+- [ ] Confirmar plan y límites de recursos del proyecto antes de abrir al público.
+
+**Conclusión:** se identificaron correcciones concretas de índices y límites de carga, pero la capacidad real de crecimiento aún no está demostrada. El siguiente paso seguro es validar los índices y la paginación en staging, no optimizar a ciegas la base activa.
