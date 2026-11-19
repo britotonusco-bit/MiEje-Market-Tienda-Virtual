@@ -292,6 +292,107 @@ REVOKE ALL ON FUNCTION public.get_customer_order_history() FROM anon;
 GRANT EXECUTE ON FUNCTION public.get_customer_order_history() TO authenticated;
 
 
+-- Historial del cliente con cursor compuesto: evita omitir pedidos cuando
+-- varias órdenes comparten la misma marca de tiempo.
+CREATE OR REPLACE FUNCTION public.get_customer_order_history_page(
+  p_limit integer DEFAULT 50,
+  p_before_created_at timestamptz DEFAULT NULL,
+  p_before_order_id uuid DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_actor uuid := auth.uid();
+  v_orders jsonb;
+  v_has_more boolean;
+BEGIN
+  IF v_actor IS NULL THEN
+    RAISE EXCEPTION 'Debes iniciar sesión para consultar tu historial.' USING ERRCODE = '42501';
+  END IF;
+
+  IF p_limit IS NULL OR p_limit < 1 OR p_limit > 50 THEN
+    RAISE EXCEPTION 'El tamaño de página debe estar entre 1 y 50.' USING ERRCODE = '22023';
+  END IF;
+
+  IF (p_before_created_at IS NULL) <> (p_before_order_id IS NULL) THEN
+    RAISE EXCEPTION 'El cursor del historial está incompleto.' USING ERRCODE = '22023';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.profiles p
+    WHERE p.id = v_actor
+      AND p.is_blocked = false
+  ) THEN
+    RAISE EXCEPTION 'La cuenta no tiene acceso al historial.' USING ERRCODE = '42501';
+  END IF;
+
+  WITH selected AS (
+    SELECT o.id, o.order_number, o.status, o.payment_status,
+           o.payment_method_name, o.subtotal, o.delivery_fee, o.total,
+           o.created_at, b.name AS business_name
+    FROM public.orders o
+    JOIN public.businesses b ON b.id = o.business_id
+    WHERE o.customer_user_id = v_actor
+      AND (
+        p_before_created_at IS NULL
+        OR (o.created_at, o.id) < (p_before_created_at, p_before_order_id)
+      )
+    ORDER BY o.created_at DESC, o.id DESC
+    LIMIT p_limit + 1
+  ),
+  page AS (
+    SELECT * FROM selected
+    ORDER BY created_at DESC, id DESC
+    LIMIT p_limit
+  )
+  SELECT
+    coalesce((
+      SELECT jsonb_agg(
+        jsonb_build_object(
+          'id', owned.id,
+          'order_number', owned.order_number,
+          'status', owned.status,
+          'payment_status', owned.payment_status,
+          'payment_method_name', owned.payment_method_name,
+          'subtotal', owned.subtotal,
+          'delivery_fee', owned.delivery_fee,
+          'total', owned.total,
+          'created_at', owned.created_at,
+          'business_name', owned.business_name,
+          'items', (
+            SELECT coalesce(
+              jsonb_agg(
+                jsonb_build_object(
+                  'product_name', oi.product_name,
+                  'quantity', oi.quantity,
+                  'unit_price', oi.unit_price,
+                  'line_total', coalesce(oi.line_total, oi.unit_price * oi.quantity)
+                ) ORDER BY oi.created_at, oi.id
+              ),
+              '[]'::jsonb
+            )
+            FROM public.order_items oi
+            WHERE oi.order_id = owned.id
+          )
+        ) ORDER BY owned.created_at DESC, owned.id DESC
+      )
+      FROM page owned
+    ), '[]'::jsonb),
+    (SELECT count(*) > p_limit FROM selected)
+  INTO v_orders, v_has_more;
+
+  RETURN jsonb_build_object('orders', v_orders, 'has_more', v_has_more);
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.get_customer_order_history_page(integer, timestamptz, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.get_customer_order_history_page(integer, timestamptz, uuid) FROM anon;
+GRANT EXECUTE ON FUNCTION public.get_customer_order_history_page(integer, timestamptz, uuid) TO authenticated;
+
+
 -- La política de order_items no debe exigir que el cliente tenga SELECT
 -- directo sobre orders.customer_user_id. La comprobación de propiedad se hace
 -- mediante una función SECURITY DEFINER y no expone ese identificador interno.
