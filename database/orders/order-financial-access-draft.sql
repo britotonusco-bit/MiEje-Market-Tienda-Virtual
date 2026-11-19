@@ -507,3 +507,79 @@ GRANT EXECUTE ON FUNCTION public.get_business_admin_profit_report(uuid,date,date
 -- 6) Un cliente no puede consultar historial ajeno, incluso con IDs conocidos.
 -- 7) El panel técnico no obtiene finanzas por estos RPCs.
 -- 8) Checkout, tracking público, paneles y cuenta siguen funcionando con grants reducidos.
+
+
+
+-- Variante paginada para el listado del panel administrativo. Mantiene la
+-- autorización del RPC financiero original y usa cursor compuesto estable.
+CREATE OR REPLACE FUNCTION public.get_business_admin_order_financials_page(
+  p_business_id uuid,
+  p_refundable_only boolean,
+  p_limit integer,
+  p_before_created_at timestamptz,
+  p_before_order_id uuid
+)
+RETURNS TABLE (
+  order_id uuid,
+  order_number bigint,
+  subtotal numeric,
+  delivery_fee numeric,
+  total numeric,
+  payment_method text,
+  payment_status text,
+  status text,
+  created_at timestamptz
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_actor uuid := auth.uid();
+  v_limit integer := greatest(1, least(coalesce(p_limit, 51), 51));
+BEGIN
+  IF v_actor IS NULL THEN
+    RAISE EXCEPTION 'Debes iniciar sesión.' USING ERRCODE = '42501';
+  END IF;
+
+  IF (p_before_created_at IS NULL) <> (p_before_order_id IS NULL) THEN
+    RAISE EXCEPTION 'El cursor de pedidos está incompleto.' USING ERRCODE = '22023';
+  END IF;
+
+  IF NOT private.business_is_active(p_business_id)
+     OR NOT private.has_business_role(p_business_id, ARRAY['business_admin']::text[]) THEN
+    RAISE EXCEPTION 'Solo el administrador activo de este negocio puede consultar sus datos financieros.'
+      USING ERRCODE = '42501';
+  END IF;
+
+  RETURN QUERY
+  SELECT o.id, o.order_number, o.subtotal, o.delivery_fee, o.total,
+         o.payment_method, o.payment_status, o.status, o.created_at
+  FROM public.orders o
+  WHERE o.business_id = p_business_id
+    AND (
+      NOT p_refundable_only
+      OR (
+        o.status = 'cancelled'
+        AND o.payment_status = 'paid'
+        AND EXISTS (
+          SELECT 1
+          FROM public.order_cancellation_requests cr
+          WHERE cr.business_id = o.business_id
+            AND cr.order_id = o.id
+            AND cr.status = 'approved'
+        )
+      )
+    )
+    AND (
+      p_before_created_at IS NULL
+      OR (o.created_at, o.id) < (p_before_created_at, p_before_order_id)
+    )
+  ORDER BY o.created_at DESC, o.id DESC
+  LIMIT v_limit;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.get_business_admin_order_financials_page(uuid, boolean, integer, timestamptz, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.get_business_admin_order_financials_page(uuid, boolean, integer, timestamptz, uuid) FROM anon;
+GRANT EXECUTE ON FUNCTION public.get_business_admin_order_financials_page(uuid, boolean, integer, timestamptz, uuid) TO authenticated;
