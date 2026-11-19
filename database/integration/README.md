@@ -505,3 +505,6 @@ Informe: `docs/session-mfa-access-audit.md`.
 La rama revalida acceso de panel cada 30 segundos y al volver a primer plano. El panel técnico y la Edge Function de rama exigen AAL2. Atención: la función `technical-business-management` desplegada en Supabase activo sigue en versión 6 y no contiene comprobación AAL2 de servidor. La UI por sí sola no reemplaza esa protección. No desplegar sin staging y autorización.
 
 La duración máxima de sesión, timeout de inactividad y sesión única no se pudieron verificar desde las herramientas disponibles. Deben revisarse manualmente en Authentication → Settings → Sessions. Las políticas activas de perfiles, membresías y negocios siguen mostrando bypass del propietario técnico; ver la sección RLS-01 del informe. No se aplicó SQL ni se alteraron ajustes de Auth.
+
+
+El panel escucha `SIGNED_OUT`, `TOKEN_REFRESHED` y `USER_UPDATED`: redirige al login al cerrar sesión y revalida permisos después de una renovación o actualización de usuario. Las consultas se difieren fuera del callback de Auth. Se conservan el intervalo de 30 segundos y la revalidación al volver a primer plano.
