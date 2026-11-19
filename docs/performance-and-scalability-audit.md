@@ -185,3 +185,15 @@ Pendientes de rendimiento/paginación:
 - Publicaciones del negocio y listas técnicas de negocios/usuarios requieren revisar paginación de extremo a extremo.
 
 No se ha probado en navegador ni staging. Los cambios de cuenta/favoritos dependen de que la migración de clientes esté instalada y la tabla esté expuesta por Data API.
+
+
+## 16. Paginación de auditoría
+
+Se añadió cursor compuesto `created_at + id` al listado de eventos de auditoría:
+- El panel técnico envía el cursor a `technical-business-management`.
+- La Edge Function valida que fecha e ID lleguen juntos, comprueba formato ISO de fecha y UUID, ordena por ambos campos y devuelve hasta 51 filas para una página de 50.
+- Se conserva el límite máximo de 100 para las llamadas existentes que no usan cursor (por ejemplo, el contador/resumen y el listado de accesos).
+- El panel de negocio pagina su consulta con el filtro de negocio o actor que ya tenía aplicado.
+- La búsqueda de nombres de usuario se limita a los actores presentes en la página actual.
+
+La Edge Function modificada está en la rama y todavía no está desplegada. No se ha validado en navegador ni staging; la paginación de registros de acceso específicos continúa con el límite anterior de 100.
