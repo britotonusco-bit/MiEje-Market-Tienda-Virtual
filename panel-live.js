@@ -197,6 +197,18 @@
   }
 
   function startAccessRevalidation() {
+    // Responder al cierre de sesión y a la renovación de tokens de Auth.
+    // Las consultas se difieren fuera del callback para no bloquear Auth.
+    db.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || !session) {
+        window.location.replace('login.html');
+        return;
+      }
+      if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+        window.setTimeout(() => { void revalidatePanelAccess(); }, 0);
+      }
+    });
+
     window.setInterval(() => { void revalidatePanelAccess(); }, 30000);
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') void revalidatePanelAccess();
