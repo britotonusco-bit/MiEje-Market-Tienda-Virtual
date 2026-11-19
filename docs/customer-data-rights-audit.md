@@ -364,3 +364,12 @@ Se consultaron en modo solo lectura las políticas y privilegios del proyecto Su
 **Verificador:** se añadieron comprobaciones para exigir las políticas anteriores y asegurar que `authenticated` no pueda modificar `platform_role`, `is_blocked` ni `blocked_reason`.
 
 **Pendiente:** ejecutar el paquete en staging y probar dos usuarios de negocios distintos, un cliente sin membresía y el propietario técnico. La base activa no se modificó; las políticas nuevas son borradores en GitHub.
+
+
+### Verificación de dependencias de cuenta en Supabase activo — 19 nov 2026
+
+Una consulta estrictamente de solo lectura confirmó que la base activa todavía no contiene `public.customer_favorites` ni `orders.customer_user_id`. Por tanto, el código de favoritos y el historial de pedidos vinculados a una cuenta dependen de migraciones que aún no se han aplicado. La ausencia de estas estructuras no debe confundirse con un error de interfaz.
+
+La cuenta web actualmente incluye autenticación, historial previsto y favoritos previstos, pero no ofrece todavía formularios para editar el perfil ni descargar/exportar los datos personales. Tampoco hay un flujo de autoservicio para solicitar eliminación de cuenta. Estas funciones quedan como trabajo pendiente y no se deben simular con controles que no ejecuten una operación real.
+
+Las políticas más restrictivas para perfiles y membresías se añadieron a `business-admin-boundaries.sql` en `correcciones-funcionales`; el verificador exige que no exista lectura global del propietario técnico. No se ejecutó la migración en Supabase activo.
