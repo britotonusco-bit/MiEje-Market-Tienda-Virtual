@@ -12,7 +12,14 @@ const corsHeaders = {
 function reply(status: number, payload: Record<string, unknown>) {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store, private, max-age=0",
+      "Pragma": "no-cache",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+    },
   });
 }
 
@@ -21,7 +28,14 @@ function textValue(value: unknown, max = 500): string {
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response("ok", {
+    headers: {
+      ...corsHeaders,
+      "Cache-Control": "no-store, max-age=0",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+    },
+  });
   if (req.method !== "POST") return reply(405, { error: "Método no permitido." });
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -30,7 +44,15 @@ Deno.serve(async (req: Request) => {
 
   let body: Record<string, unknown>;
   try {
-    body = await req.json();
+    const rawBody = await req.text();
+    if (new TextEncoder().encode(rawBody).byteLength > 65536) {
+      return reply(413, { error: "La solicitud supera el tamaño permitido." });
+    }
+    const parsed: unknown = JSON.parse(rawBody);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return reply(400, { error: "La solicitud no contiene un objeto JSON válido." });
+    }
+    body = parsed as Record<string, unknown>;
   } catch {
     return reply(400, { error: "La solicitud no contiene JSON válido." });
   }
