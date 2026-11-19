@@ -67,6 +67,8 @@ BEGIN
 
   IF OLD.status = 'active'
      AND NEW.status = 'voided'
+     AND OLD.payment_status = 'pending'
+     AND NEW.payment_status = 'pending'
      AND NEW.voided_by = (SELECT auth.uid())
      AND (to_jsonb(NEW) - ARRAY['status','void_reason','voided_by','voided_at','updated_at'])
          = (to_jsonb(OLD) - ARRAY['status','void_reason','voided_by','voided_at','updated_at'])
@@ -243,10 +245,16 @@ BEGIN
     RAISE EXCEPTION 'Solo el administrador del negocio activo puede anular gastos.' USING ERRCODE='42501';
   END IF;
   IF v_expense.status <> 'active' THEN RAISE EXCEPTION 'El gasto ya fue anulado.' USING ERRCODE='23514'; END IF;
+  -- Un gasto pagado ya forma parte de los reportes históricos. Anularlo
+  -- lo borraría del cálculo sin registrar una reversión financiera.
+  IF v_expense.payment_status <> 'pending' THEN
+    RAISE EXCEPTION 'Un gasto pagado no se puede anular. Conserva el registro y realiza una corrección contable auditada.' USING ERRCODE='23514';
+  END IF;
 
   UPDATE public.business_expenses
   SET status='voided',void_reason=v_reason,voided_by=v_actor,voided_at=now(),updated_at=now()
-  WHERE id=p_expense_id AND business_id=v_expense.business_id AND status='active';
+  WHERE id=p_expense_id AND business_id=v_expense.business_id
+    AND status='active' AND payment_status='pending';
   IF NOT FOUND THEN RAISE EXCEPTION 'No se pudo anular el gasto.' USING ERRCODE='40001'; END IF;
 
   INSERT INTO public.audit_logs(business_id,actor_id,action,entity_type,entity_id,details)
