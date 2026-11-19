@@ -272,6 +272,18 @@ BEGIN
     RAISE EXCEPTION 'FALLO: faltan RPCs de finanzas o historial de clientes.';
   END IF;
 
+  IF position('cr.status = ''approved''' IN lower(pg_get_functiondef(
+       'public.get_business_admin_order_financials(uuid,boolean,integer)'::regprocedure
+     ))) = 0
+     OR position('o.status = ''cancelled''' IN lower(pg_get_functiondef(
+       'public.get_business_admin_order_financials(uuid,boolean,integer)'::regprocedure
+     ))) = 0
+     OR position('o.payment_status = ''paid''' IN lower(pg_get_functiondef(
+       'public.get_business_admin_order_financials(uuid,boolean,integer)'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: la lista de devoluciones debe limitarse a pedidos cancelados y pagados con una solicitud aprobada.';
+  END IF;
+
   IF NOT EXISTS (
        SELECT 1 FROM pg_indexes
        WHERE schemaname='public'
