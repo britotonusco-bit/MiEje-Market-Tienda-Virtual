@@ -201,3 +201,12 @@ Se contrastaron la Edge Function técnica, `resolve-my-access`, la página de ac
 - La membresía se crea activa antes de la aceptación del enlace. Esto no equivale a una sesión autenticada, pero es una decisión de ciclo de vida que debe validarse con cuentas ficticias en staging.
 
 No se realizaron cambios en Auth, SQL activo, membresías ni funciones desplegadas. Esta revisión es estática; no prueba entrega de correo, expiración real de enlaces ni comportamiento del proveedor SMTP.
+
+
+## Registro explícito de reconciliación de invitaciones — 19 nov 2026
+
+Se añadió un indicador separado para identificar cuando una asignación se completa usando una invitación pendiente que Auth ya había creado. La RPC `create_business_membership_assignment` ahora recibe `p_existing_invitation`, rechaza que se marque simultáneamente como invitación nueva y existente, y registra `business.member_invitation_reconciled` cuando corresponde. Las invitaciones nuevas conservan `business.member_invited`; las asignaciones normales conservan `business.member_assigned`.
+
+La Edge Function envía ese indicador únicamente cuando encuentra la cuenta existente con correo sin confirmar y `invited_at`. No vuelve a llamar `inviteUserByEmail` para ese caso. La auditoría incluye `existing_invitation_reconciled` y mantiene `invitation_sent` como indicador de correo enviado en la operación actual. El verificador exige la nueva firma y el evento específico.
+
+La firma SQL y sus permisos deben aplicarse como parte de la migración coordinada: no se ejecutó SQL ni se desplegó la Edge Function. La modificación permanece en `correcciones-funcionales`; falta probar el flujo con cuentas ficticias en staging, incluido el fallo posterior al envío y el reintento.
