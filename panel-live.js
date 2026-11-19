@@ -1612,7 +1612,9 @@
       form.reset();
       await loadBlockTargetUsers();
     } catch (error) {
-      message.textContent = error.message || 'No se pudo enviar la solicitud.';
+      message.textContent = error?.code === '23505'
+        ? 'Ya existe una solicitud pendiente para esta cuenta en este negocio. Espera la revisión técnica.'
+        : (error.message || 'No se pudo enviar la solicitud.');
       message.className = 'message error';
     } finally {
       button.disabled = false;
