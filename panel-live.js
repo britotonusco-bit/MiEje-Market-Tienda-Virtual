@@ -108,7 +108,10 @@
       document.querySelector('#refreshTechnicalBtn')?.addEventListener('click', refreshTechnical);
       document.querySelector('#createBusinessForm')?.addEventListener('submit', createBusiness);
       document.querySelector('#inviteMemberForm')?.addEventListener('submit', inviteBusinessMember);
-      document.querySelector('#businessSearch')?.addEventListener('input', renderBusinesses);
+      document.querySelector('#businessSearch')?.addEventListener('input', () => {
+        if (businessDirectorySearchTimer) window.clearTimeout(businessDirectorySearchTimer);
+        businessDirectorySearchTimer = window.setTimeout(() => { void loadTechnicalBusinesses(true); }, 250);
+      });
       document.querySelector('#businessSelect')?.addEventListener('change', event => loadSelectedBusiness(event.currentTarget.value));
       document.querySelector('#suspensionForm')?.addEventListener('submit', saveSuspension);
       document.querySelector('#memberStatusForm')?.addEventListener('submit', saveMemberStatus);
@@ -985,6 +988,7 @@
   let businessDirectoryHasMore = false;
   let businessDirectoryCounts = { total: 0, active: 0, suspended: 0 };
   let technicalAuditCount = 0;
+  let businessDirectorySearchTimer = null;
 
   async function loadTechnicalBusinesses(reset = true) {
     if (reset) {
@@ -992,8 +996,10 @@
       businessDirectoryPageIndex = 0;
     }
     const cursor = businessDirectoryCursorStack[businessDirectoryPageIndex];
+    const search = document.querySelector('#businessSearch')?.value.trim() || '';
     const result = await callTechnicalFunction({
       action: 'list_businesses', limit: PANEL_PAGE_SIZE + 1,
+      search: search || undefined,
       before_created_at: cursor?.created_at || undefined,
       before_id: cursor?.id || undefined
     });
@@ -1037,7 +1043,14 @@
 
   function initBusinessPicker(selector, activeOnly = false) {
     const select = document.querySelector(selector);
-    if (!select || businessPickerStates.has(selector)) return;
+    if (!select) return;
+    const existingState = businessPickerStates.get(selector);
+    if (existingState) {
+      existingState.cursors = [null];
+      existingState.page = 0;
+      void loadBusinessPickerPage(existingState);
+      return;
+    }
     const search = document.createElement('input');
     search.type = 'search';
     search.className = 'field';
@@ -1122,11 +1135,11 @@
     const target = document.querySelector('#businessesContainer');
     if (!target) return;
     const search = (document.querySelector('#businessSearch')?.value || '').trim().toLocaleLowerCase('es');
-    const filtered = cachedBusinesses.filter(b => [b.name, b.slug, b.category].some(v => String(v || '').toLocaleLowerCase('es').includes(search)));
+    const filtered = cachedBusinesses;
     const count = document.querySelector('#businessCount');
-    if (count) count.textContent = `Página ${businessDirectoryPageIndex + 1} · ${businessDirectoryCounts.total} negocios registrados`;
+    if (count) count.textContent = `${businessDirectoryCounts.total} negocios registrados · Página ${businessDirectoryPageIndex + 1}${search ? ` · búsqueda: ${search}` : ''}`;
     if (!filtered.length) {
-      target.innerHTML = '<div class="empty">' + (search ? 'No hay coincidencias en esta página. Avanza o busca por otro término.' : 'Todavía no hay negocios registrados.') + '</div>';
+      target.innerHTML = '<div class="empty">' + (search ? 'No se encontraron negocios con esa búsqueda.' : 'Todavía no hay negocios registrados.') + '</div>';
       appendCursorPager(target, {
         page: businessDirectoryPageIndex + 1,
         canPrevious: businessDirectoryPageIndex > 0,
