@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.75.0";
 
 const BUCKET = "job-applications-private";
+const REQUIRED_PRIVACY_CONSENT_VERSION = "job-application-2026-11-19-v1";
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 const ALLOWED: Record<string, { mime: string; extension: string }> = {
   "application/pdf": { mime: "application/pdf", extension: "pdf" },
@@ -118,7 +119,7 @@ Deno.serve(async (req: Request) => {
     if (action === "request_upload") {
       // No emitir un token de carga ni recibir una hoja de vida antes de que
       // la persona acepte el aviso de tratamiento en el servidor.
-      if (body.privacy_consent !== true) {
+      if (body.privacy_consent !== true || body.privacy_consent_version !== REQUIRED_PRIVACY_CONSENT_VERSION) {
         return reply(400, { error: "Autoriza el tratamiento de datos antes de adjuntar tu hoja de vida." });
       }
       const fileName = value(body.file_name, 180);
@@ -166,7 +167,8 @@ Deno.serve(async (req: Request) => {
       const applicantName = value(body.applicant_name, 120);
       const applicantContact = value(body.applicant_contact, 180);
       const applicantMessage = value(body.applicant_message, 2000);
-      const privacyConsent = body.privacy_consent === true;
+      const privacyConsent = body.privacy_consent === true
+        && body.privacy_consent_version === REQUIRED_PRIVACY_CONSENT_VERSION;
       const formResponses = body.form_responses && typeof body.form_responses === "object"
         && !Array.isArray(body.form_responses) ? body.form_responses : {};
       const responseEntries = Object.entries(formResponses);
@@ -246,6 +248,7 @@ Deno.serve(async (req: Request) => {
           p_applicant_message: applicantMessage,
           p_form_responses: formResponses,
           p_privacy_consent: privacyConsent,
+          p_privacy_consent_version: REQUIRED_PRIVACY_CONSENT_VERSION,
           p_resume_path: resumePath,
         },
       );
