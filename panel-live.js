@@ -321,9 +321,12 @@
       const receipt = item.receipt_path
         ? '<button class="button secondary" type="button" data-expense-action="receipt" data-expense-id="'+esc(item.id)+'">Ver comprobante</button>'
         : (item.status === 'active' ? '<label>Adjuntar comprobante<input class="field" type="file" data-expense-file="'+esc(item.id)+'" accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"></label>' : '—');
-      return '<tr><td>'+esc(item.expense_date)+'</td><td><strong>'+esc(item.description)+'</strong><br><small>'+esc(item.category)+(item.supplier ? ' · '+esc(item.supplier) : '')+'</small></td><td>'+esc(money(item.amount))+'</td><td>'+esc(status)+'</td><td>'+esc(payment)+(item.transaction_reference ? '<br><small>Ref.: '+esc(item.transaction_reference)+'</small>' : '')+'</td><td>'+receipt+'</td><td>'+actions+(item.status === 'voided' ? '<small>Motivo: '+esc(item.void_reason || '—')+'</small>' : '')+'</td></tr>';
+      const paidDate = item.paid_at
+        ? new Date(item.paid_at).toLocaleString('es-CO',{timeZone:'America/Bogota',dateStyle:'short',timeStyle:'short'})
+        : 'Pendiente';
+      return '<tr><td>'+esc(item.expense_date)+'</td><td>'+esc(paidDate)+'</td><td><strong>'+esc(item.description)+'</strong><br><small>'+esc(item.category)+(item.supplier ? ' · '+esc(item.supplier) : '')+'</small></td><td>'+esc(money(item.amount))+'</td><td>'+esc(status)+'</td><td>'+esc(payment)+(item.transaction_reference ? '<br><small>Ref.: '+esc(item.transaction_reference)+'</small>' : '')+'</td><td>'+receipt+'</td><td>'+actions+(item.status === 'voided' ? '<small>Motivo: '+esc(item.void_reason || '—')+'</small>' : '')+'</td></tr>';
     });
-    target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Detalle</th><th>Valor</th><th>Estado</th><th>Pago</th><th>Comprobante</th><th>Acciones</th></tr></thead><tbody>'+rows.join('')+'</tbody></table></div><p class="muted">Se muestran hasta 250 registros recientes. Los gastos anulados se conservan en el historial y no se incluyen como gastos pagados en el reporte.</p>';
+    target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha del gasto</th><th>Fecha de pago</th><th>Detalle</th><th>Valor</th><th>Estado</th><th>Pago</th><th>Comprobante</th><th>Acciones</th></tr></thead><tbody>'+rows.join('')+'</tbody></table></div><p class="muted">Se muestran hasta 250 registros recientes. El reporte financiero agrupa los gastos por fecha de pago, no por fecha del gasto. Los gastos anulados se conservan en el historial y no se incluyen como gastos pagados.</p>';
   }
 
   function handleExpenseControlChange(event) {
