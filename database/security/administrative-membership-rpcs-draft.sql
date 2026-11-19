@@ -25,7 +25,8 @@ CREATE OR REPLACE FUNCTION public.create_business_membership_assignment(
   p_job_title text,
   p_display_name text,
   p_actor_id uuid,
-  p_invitation_sent boolean DEFAULT false
+  p_invitation_sent boolean DEFAULT false,
+  p_existing_invitation boolean DEFAULT false
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -47,7 +48,8 @@ BEGIN
      OR p_role IS NULL OR p_role NOT IN ('business_admin', 'employee')
      OR v_job_title IS NULL OR pg_catalog.char_length(v_job_title) NOT BETWEEN 2 AND 100
      OR v_display_name IS NULL OR pg_catalog.char_length(v_display_name) NOT BETWEEN 3 AND 160
-     OR p_invitation_sent IS NULL THEN
+     OR p_invitation_sent IS NULL OR p_existing_invitation IS NULL
+     OR (p_invitation_sent AND p_existing_invitation) THEN
     RAISE EXCEPTION 'Datos de asignación o invitación no válidos.'
       USING ERRCODE = '22023';
   END IF;
@@ -133,8 +135,9 @@ BEGIN
   ) VALUES (
     p_business_id,
     p_actor_id,
-    CASE WHEN p_invitation_sent
-      THEN 'business.member_invited'
+    CASE
+      WHEN p_invitation_sent THEN 'business.member_invited'
+      WHEN p_existing_invitation THEN 'business.member_invitation_reconciled'
       ELSE 'business.member_assigned'
     END,
     'business_membership',
@@ -143,7 +146,8 @@ BEGIN
       'target_user_id', p_user_id,
       'role', p_role,
       'job_title', v_job_title,
-      'invitation_sent', p_invitation_sent
+      'invitation_sent', p_invitation_sent,
+      'existing_invitation_reconciled', p_existing_invitation
     )
   );
 
@@ -162,9 +166,9 @@ BEGIN
 END;
 $function$;
 
-REVOKE ALL ON FUNCTION public.create_business_membership_assignment(uuid, uuid, text, text, text, uuid, boolean)
+REVOKE ALL ON FUNCTION public.create_business_membership_assignment(uuid, uuid, text, text, text, uuid, boolean, boolean)
   FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.create_business_membership_assignment(uuid, uuid, text, text, text, uuid, boolean)
+GRANT EXECUTE ON FUNCTION public.create_business_membership_assignment(uuid, uuid, text, text, text, uuid, boolean, boolean)
   TO service_role;
 
 
