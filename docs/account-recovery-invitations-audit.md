@@ -109,3 +109,36 @@ Los cambios no están desplegados ni publicados. No se modificó Auth ni la base
 ## Conclusión
 
 El inicio de sesión, MFA, aceptación de invitaciones y recuperación tienen controles útiles en la rama, pero aún no puede considerarse completo el ciclo de invitaciones. El punto más importante pendiente es el usuario ya existente sin correo confirmado y la capacidad de reenvío/revocación. La auditoría tampoco es inmutable frente a `service_role`; debe definirse una protección de solo inserción antes de declarar cerrada esa parte.
+
+
+## ACC-06 — Cuenta existente sin correo confirmado y asignación prematura — 19 nov 2026
+
+Se corrigió el flujo de `technical-business-management` en la rama:
+
+- Si la búsqueda encuentra una cuenta de Auth preexistente y `email_confirmed_at` es nulo, la función responde HTTP 409.
+- No llama a `create_business_membership_assignment` para esa cuenta.
+- Devuelve `assignment_created: false` y `requires_email_confirmation: true`.
+- No intenta enviar automáticamente un enlace de confirmación. El reenvío debe ser un proceso separado, con límites y validación de destinatario.
+
+La distinción es importante: las cuentas nuevas creadas mediante `inviteUserByEmail` siguen el flujo de invitación normal, aunque inicialmente no tengan correo confirmado; el bloqueo se aplica a cuentas que ya existían antes de esta operación.
+
+También se reforzó `aceptar-invitacion.js`: después de verificar el enlace y recuperar la sesión, exige que Auth indique `email_confirmed_at`. Si no aparece confirmado, cierra la sesión local y no permite establecer la contraseña desde esa pantalla.
+
+**Límites pendientes:**
+- No existe todavía una tabla propia de invitaciones con estados pending/sent/accepted/expired/revoked.
+- No existe un mecanismo de reenvío limitado ni de revocación coordinada con Auth.
+- El envío de invitación ocurre antes de la RPC que crea la membresía. Si Auth envía el correo y la RPC falla, el correo puede llegar sin que la asignación se haya completado. La función devuelve `invitation_sent: true` y `retryable: true`, pero no hay reconciliación automática.
+- No se ha probado la entrega de correos ni los límites reales de SMTP/Auth.
+- La lista de usuarios se busca por páginas de hasta 1000 y falla de forma cerrada al alcanzar 20 páginas sin completar la búsqueda; no se debe interpretar una búsqueda incompleta como correo inexistente.
+
+**Pruebas de staging añadidas:**
+1. Usuario nuevo: Auth crea invitación, RPC asigna una única membresía y el enlace permite verificar el correo.
+2. Usuario existente confirmado: asignación permitida sin enviar invitación duplicada.
+3. Usuario existente sin confirmar: HTTP 409 y cero nuevas membresías.
+4. Correo duplicado/membresía ya existente: no crear otra membresía ni enviar un segundo correo.
+5. Negocio suspendido: rechazar antes de invitar.
+6. Fallo de Auth: no crear membresía.
+7. Fallo de RPC después del envío: conservar el resultado de envío y completar mediante un reintento controlado, sin volver a invitar.
+8. Enlace vencido/reutilizado o correo no confirmado: no activar la cuenta desde la página de aceptación.
+
+Estos cambios están únicamente en `correcciones-funcionales`; no se modificó Auth, no se enviaron correos y no se alteraron usuarios reales.
