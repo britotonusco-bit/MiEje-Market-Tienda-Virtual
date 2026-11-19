@@ -215,3 +215,39 @@ La firma SQL y sus permisos deben aplicarse como parte de la migración coordina
 ### Compatibilidad de la firma RPC
 
 Al ampliar la firma PostgreSQL, `CREATE OR REPLACE FUNCTION` no sustituye automáticamente una función con distinto número de parámetros: puede dejar la sobrecarga anterior disponible. Por eso el borrador ahora elimina explícitamente la firma antigua de siete argumentos antes de crear la nueva de ocho, y el verificador exige que la antigua ya no exista. Antes de aplicar esta migración en staging debe comprobarse que no haya dependencias SQL que impidan ese `DROP`; no debe ejecutarse parcialmente ni en producción sin respaldo y revisión del plan de migración.
+
+
+## Auditoría de revocación de invitaciones y conservación de otras membresías — 19 nov 2026
+
+### Hallazgo en la rama
+
+No existe una acción `revoke_invitation`/`cancel_invitation` en `technical-business-management`, no existe una RPC de revocación en `administrative-membership-rpcs-draft.sql` y tampoco hay control para esa operación en `panel-tecnico.html` o `panel-live.js`. Por tanto, actualmente el panel no permite revocar una asignación invitada pendiente.
+
+### Hallazgo en Supabase activo (consulta de solo lectura)
+
+En el proyecto activo `cqixlrwbqatbhzmpygiz`:
+
+- `business_memberships` contiene `id`, `business_id`, `user_id`, `role`, `status`, `blocked_reason`, `created_by`, `created_at` y `updated_at`; no tiene un estado de invitación separado ni `invitation_id`.
+- No se encontraron funciones públicas con nombres relacionados con invitaciones o `membership_assignment`.
+- El único trigger no interno de `business_memberships` observado fue `memberships_set_updated_at`; no está instalado el trigger de protección del último administrador preparado en la rama.
+- La policy activa de lectura permite consultar membresías propias, del propietario técnico y del administrador del negocio. Esto no implementa revocación.
+
+No se realizaron escrituras ni se modificó la base activa.
+
+### Semántica segura que debe implementarse
+
+La operación que falta debe denominarse **revocar asignación pendiente al negocio**, no eliminar la cuenta ni prometer que invalida por sí sola el enlace de correo de Supabase Auth.
+
+1. Solo puede dirigirse a una membresía que corresponda a una invitación todavía no aceptada, verificada en servidor mediante Auth (`email_confirmed_at` ausente y `invited_at` presente). La interfaz no puede declarar por sí sola que una cuenta está pendiente.
+2. La mutación debe afectar únicamente la membresía del `business_id` indicado. No debe borrar `auth.users`, borrar el perfil, suspender globalmente la cuenta ni revocar todas las sesiones, porque el mismo usuario podría tener otras membresías o utilizar su cuenta como cliente.
+3. Debe bloquear la fila de negocio y la membresía, volver a validar el estado pendiente dentro de la operación y registrar actor, negocio, usuario objetivo, membresía, motivo y resultado en `audit_logs` dentro de la misma transacción.
+4. Si la persona ya confirmó su correo, la operación de revocación de invitación pendiente debe rechazarse. La baja de una persona que ya aceptó requiere el flujo normal de suspensión/eliminación de membresía y sus protecciones, incluida la regla del último administrador.
+5. Una vez retirada la membresía, aunque la persona complete el enlace de Auth que ya recibió, no debe obtener acceso a ese negocio. La cuenta y sus otras membresías permanecen intactas.
+6. La revocación de la asignación no garantiza invalidar un enlace de invitación que ya fue enviado. La invalidación del enlace es un proceso separado de Auth y debe comprobarse con la documentación y pruebas de Supabase antes de ofrecerla como resultado.
+7. Debe ser idempotente: un segundo intento no crea otro evento de revocación ni altera otras membresías. Debe devolver un resultado claro si ya no existe la asignación pendiente.
+
+### Decisión de seguridad
+
+No se implementó todavía una acción de revocación. El esquema actual crea la membresía con `status='active'` antes de la aceptación del correo y no conserva un estado inequívoco `invited/pending`. Añadir una operación segura exige primero introducir una señal persistente de invitación pendiente, migrar la creación de membresías y actualizar `resolve-my-access`/los controles de panel para que una membresía pendiente nunca otorgue acceso antes de aceptar. Implementar solo un botón que borre o suspenda una membresía activa podría afectar administradores reales o no distinguir una invitación de una cuenta confirmada.
+
+La revisión queda documentada como brecha funcional. No se modificó Auth, no se borraron cuentas ni membresías y no se desplegaron funciones.
