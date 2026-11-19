@@ -166,3 +166,18 @@ Se ajustó el panel para mostrar explícitamente el estado **Pendiente de devolu
 El informe financiero resta únicamente reembolsos efectivamente completados dentro del periodo. Por tanto, una cancelación pagada aún no reembolsada permanece en los cobros netos hasta que se registre el movimiento real. El costo de inventario, en cambio, se revierte cuando se aprueba la cancelación. Son movimientos distintos y deben mostrarse por separado.
 
 **Límite:** el modelo actual registra reembolsos totales, no parciales, y no ejecuta transferencias ni pagos automáticos. La prueba de conciliación de casos pendientes y completados sigue pendiente en staging.
+
+### 15. Casos de cancelación, inventario y fechas financieras
+
+Se contrastó el flujo para cuatro escenarios:
+
+- **Cancelación antes del pago:** la aprobación cancela el pedido y restituye las unidades descontadas por el checkout. No genera un movimiento de reembolso ni cambia `payment_status` a `refunded`, porque no existe dinero recibido que devolver.
+- **Cancelación después del pago:** la aprobación restituye inventario y revierte el costo de inventario en la fecha de decisión. El pago continúa registrado como recibido hasta que el administrador registre por separado el reembolso que ya realizó.
+- **Cancelación aprobada sin reembolso completado:** el pedido aparece en la cola de devoluciones pendientes. El reporte no resta el importe como reembolsado, aunque el costo del inventario ya se haya revertido.
+- **Reembolso en un periodo posterior:** el ingreso se cuenta en la fecha `completed_at` del pago y la devolución en la fecha `completed_at` del reembolso. La reversión del costo se reconoce en la fecha `decided_at` de la cancelación aprobada. Por eso, las cifras de periodos distintos pueden mostrar el cobro, la reversión de costo y la devolución en meses diferentes; no deben forzarse a coincidir por fecha de creación del pedido.
+
+La aprobación de cancelación bloquea el pedido y la solicitud, solo procesa solicitudes pendientes y evita una segunda aprobación mediante el índice único por pedido. Para restituir existencias bloquea los productos en orden UUID, actualiza las cantidades en la misma transacción y aborta toda la operación si no logra restituir todos los productos referenciados. El trigger de inventario registra el movimiento de restitución.
+
+Se amplió el verificador SQL para detectar que la cancelación no registre por sí misma un reembolso ni marque el pago como devuelto, que la decisión no procese solicitudes ya atendidas y que la reversión de costo requiera un pago completado en COP.
+
+**Pendiente de prueba:** ejecutar en staging escenarios concurrentes y de conciliación con datos controlados. Esta revisión es estática; no confirma que los triggers, índices y RPC estén instalados en la base activa.
