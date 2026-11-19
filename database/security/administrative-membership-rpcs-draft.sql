@@ -621,6 +621,7 @@ BEGIN
   IF p_business_id IS NULL OR p_actor_id IS NULL
      OR p_status IS NULL
      OR p_status NOT IN ('active', 'suspended', 'closed')
+     OR (p_status = 'suspended' AND pg_catalog.char_length(COALESCE(v_decision_reason, '')) < 5)
      OR pg_catalog.char_length(COALESCE(v_decision_reason, '')) > 2000
      OR pg_catalog.char_length(COALESCE(v_public_message, '')) > 1000 THEN
     RAISE EXCEPTION 'Datos de estado del negocio no válidos.'
