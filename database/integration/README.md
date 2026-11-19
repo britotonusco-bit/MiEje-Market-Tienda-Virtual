@@ -377,3 +377,10 @@ Se rectifica la conclusión anterior sobre UPDATE de pedidos: aunque el privileg
 Las nueve RPC ausentes en Supabase activo ya tienen borradores SQL en el repositorio, repartidos entre pedidos, cancelaciones, reembolsos, inventario, pagos y gastos. No están desplegadas/activas; se debe revisar y probar su orden de aplicación antes de ejecutar. `get-platform-public-settings` también existe como fuente y borrador, pero no está desplegada.
 
 Asesores: protección de contraseñas filtradas deshabilitada; tres tablas RLS sin políticas, pero sin grants a anon/authenticated (internas); 16 FKs sin índices de cobertura y una tabla con múltiples políticas SELECT permisivas. No se modificó Supabase ni Auth. Ver detalle en `docs/order-panel-callsite-integration-audit.md`.
+
+
+### Auditoría de favoritos, historial y consentimiento del checkout (19 nov 2026)
+
+Informe: [docs/customer-favorites-history-consent-audit.md](../../docs/customer-favorites-history-consent-audit.md).
+
+La revisión estática confirmó que la Edge Function vincula los pedidos autenticados al usuario validado por Auth y que los borradores de favoritos e historial aplican filtros por propietario. Se detectó un bloqueo crítico: el formulario exige la casilla de privacidad, pero el manejador del checkout no transmite su valor; la Edge Function y las RPC tampoco guardan evidencia versionada y fechada. El checkout no debe considerarse completo hasta validar el consentimiento en servidor y persistirlo en el pedido. No se ejecutó SQL ni se desplegó código.
