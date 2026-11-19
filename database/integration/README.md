@@ -465,3 +465,12 @@ El RPC `get_business_admin_profit_report` ahora devuelve `NULL` en las estimacio
 Las RPC `mark_order_payment_received`, `complete_order_refund` y `decide_order_cancellation` deben autorizar al usuario contra el negocio propietario antes de adquirir bloqueos de filas. Después del bloqueo deben comprobar nuevamente que el negocio siga activo y que el usuario conserve el rol de administrador. El verificador integral comprueba el orden de estas validaciones.
 
 En staging, ejecutar pruebas con dos negocios y sesiones distintas: un administrador del negocio A debe ser rechazado al usar IDs del negocio B sin bloquear el pedido ni la solicitud; el administrador de B debe poder completar la operación normalmente. Repetir con solicitudes concurrentes y cambios de membresía/suspensión.
+
+
+## Contraste de Storage activo — 19 nov 2026
+
+La consulta de solo lectura confirmó que Storage tiene RLS habilitado y que los buckets business-assets y job-applications-private no contienen objetos en este momento. La base activa todavía conserva dos diferencias frente al paso 7: las cuatro policies de business-assets usan storage.foldername(b.name) en lugar de la ruta del objeto, y la policy de lectura de CV no exige coincidencia con job_applications.resume_path. El archivo database/security/storage-policy-fix.sql ya corrige ambos puntos; no se ha aplicado al proyecto activo.
+
+La política privada corregida no habilita INSERT, UPDATE ni DELETE para visitantes o usuarios autenticados. La carga de CV continúa usando token firmado desde la Edge Function; la descarga administrativa se solicita bajo demanda con enlace firmado de 300 segundos. El verificador integral ahora comprueba la ruta real de business-assets y la relación exacta entre objeto, negocio y postulación.
+
+Antes de producción, aplicar el paso 7 solo en staging, probar dos negocios y los roles administrador/empleado/visitante, y comprobar que un archivo de otro negocio no pueda descargarse aunque se conozca su ruta. También siguen pendientes el análisis antimalware y la política de conservación de CV asociados.
