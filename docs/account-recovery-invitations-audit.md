@@ -347,3 +347,25 @@ Se añadió `database/security/business-invitations-draft.sql` en la rama `corre
 5. Añadir pruebas de concurrencia, expiración, reintento, correo equivocado, dos negocios y conservación de membresías históricas.
 
 **No se debe desplegar ni aplicar este SQL todavía.** Las funciones actuales de invitación siguen usando el flujo anterior y aún no escriben en `business_invitations`; por tanto, el borrador no está conectado a la aplicación. La verificación del paquete se amplió para exigir tabla, RLS, permisos, RPC, helper de roles e índices cuando se ejecute en un entorno de ensayo.
+
+
+### ACC-08 — Integración inicial en Edge Function y página de aceptación
+
+Se conectó en la rama el primer tramo de aplicación:
+
+- `technical-business-management` genera un token aleatorio de 256 bits con Web Crypto y calcula su SHA-256.
+- Prepara la invitación en la tabla antes de llamar a Auth, y añade `invitation_id` y el token original al enlace de retorno. El token original solo permanece en memoria y en el enlace enviado; la tabla conserva únicamente el hash.
+- Tras recibir el usuario de Auth, vincula su cuenta a una membresía suspendida. Si el vínculo falla después de enviar el correo, el mismo intento puede reconciliarse sin reenviar el correo.
+- Las cuentas existentes y confirmadas conservan la asignación directa normal; no se cambia su contraseña ni se envía invitación innecesaria.
+- Se añadieron las acciones de servidor `list_business_invitations` y `revoke_invitation`, protegidas por la autorización técnica y MFA existente.
+- Se creó `supabase/functions/accept-business-invitation/index.ts`. Verifica el JWT mediante `getUser`, exige correo confirmado, compara usuario/correo/token/expiración, actualiza la contraseña mediante Auth Admin y llama a la RPC de aceptación.
+- `aceptar-invitacion.js` ya no cambia la contraseña directamente desde el navegador: invoca la Edge Function y solo cierra la sesión tras recibir confirmación de activación.
+- Se configuró `verify_jwt = true` para la nueva función y se añadió `Referrer-Policy` mediante meta tag en la página de aceptación.
+
+### Limitaciones y pruebas aún pendientes
+
+- La interfaz técnica todavía no muestra la lista de invitaciones ni el control para revocarlas; por ahora existen las acciones de servidor.
+- No se ha implementado un flujo de reenvío de invitaciones antiguas que ya existían antes de este esquema. Esas cuentas se rechazan de forma segura y requieren terminar el enlace anterior o una renovación controlada.
+- El dominio de GitHub Pages debe estar permitido en Supabase Auth Redirect URLs para el retorno con parámetros de invitación; debe comprobarse en staging.
+- La Edge Function de aceptación, la función técnica y el SQL no se han ejecutado con Deno/SQL parser ni probado en navegador.
+- El SQL continúa siendo un borrador. No se aplicó en Supabase activo, no se desplegó ninguna Edge Function y no se enviaron correos reales.
