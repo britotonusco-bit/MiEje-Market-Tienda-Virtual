@@ -1368,7 +1368,7 @@
       container.querySelectorAll('[data-revoke-invitation]').forEach(button => {
         button.addEventListener('click', async () => {
           const invitationId = button.dataset.revokeInvitation;
-          const reason = window.prompt('Motivo para revocar esta invitación (mínimo 5 caracteres):', '');
+          const reason = window.prompt('Motivo para revocar esta invitación (mínimo 5 caracteres; no incluyas correos, teléfonos ni datos personales):', '');
           if (!reason || reason.trim().length < 5) {
             alert('Escribe un motivo de al menos cinco caracteres. No se realizó ningún cambio.');
             return;
