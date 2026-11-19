@@ -97,7 +97,7 @@ BEGIN
   PERFORM 1 FROM public.profiles p
   WHERE p.id = p_actor_id
     AND p.platform_role = 'platform_owner'
-    AND coalesce(p.is_blocked,false) = false
+    AND p.is_blocked IS FALSE
   FOR SHARE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Solo el propietario técnico puede crear invitaciones.'
@@ -131,7 +131,7 @@ BEGIN
     p_business_id, p_actor_id, 'business.invitation_created',
     'business_invitation', v_invitation.id::text,
     pg_catalog.jsonb_build_object(
-      'email', v_email, 'role', p_role, 'expires_at', p_expires_at
+      'role', p_role, 'expires_at', p_expires_at
     )
   );
 
@@ -186,7 +186,7 @@ BEGIN
 
   IF NOT EXISTS (
     SELECT 1 FROM public.profiles p
-    WHERE p.id = p_user_id AND coalesce(p.is_blocked,false) = false
+    WHERE p.id = p_user_id AND p.is_blocked IS FALSE
   ) THEN
     RAISE EXCEPTION 'La cuenta no tiene perfil válido o está bloqueada.'
       USING ERRCODE = '42501';
@@ -263,7 +263,7 @@ DECLARE
 BEGIN
   PERFORM 1 FROM public.profiles p
   WHERE p.id = p_actor_id AND p.platform_role = 'platform_owner'
-    AND coalesce(p.is_blocked,false) = false
+    AND p.is_blocked IS FALSE
   FOR SHARE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Técnico no autorizado.' USING ERRCODE = '42501';
@@ -430,7 +430,7 @@ BEGIN
 
   PERFORM 1 FROM public.profiles p
   WHERE p.id = p_actor_id AND p.platform_role = 'platform_owner'
-    AND coalesce(p.is_blocked,false) = false
+    AND p.is_blocked IS FALSE
   FOR SHARE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Solo el propietario técnico puede revocar invitaciones.'
