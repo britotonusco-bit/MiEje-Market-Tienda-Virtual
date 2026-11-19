@@ -276,3 +276,18 @@ La paginación de los selectores no cambia la autorización de las operaciones. 
 **Pendiente de validación:** probar en staging con más de 50 membresías por negocio, varias cuentas con la misma marca temporal, cuentas suspendidas y dos negocios distintos. Verificar que cambiar de negocio reinicie el cursor y que las operaciones sigan usando el identificador de membresía o usuario correcto.
 
 No se desplegó la Edge Function ni se modificó la base activa.
+
+
+## 19. Minimización de datos personales en selectores de miembros
+
+En la revisión posterior de la paginación se detectó que la Edge Function todavía consultaba Auth Admin individualmente para cada miembro de la página, aunque el selector no necesitaba el correo. Se eliminó ese enriquecimiento:
+
+- La consulta de membresías sigue limitada por negocio, cursor y tamaño de página.
+- El perfil relacionado devuelve únicamente `display_name`; ya no solicita teléfono ni avatar para este selector.
+- La fila centinela solo determina `has_more` y no se devuelve ni genera consultas adicionales.
+- La interfaz muestra nombre, rol, cargo y estado, sin correo electrónico.
+- Se evita realizar hasta 50 llamadas adicionales a Auth Admin por página.
+
+La autorización de las acciones sigue validándose en la Edge Function y en las RPC correspondientes. El cambio minimiza los datos entregados al panel; no sustituye las pruebas de RLS ni las pruebas reales de staging.
+
+**Validación estática:** 10/10 comprobaciones de la revisión de minimización aprobadas. No se ejecutó Deno check, navegador, staging ni despliegue.
