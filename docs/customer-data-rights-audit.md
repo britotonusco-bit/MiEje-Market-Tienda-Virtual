@@ -329,3 +329,8 @@ La migración de permisos del paso 20 se reforzó para revocar dinámicamente la
 La lectura de `business-admin-boundaries.sql` confirma que el permiso directo de UPDATE sobre `products.inventory` se revoca a `authenticated` y `anon`. El ajuste de existencias se canaliza por `adjust_business_inventory`, que valida negocio activo y rol `business_admin`, bloquea la fila del producto y compara las existencias esperadas antes de guardar. El historial `inventory_movements` tiene RLS y una política de lectura para el administrador del negocio activo.
 
 Se amplió `verify-integration-package.sql` para comprobar en staging que: ningún cliente pueda insertar, modificar o borrar el historial; nadie pueda actualizar directamente `products.inventory`; la RPC sea `SECURITY DEFINER` con `search_path` vacío; y la política de lectura del historial exija administrador y negocio activo. Estas son comprobaciones estáticas del verificador; todavía no se han ejecutado contra staging ni producción.
+
+
+### Comprobación estática de checkout y cancelaciones — 19 nov 2026
+
+Se amplió el verificador de integración para revisar el contenido de las RPC instaladas en staging: el checkout debe ordenar los productos por UUID antes de bloquearlos, usar bloqueo de fila y descontar inventario; la aprobación de cancelación debe bloquear productos en orden estable, sumar las cantidades de las líneas y comprobar que se restituyeron todos los productos esperados. Esto no sustituye pruebas concurrentes reales ni confirma que las funciones ya estén desplegadas.
