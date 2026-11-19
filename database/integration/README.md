@@ -437,3 +437,8 @@ El verificador integral también inspecciona las definiciones de `create_public_
 ### Conciliación financiera en COP — 19 nov 2026
 
 El reporte de ganancias filtra pagos y reembolsos completados por `currency='COP'`. El verificador también inspecciona `complete_order_refund` para confirmar que bloquee el pedido, exija pedido cancelado y pago pagado, concilie un único pago completado por el total, exija moneda COP y una solicitud de cancelación aprobada. Ejecutar el verificador en staging después de aplicar el paquete SQL en el orden documentado.
+
+
+### Conservación de gastos pagados — 19 nov 2026
+
+El flujo de anulación de gastos ahora solo admite registros pendientes. Los gastos pagados no se pueden anular porque el informe de ganancias los excluye cuando pasan a `voided`, lo que alteraría resultados históricos sin una reversión financiera. La condición se aplica tanto en `void_business_expense` como en `private.guard_business_expense_update`, y queda cubierta por el verificador de integración. No se incorpora todavía una RPC para revertir pagos ya efectuados.
