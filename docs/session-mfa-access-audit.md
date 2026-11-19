@@ -15,7 +15,7 @@ La configuración de expiración de JWT, duración máxima de sesión, inactivid
 | ID | Hallazgo | Severidad | Estado |
 |---|---|---|---|
 | SES-01 | El panel revalida usuario, perfil, negocio y membresía cada 30 segundos y al volver a primer plano | Correcto en rama |
-| SES-02 | El panel no reacciona inmediatamente a todos los eventos de Auth; depende del intervalo o de volver a la pestaña | Media | Mejora recomendada |
+| SES-02 | El panel reacciona a cierre de sesión, renovación de token y actualización de usuario; conserva chequeos periódicos y de visibilidad | Correcto en rama |
 | MFA-01 | La rama exige AAL2 en UI y en la Edge Function técnica | Correcto en rama |
 | MFA-02 | La función técnica desplegada en Supabase versión 6 no contiene comprobación AAL2 del lado servidor | Crítica | Pendiente de despliegue autorizado |
 | SES-03 | La configuración real de expiración, inactividad y sesión única no pudo verificarse desde las herramientas disponibles | Media | Verificación manual pendiente |
