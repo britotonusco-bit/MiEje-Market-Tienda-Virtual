@@ -78,6 +78,59 @@ ALTER TABLE public.order_items
   REFERENCES public.products(id)
   ON DELETE RESTRICT;
 
+-- Las líneas de pedido son snapshots históricos: no deben editarse ni borrarse.
+-- Las nuevas líneas deben referirse a un producto existente del mismo negocio
+-- que contiene el pedido. Las filas antiguas con product_id NULL se conservan
+-- para consulta, pero no podrán originar una restitución automática.
+CREATE OR REPLACE FUNCTION private.guard_order_item_history()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_order_business_id uuid;
+  v_product_business_id uuid;
+BEGIN
+  IF TG_OP IN ('UPDATE', 'DELETE') THEN
+    RAISE EXCEPTION 'Las líneas históricas de un pedido no se pueden modificar ni eliminar.'
+      USING ERRCODE = '55000';
+  END IF;
+
+  IF NEW.product_id IS NULL THEN
+    RAISE EXCEPTION 'Una nueva línea de pedido debe conservar la referencia a su producto.'
+      USING ERRCODE = '23502';
+  END IF;
+
+  SELECT o.business_id, p.business_id
+  INTO v_order_business_id, v_product_business_id
+  FROM public.orders o
+  JOIN public.products p ON p.id = NEW.product_id
+  WHERE o.id = NEW.order_id;
+
+  IF v_order_business_id IS NULL OR v_product_business_id IS NULL THEN
+    RAISE EXCEPTION 'El pedido o el producto de la línea no existe.'
+      USING ERRCODE = '23503';
+  END IF;
+
+  IF v_order_business_id <> v_product_business_id THEN
+    RAISE EXCEPTION 'La línea del pedido debe pertenecer a un producto del mismo negocio.'
+      USING ERRCODE = '23514';
+  END IF;
+
+  RETURN NEW;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION private.guard_order_item_history()
+  FROM PUBLIC, anon, authenticated, service_role;
+
+DROP TRIGGER IF EXISTS order_items_history_guard ON public.order_items;
+CREATE TRIGGER order_items_history_guard
+BEFORE INSERT OR UPDATE OR DELETE ON public.order_items
+FOR EACH ROW
+EXECUTE FUNCTION private.guard_order_item_history();
+
 CREATE INDEX IF NOT EXISTS inventory_movements_business_created_idx
   ON public.inventory_movements (business_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS inventory_movements_product_created_idx
