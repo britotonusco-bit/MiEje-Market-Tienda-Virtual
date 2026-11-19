@@ -1021,11 +1021,8 @@
 
   async function loadTechnical() {
     const auditResult = await callTechnicalFunction({ action: 'list_audit_logs', limit: 1 });
-    await loadTechnicalBusinesses(true);
     technicalAuditCount = Number(auditResult.audit_count || 0);
-    const pageBusinesses = cachedBusinesses;
-    const options = `<option value="">Todos los negocios</option>` + pageBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (inactivo)'}</option>`).join('');
-    const select = document.querySelector('#businessSelect'); if (select) select.innerHTML = options;
+    await loadTechnicalBusinesses(true);
     initBusinessPicker('#businessSelect', false, true);
     initBusinessPicker('#memberBusinessSelect');
     initBusinessPicker('#assignmentBusinessSelect');
@@ -1082,6 +1079,7 @@
     const select = document.querySelector(state.selector);
     const pager = select?.nextElementSibling;
     if (!select || !pager) return;
+    const requestId = ++state.requestId;
     select.disabled = true;
     select.innerHTML = '<option value="">Cargando negocios…</option>';
     pager.textContent = 'Consultando…';
