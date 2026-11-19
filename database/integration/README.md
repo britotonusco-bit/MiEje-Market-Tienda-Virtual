@@ -384,3 +384,6 @@ Asesores: protección de contraseñas filtradas deshabilitada; tres tablas RLS s
 Informe: [docs/customer-favorites-history-consent-audit.md](../../docs/customer-favorites-history-consent-audit.md).
 
 La revisión estática confirmó que la Edge Function vincula los pedidos autenticados al usuario validado por Auth y que los borradores de favoritos e historial aplican filtros por propietario. Se detectó un bloqueo crítico: el formulario exige la casilla de privacidad, pero el manejador del checkout no transmite su valor; la Edge Function y las RPC tampoco guardan evidencia versionada y fechada. El checkout no debe considerarse completo hasta validar el consentimiento en servidor y persistirlo en el pedido. No se ejecutó SQL ni se desplegó código.
+
+
+La versión admitida actualmente para el consentimiento del checkout es `privacy-2026-11-19-v1`. Debe coincidir entre `index.html`, `app.js`, `supabase/functions/create-public-order/index.ts` y `checkout-idempotency-draft.sql`. El servidor y la RPC rechazan pedidos sin aceptación; PostgreSQL registra la fecha. La verificación posterior exige las tres columnas y la restricción de coherencia. Véase `docs/customer-favorites-history-consent-audit.md`.
