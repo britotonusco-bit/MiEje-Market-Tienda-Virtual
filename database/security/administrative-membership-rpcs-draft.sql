@@ -614,14 +614,14 @@ DECLARE
   v_actor_blocked boolean;
   v_before public.businesses%ROWTYPE;
   v_after public.businesses%ROWTYPE;
+  v_decision_reason text := NULLIF(pg_catalog.btrim(p_reason), '');
   v_reason text := NULLIF(pg_catalog.btrim(p_reason), '');
   v_public_message text := NULLIF(pg_catalog.btrim(p_public_message), '');
 BEGIN
   IF p_business_id IS NULL OR p_actor_id IS NULL
      OR p_status IS NULL
      OR p_status NOT IN ('active', 'suspended', 'closed')
-     OR (p_status = 'suspended' AND v_reason IS NULL)
-     OR pg_catalog.char_length(COALESCE(v_reason, '')) > 2000
+     OR pg_catalog.char_length(COALESCE(v_decision_reason, '')) > 2000
      OR pg_catalog.char_length(COALESCE(v_public_message, '')) > 1000 THEN
     RAISE EXCEPTION 'Datos de estado del negocio no válidos.'
       USING ERRCODE = '22023';
@@ -647,6 +647,12 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'No se encontró el negocio.'
       USING ERRCODE = 'P0002';
+  END IF;
+
+  IF v_before.status IS DISTINCT FROM p_status
+     AND pg_catalog.char_length(COALESCE(v_decision_reason, '')) < 5 THEN
+    RAISE EXCEPTION 'Indica un motivo de al menos cinco caracteres para cambiar el estado.'
+      USING ERRCODE = '22023';
   END IF;
 
   IF p_status = 'suspended' THEN
@@ -696,6 +702,7 @@ BEGIN
       'new_status', v_after.status,
       'previous_reason', v_before.suspension_reason,
       'reason', v_after.suspension_reason,
+      'decision_reason', v_decision_reason,
       'previous_public_message', v_before.public_suspension_message,
       'public_message', v_after.public_suspension_message
     )
