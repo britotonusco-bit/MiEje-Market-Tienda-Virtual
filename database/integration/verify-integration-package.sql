@@ -1340,6 +1340,51 @@ BEGIN
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_trigger
+    WHERE tgrelid='public.order_items'::regclass
+      AND tgname='order_items_history_guard'
+      AND NOT tgisinternal
+      AND (tgtype & 4) = 4
+      AND (tgtype & 8) = 8
+      AND (tgtype & 16) = 16
+  ) OR to_regprocedure('private.guard_order_item_history()') IS NULL THEN
+    RAISE EXCEPTION 'FALLO: las líneas de pedido no tienen protección de snapshot histórico.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid='public.order_items'::regclass
+      AND conname='order_items_product_id_fkey'
+      AND contype='f'
+      AND confdeltype='r'
+      AND convalidated
+      AND pg_get_constraintdef(oid) ILIKE '%product_id%'
+      AND pg_get_constraintdef(oid) ILIKE '%products(id)%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: eliminar un producto todavía puede romper la referencia de las líneas de pedido.';
+  END IF;
+
+  IF position(
+    'new.product_id is null' IN lower(pg_get_functiondef(
+      'private.guard_order_item_history()'::regprocedure
+    ))
+  ) = 0 OR position(
+    'v_order_business_id <> v_product_business_id' IN lower(pg_get_functiondef(
+      'private.guard_order_item_history()'::regprocedure
+    ))
+  ) = 0 THEN
+    RAISE EXCEPTION 'FALLO: el trigger de líneas de pedido no valida referencia y pertenencia al mismo negocio.';
+  END IF;
+
+  IF position(
+    'oi.product_id is null' IN lower(pg_get_functiondef(
+      'public.decide_order_cancellation(uuid,text,text)'::regprocedure
+    ))
+  ) = 0 THEN
+    RAISE EXCEPTION 'FALLO: la cancelación no bloquea pedidos históricos con productos sin referencia para restituir.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
     WHERE tgrelid='public.inventory_movements'::regclass
       AND tgname='inventory_movements_immutable'
       AND NOT tgisinternal
