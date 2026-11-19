@@ -270,3 +270,21 @@ Antes de producción debe decidirse un plazo de conservación y, si el volumen c
 - Privilegios de service_role: INSERT conservado; UPDATE/DELETE/TRUNCATE revocados.
 
 No se ejecutaron migraciones ni escrituras SQL. El conteo de eventos en la base activa fue solo agregado y devolvió cero.
+
+
+## Revisión adicional de invitaciones y cambios de membresía — 19 nov 2026
+
+Se contrastó el formulario del panel técnico con las acciones de la Edge Function y las RPC transaccionales del borrador SQL.
+
+- El selector de miembros devuelve el identificador de la membresía (`business_memberships.id`), no el identificador de Auth. Se cambió el nombre del campo HTML a `membership_id` y el panel ahora envía ese campo explícitamente para suspender o reactivar.
+- La Edge Function valida el formato UUID de la membresía en los cambios de rol/cargo, suspensión y reactivación. También exige motivos de al menos cinco caracteres para suspender/reactivar.
+- Los cambios de rol/cargo llaman a `update_business_membership_assignment`; suspensión y reactivación llaman a sus RPC transaccionales. Los procedimientos borrador verifican el actor técnico, bloquean el negocio antes que la membresía y protegen la existencia de al menos un administrador activo.
+- La suspensión/reactivación de una tienda llama a `set_technical_business_status`; la decisión se registra en auditoría dentro de la RPC.
+
+### Limitación que sigue pendiente en invitaciones
+
+El envío de correo de Auth y la asignación de membresía son dos operaciones distintas: primero se crea/envía la invitación y después se ejecuta la RPC transaccional. Si Auth envía el correo pero la RPC falla, puede quedar una cuenta invitada sin membresía. Se corrigió el mensaje de error para no prometer un reenvío automático: el usuario debe aceptar y confirmar el correo antes de volver a intentar la asignación. Si el correo no llega, el panel todavía no ofrece un flujo de reenvío; requiere revisión de Auth.
+
+Esta separación no se puede hacer atómica con una sola transacción PostgreSQL. Antes de producción hace falta un proceso idempotente de reconciliación y un flujo de reenvío limitado y auditado.
+
+No se desplegó la Edge Function ni se aplicó el borrador SQL. La revisión es estática; no se probaron correos, confirmaciones, concurrencia ni restricciones en staging.
