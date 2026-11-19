@@ -376,7 +376,10 @@ Deno.serve(async (req: Request) => {
     if (action === "list_audit_logs") {
       const businessId = textValue(body.business_id, 80);
       const limitValue = Number(body.limit ?? 100);
-      const limit = Number.isInteger(limitValue) ? Math.min(Math.max(limitValue, 1), 500) : 100;
+      const limit = Number.isInteger(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 100;
+      if (businessId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(businessId)) {
+        return reply(400, { error: "El identificador del negocio no es válido." });
+      }
       let query = admin.from("audit_logs")
         .select("id,business_id,actor_id,action,entity_type,entity_id,details,created_at", { count: "exact" })
         .order("created_at", { ascending: false })
