@@ -134,3 +134,10 @@ Se detectó un problema de presentación: el RPC devuelve `NULL` para la gananci
 El verificador de integración ahora exige las tres fechas efectivas y la zona horaria Bogotá, además de comprobar la definición del índice único de cancelaciones aprobadas. Esto es una comprobación estática del SQL, no una prueba de ejecución.
 
 **Pendiente:** probar en staging pedidos pagados y cancelados en periodos distintos, reembolsos realizados en una fecha posterior, gastos creados un día y pagados otro, y rangos que cruzan medianoche en Bogotá. No se ejecutó SQL ni se modificó Supabase.
+
+
+## 13. Fechas visibles en el historial de gastos
+
+El historial del panel ahora diferencia la fecha en que ocurrió o se registró el gasto (`expense_date`) de la fecha efectiva de pago (`paid_at`). La fecha de pago se presenta en hora de Colombia y aparece como pendiente cuando el gasto todavía no ha sido pagado.
+
+Esto alinea la lectura del historial con el reporte financiero, que incorpora los gastos en el periodo de `paid_at`, no en el periodo de `expense_date`. No cambia importes ni registros almacenados.
