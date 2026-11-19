@@ -21,6 +21,8 @@
   let expensePageIndex = 0;
   let inventoryCursorStack = [null];
   let inventoryPageIndex = 0;
+  let refundCursorStack = [null];
+  let refundPageIndex = 0;
   const auditCursorStacks = new Map();
   const auditPageIndexes = new Map();
   let employeeOrderPageIndex = 0;
@@ -2124,31 +2126,52 @@
     target.querySelectorAll('[data-cancel-request]').forEach(button => button.addEventListener('click', () => requestCancellation(button.dataset.cancelRequest, button)));
   }
 
-  async function loadRefundableOrders() {
+  async function loadRefundableOrders(reset = true) {
     const target = document.querySelector('#refundsContainer');
     if (!target || panel !== 'business_admin') return;
+    if (reset) { refundCursorStack = [null]; refundPageIndex = 0; }
     target.innerHTML = '<div class="empty">Consultando pedidos pagados y cancelados…</div>';
-    const { data, error } = await db.rpc('get_business_admin_order_financials', {
+    const cursor = refundCursorStack[refundPageIndex];
+    const { data, error } = await db.rpc('get_business_admin_order_financials_page', {
       p_business_id: businessId,
       p_refundable_only: true,
-      p_limit: 100
+      p_limit: PANEL_PAGE_SIZE + 1,
+      p_before_created_at: cursor?.created_at || null,
+      p_before_order_id: cursor?.order_id || null
     });
     if (error) return showError(target, error);
-    const orders = data || [];
-    if (!orders.length) {
+    const fetchedRows = data || [];
+    const orders = fetchedRows.slice(0, PANEL_PAGE_SIZE);
+    if (!orders.length && refundPageIndex === 0) {
       target.innerHTML = '<div class="empty">No hay reembolsos pendientes de registrar.</div>';
       return;
     }
-    const rows = orders.map(o => [
-      esc(`#${o.order_number}`),
-      money(o.total),
-      dateTime(o.created_at),
-      'Pendiente de devolución',
-      `<button class="small-button" data-register-refund="${esc(o.order_id)}">Registrar devolución realizada</button>`
-    ]);
-    target.innerHTML = tableHtml(['Pedido','Importe a devolver','Fecha del pedido','Estado de devolución','Acción'], rows);
-    target.querySelectorAll('[data-register-refund]').forEach(button => {
-      button.addEventListener('click', () => registerOrderRefund(button.dataset.registerRefund, button));
+    if (!orders.length) target.innerHTML = '<div class="empty">No hay más reembolsos pendientes en esta página.</div>';
+    if (orders.length) {
+      const rows = orders.map(o => [
+        esc(`#${o.order_number}`),
+        money(o.total),
+        dateTime(o.created_at),
+        'Pendiente de devolución',
+        `<button class="small-button" data-register-refund="${esc(o.order_id)}">Registrar devolución realizada</button>`
+      ]);
+      target.innerHTML = tableHtml(['Pedido','Importe a devolver','Fecha del pedido','Estado de devolución','Acción'], rows);
+      target.querySelectorAll('[data-register-refund]').forEach(button => {
+        button.addEventListener('click', () => registerOrderRefund(button.dataset.registerRefund, button));
+      });
+    }
+    appendCursorPager(target, {
+      page: refundPageIndex + 1,
+      canPrevious: refundPageIndex > 0,
+      hasMore: fetchedRows.length > PANEL_PAGE_SIZE,
+      previous: () => { refundPageIndex--; void loadRefundableOrders(false); },
+      next: () => {
+        const last = orders[orders.length - 1];
+        if (!last) return;
+        refundCursorStack[refundPageIndex + 1] = { created_at: last.created_at, order_id: last.order_id };
+        refundPageIndex++;
+        void loadRefundableOrders(false);
+      }
     });
   }
 
