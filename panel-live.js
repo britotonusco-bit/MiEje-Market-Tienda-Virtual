@@ -1067,6 +1067,7 @@
     businessPickerStates.set(selector, state);
     search.addEventListener('input', () => {
       state.search = search.value.trim();
+      state.requestId++;
       state.cursors = [null];
       state.page = 0;
       if (state.timer) window.clearTimeout(state.timer);
