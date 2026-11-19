@@ -1026,6 +1026,7 @@
     const pageBusinesses = cachedBusinesses;
     const options = `<option value="">Todos los negocios</option>` + pageBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (inactivo)'}</option>`).join('');
     const select = document.querySelector('#businessSelect'); if (select) select.innerHTML = options;
+    initBusinessPicker('#businessSelect', false, true);
     initBusinessPicker('#memberBusinessSelect');
     initBusinessPicker('#assignmentBusinessSelect');
     initBusinessPicker('#suspensionBusinessSelect');
@@ -1041,7 +1042,7 @@
 
   const businessPickerStates = new Map();
 
-  function initBusinessPicker(selector, activeOnly = false) {
+  function initBusinessPicker(selector, activeOnly = false, allowAll = false) {
     const select = document.querySelector(selector);
     if (!select) return;
     const existingState = businessPickerStates.get(selector);
@@ -1065,7 +1066,7 @@
     pager.style.marginTop = '6px';
     select.parentNode.insertBefore(search, select);
     select.insertAdjacentElement('afterend', pager);
-    const state = { selector, activeOnly, search: '', cursors: [null], page: 0, hasMore: false, timer: null };
+    const state = { selector, activeOnly, allowAll, search: '', cursors: [null], page: 0, hasMore: false, timer: null, requestId: 0 };
     businessPickerStates.set(selector, state);
     search.addEventListener('input', () => {
       state.search = search.value.trim();
@@ -1094,10 +1095,11 @@
         before_created_at: cursor?.created_at || undefined,
         before_id: cursor?.id || undefined
       });
+      if (requestId !== state.requestId) return;
       const rows = result.businesses || [];
       state.hasMore = Boolean(result.has_more);
       state.last = rows[rows.length - 1] || null;
-      select.innerHTML = '<option value="">Selecciona un negocio</option>' + rows.map(b =>
+      select.innerHTML = (state.allowAll ? '<option value="">Todos los negocios</option>' : '<option value="">Selecciona un negocio</option>') + rows.map(b =>
         `<option value="${esc(b.id)}">${esc(b.name)} · ${esc(b.slug)}${b.status === 'active' ? '' : ' (suspendido)'}</option>`
       ).join('');
       if (!rows.length) select.innerHTML = '<option value="">No se encontraron negocios</option>';
@@ -1124,10 +1126,11 @@
       });
       pager.replaceChildren(previous, label, next);
     } catch (error) {
+      if (requestId !== state.requestId) return;
       select.innerHTML = '<option value="">No se pudieron cargar los negocios</option>';
       pager.textContent = error.message || 'Error al consultar negocios.';
     } finally {
-      select.disabled = false;
+      if (requestId === state.requestId) select.disabled = false;
     }
   }
 
