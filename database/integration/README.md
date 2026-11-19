@@ -547,3 +547,21 @@ La retención formal y paginación histórica siguen pendientes. No se debe inst
 La revisión estática está documentada en `docs/support-and-customer-service-audit.md`. El proyecto tiene un enlace externo a WhatsApp para soporte técnico y contactos WhatsApp de cada negocio. No existe actualmente un módulo interno de tickets ni conversaciones persistentes. El asistente de tienda es una ayuda local basada en reglas, no un servicio de IA ni un canal para reclamos.
 
 En Supabase activo no se encontraron tablas públicas de soporte/tickets/chat/mensajes/contacto. La Edge Function `get-platform-public-settings` y la tabla `platform_public_settings` no están activas en el proyecto actual. La rama añade cabeceras de no-cache al endpoint, aclara el uso público de los números y advierte sobre datos personales en el asistente. No se desplegó ni se aplicó SQL.
+
+
+## 6. Copias de seguridad y recuperación
+
+La auditoría detallada está en `docs/backup-and-recovery-audit.md`.
+
+El proyecto Supabase consultado pertenece a una organización con plan Free. No se deben asumir backups diarios automáticos: Supabase documenta backups diarios automáticos para Pro, Team y Enterprise, y recomienda exportaciones periódicas con Supabase CLI para proyectos Free.
+
+Antes de producción:
+1. Exportar esquema y datos PostgreSQL con Supabase CLI desde un equipo/runner seguro, sin incluir cadenas de conexión ni secretos en Git.
+2. Copiar los objetos de cada bucket por separado mediante Storage API. Un dump de base de datos no contiene los archivos binarios de Storage.
+3. Mantener código de Edge Functions vinculado a un commit exacto y un inventario de configuración externa.
+4. Guardar secretos fuera del repositorio, con acceso restringido y procedimiento de rotación.
+5. Ensayar restauración en un proyecto Supabase aislado, nunca sobre el proyecto activo.
+6. Verificar RLS, grants, triggers, RPC, datos, archivos y aislamiento entre negocios tras restaurar.
+7. Aprobar RPO, RTO, frecuencia, retención y responsables antes de prometer tiempos de recuperación.
+
+La revisión del 19 nov 2026 no generó backups ni ejecutó restauraciones. No se ha acreditado una copia externa recuperable. Consultar el informe para las condiciones y la lista de cierre.
