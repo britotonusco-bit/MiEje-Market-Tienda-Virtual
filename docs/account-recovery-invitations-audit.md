@@ -210,3 +210,8 @@ Se añadió un indicador separado para identificar cuando una asignación se com
 La Edge Function envía ese indicador únicamente cuando encuentra la cuenta existente con correo sin confirmar y `invited_at`. No vuelve a llamar `inviteUserByEmail` para ese caso. La auditoría incluye `existing_invitation_reconciled` y mantiene `invitation_sent` como indicador de correo enviado en la operación actual. El verificador exige la nueva firma y el evento específico.
 
 La firma SQL y sus permisos deben aplicarse como parte de la migración coordinada: no se ejecutó SQL ni se desplegó la Edge Function. La modificación permanece en `correcciones-funcionales`; falta probar el flujo con cuentas ficticias en staging, incluido el fallo posterior al envío y el reintento.
+
+
+### Compatibilidad de la firma RPC
+
+Al ampliar la firma PostgreSQL, `CREATE OR REPLACE FUNCTION` no sustituye automáticamente una función con distinto número de parámetros: puede dejar la sobrecarga anterior disponible. Por eso el borrador ahora elimina explícitamente la firma antigua de siete argumentos antes de crear la nueva de ocho, y el verificador exige que la antigua ya no exista. Antes de aplicar esta migración en staging debe comprobarse que no haya dependencias SQL que impidan ese `DROP`; no debe ejecutarse parcialmente ni en producción sin respaldo y revisión del plan de migración.
