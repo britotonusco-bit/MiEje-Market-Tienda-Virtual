@@ -657,6 +657,7 @@ Deno.serve(async (req: Request) => {
         p_display_name: displayName,
         p_actor_id: user.id,
         p_invitation_sent: invitationSent,
+        p_existing_invitation: existingPendingInvite,
       });
 
       if (error) {
