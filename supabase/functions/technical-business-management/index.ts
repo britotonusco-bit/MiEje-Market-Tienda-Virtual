@@ -832,8 +832,31 @@ Deno.serve(async (req: Request) => {
       if (cursorCreatedAt && cursorId) {
         query = query.or(`created_at.lt.${cursorCreatedAt},and(created_at.eq.${cursorCreatedAt},id.lt.${cursorId})`);
       }
-      const { data, error } = await query;
+      let { data, error } = await query;
       if (error) throw error;
+      const expiredRows = (data ?? []).filter((row: any) => Date.parse(row.expires_at) <= Date.now());
+      for (const expired of expiredRows) {
+        const { error: expireError } = await admin.rpc("expire_business_invitation", {
+          p_invitation_id: expired.id,
+        });
+        if (expireError) throw expireError;
+      }
+      if (expiredRows.length) {
+        let refreshedQuery = admin.from("business_invitations")
+          .select("id,business_id,email_normalized,user_id,membership_id,role,job_title,status,created_at,expires_at,accepted_at,revoked_at")
+          .eq("business_id", businessId)
+          .eq("status", status)
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
+          .limit(limit + 1);
+        if (cursorCreatedAt && cursorId) {
+          refreshedQuery = refreshedQuery.or(`created_at.lt.${cursorCreatedAt},and(created_at.eq.${cursorCreatedAt},id.lt.${cursorId})`);
+        }
+        const refreshed = await refreshedQuery;
+        data = refreshed.data;
+        error = refreshed.error;
+        if (error) throw error;
+      }
       const rows = data ?? [];
       const hasMore = rows.length > limit;
       const invitations = rows.slice(0, limit);
