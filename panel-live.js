@@ -980,39 +980,54 @@
     });
   }
 
-  async function loadTechnical() {
-    const businessRows = [];
-    let businessCursor = null;
-    while (true) {
-      const result = await callTechnicalFunction({
-        action: 'list_businesses', limit: PANEL_PAGE_SIZE + 1,
-        before_created_at: businessCursor?.created_at || undefined,
-        before_id: businessCursor?.id || undefined
-      });
-      const fetched = result.businesses || [];
-      const pageRows = fetched.slice(0, PANEL_PAGE_SIZE);
-      businessRows.push(...pageRows);
-      if (fetched.length <= PANEL_PAGE_SIZE) break;
-      const last = pageRows[pageRows.length - 1];
-      if (!last) break;
-      businessCursor = { created_at: last.created_at, id: last.id };
+  let businessDirectoryCursorStack = [null];
+  let businessDirectoryPageIndex = 0;
+  let businessDirectoryHasMore = false;
+  let businessDirectoryCounts = { total: 0, active: 0, suspended: 0 };
+
+  async function loadTechnicalBusinesses(reset = true) {
+    if (reset) {
+      businessDirectoryCursorStack = [null];
+      businessDirectoryPageIndex = 0;
     }
-    cachedBusinesses = businessRows;
-    businessListPageIndex = 0;
-    const auditResult = await callTechnicalFunction({ action: 'list_audit_logs', limit: 1 });
+    const cursor = businessDirectoryCursorStack[businessDirectoryPageIndex];
+    const result = await callTechnicalFunction({
+      action: 'list_businesses', limit: PANEL_PAGE_SIZE + 1,
+      before_created_at: cursor?.created_at || undefined,
+      before_id: cursor?.id || undefined
+    });
+    cachedBusinesses = result.businesses || [];
+    businessDirectoryHasMore = Boolean(result.has_more);
+    businessDirectoryCounts = {
+      total: Number(result.business_count || 0),
+      active: Number(result.active_count || 0),
+      suspended: Number(result.suspended_count || 0)
+    };
     renderStats([
-      ['Negocios registrados', number(cachedBusinesses.length), 'Administración de la plataforma'],
-      ['Negocios activos', number(cachedBusinesses.filter(b => b.status === 'active').length), 'Con acceso habilitado'],
-      ['Negocios suspendidos', number(cachedBusinesses.filter(b => b.status === 'suspended').length), 'Requieren revisión o reactivación'],
-      ['Eventos de auditoría', number(auditResult.audit_count || 0), 'Registros de actividad']
+      ['Negocios registrados', number(businessDirectoryCounts.total), 'Total de la plataforma'],
+      ['Negocios activos', number(businessDirectoryCounts.active), 'Con acceso habilitado'],
+      ['Negocios suspendidos', number(businessDirectoryCounts.suspended), 'Requieren revisión o reactivación']
     ]);
-    const options = `<option value="">Todos los negocios</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (inactivo)'}</option>`).join('');
-    const select = document.querySelector('#businessSelect'); if (select) select.innerHTML = options;
-    const memberSelect = document.querySelector('#memberBusinessSelect'); if (memberSelect) memberSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
-    const assignmentBusinessSelect = document.querySelector('#assignmentBusinessSelect'); if (assignmentBusinessSelect) assignmentBusinessSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
-    const suspensionSelect = document.querySelector('#suspensionBusinessSelect'); if (suspensionSelect) suspensionSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (suspendido)'}</option>`).join('');
-    const inviteSelect = document.querySelector('#inviteBusinessSelect'); if (inviteSelect) inviteSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.filter(b => b.status === 'active').map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
     renderBusinesses();
+  }
+
+  async function loadTechnical() {
+    const auditResult = await callTechnicalFunction({ action: 'list_audit_logs', limit: 1 });
+    await loadTechnicalBusinesses(true);
+    const auditStat = document.querySelector('#statsGrid');
+    if (auditStat) {
+      const stat = document.createElement('div');
+      stat.className = 'stat-card';
+      stat.innerHTML = '<span>Eventos de auditoría</span><strong>' + number(auditResult.audit_count || 0) + '</strong><small>Registros de actividad</small>';
+      auditStat.appendChild(stat);
+    }
+    const pageBusinesses = cachedBusinesses;
+    const options = `<option value="">Todos los negocios</option>` + pageBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (inactivo)'}</option>`).join('');
+    const select = document.querySelector('#businessSelect'); if (select) select.innerHTML = options;
+    const memberSelect = document.querySelector('#memberBusinessSelect'); if (memberSelect) memberSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + pageBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+    const assignmentBusinessSelect = document.querySelector('#assignmentBusinessSelect'); if (assignmentBusinessSelect) assignmentBusinessSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + pageBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+    const suspensionSelect = document.querySelector('#suspensionBusinessSelect'); if (suspensionSelect) suspensionSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + pageBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (suspendido)'}</option>`).join('');
+    const inviteSelect = document.querySelector('#inviteBusinessSelect'); if (inviteSelect) inviteSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + pageBusinesses.filter(b => b.status === 'active').map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
     await loadSelectedBusiness('');
     await loadAccessEvents(null, '#accessContainer');
     await loadAuditEvents(null, '#auditContainer');
@@ -1024,23 +1039,42 @@
 
   function renderBusinesses() {
     const target = document.querySelector('#businessesContainer');
+    if (!target) return;
     const search = (document.querySelector('#businessSearch')?.value || '').trim().toLocaleLowerCase('es');
-    const filtered = cachedBusinesses.filter(b => [b.name, b.slug, b.business_type, b.category].some(v => String(v || '').toLocaleLowerCase('es').includes(search)));
+    const filtered = cachedBusinesses.filter(b => [b.name, b.slug, b.category].some(v => String(v || '').toLocaleLowerCase('es').includes(search)));
     const count = document.querySelector('#businessCount');
-    if (count) count.textContent = `${filtered.length} de ${cachedBusinesses.length} negocios`;
-    if (!cachedBusinesses.length) { target.innerHTML = '<div class="empty">Todavía no hay negocios. Usa el formulario de arriba para crear el primero.</div>'; return; }
-    if (!filtered.length) { target.innerHTML = '<div class="empty">No hay negocios que coincidan con la búsqueda.</div>'; return; }
-    const pageCount = Math.max(1, Math.ceil(filtered.length / PANEL_PAGE_SIZE));
-    businessListPageIndex = Math.min(businessListPageIndex, pageCount - 1);
-    const visible = filtered.slice(businessListPageIndex * PANEL_PAGE_SIZE, (businessListPageIndex + 1) * PANEL_PAGE_SIZE);
-    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Negocio</th><th>Tipo</th><th>Identificador</th><th>Estado / motivo</th><th>Creado</th><th>Acción</th></tr></thead><tbody>${visible.map(b => { const active = b.status === 'active'; return `<tr><td><strong>${esc(b.name)}</strong></td><td>${esc(b.business_type || b.category || '—')}</td><td>${esc(b.slug)}</td><td><span class="pill ${active ? 'green':'red'}">${active ? 'Activo':'Suspendido'}</span>${!active ? `<br><small>${esc(b.suspension_reason || 'Motivo pendiente de registrar')}</small>` : ''}</td><td>${dateTime(b.created_at)}</td><td><button class="small-button" data-business-status="${esc(b.id)}" data-active="${active ? 'false':'true'}">${active ? 'Suspender':'Reactivar'}</button></td></tr>`; }).join('')}</tbody></table></div>`;
+    if (count) count.textContent = `Página ${businessDirectoryPageIndex + 1} · ${businessDirectoryCounts.total} negocios registrados`;
+    if (!filtered.length) {
+      target.innerHTML = '<div class="empty">' + (search ? 'No hay coincidencias en esta página. Avanza o busca por otro término.' : 'Todavía no hay negocios registrados.') + '</div>';
+      appendCursorPager(target, {
+        page: businessDirectoryPageIndex + 1,
+        canPrevious: businessDirectoryPageIndex > 0,
+        hasMore: businessDirectoryHasMore,
+        previous: () => { if (businessDirectoryPageIndex > 0) { businessDirectoryPageIndex--; void loadTechnicalBusinesses(false); } },
+        next: () => advanceBusinessDirectory()
+      });
+      return;
+    }
+    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Negocio</th><th>Tipo</th><th>Identificador</th><th>Estado / motivo</th><th>Creado</th><th>Acción</th></tr></thead><tbody>${filtered.map(b => { const active = b.status === 'active'; return `<tr><td><strong>${esc(b.name)}</strong></td><td>${esc(b.business_type || b.category || '—')}</td><td>${esc(b.slug)}</td><td><span class="pill ${active ? 'green':'red'}">${active ? 'Activo':'Suspendido'}</span>${!active ? `<br><small>${esc(b.suspension_reason || 'Motivo pendiente de registrar')}</small>` : ''}</td><td>${dateTime(b.created_at)}</td><td><button class="small-button" data-business-status="${esc(b.id)}" data-active="${active ? 'false':'true'}">${active ? 'Suspender':'Reactivar'}</button></td></tr>`; }).join('')}</tbody></table></div>`;
     appendCursorPager(target, {
-      page: businessListPageIndex + 1, canPrevious: businessListPageIndex > 0,
-      hasMore: (businessListPageIndex + 1) * PANEL_PAGE_SIZE < filtered.length,
-      previous: () => { businessListPageIndex--; renderBusinesses(); },
-      next: () => { businessListPageIndex++; renderBusinesses(); }
+      page: businessDirectoryPageIndex + 1,
+      canPrevious: businessDirectoryPageIndex > 0,
+      hasMore: businessDirectoryHasMore,
+      previous: () => { if (businessDirectoryPageIndex > 0) { businessDirectoryPageIndex--; void loadTechnicalBusinesses(false); } },
+      next: () => advanceBusinessDirectory()
     });
-    target.querySelectorAll('[data-business-status]').forEach(button => button.addEventListener('click', () => changeBusinessStatus(button.dataset.businessStatus, button.dataset.active === 'true', button)));
+    target.querySelectorAll('[data-business-status]').forEach(button => button.addEventListener('click', async () => {
+      await changeBusinessStatus(button.dataset.businessStatus, button.dataset.active === 'true', button);
+      await loadTechnicalBusinesses(false);
+    }));
+  }
+
+  function advanceBusinessDirectory() {
+    const last = cachedBusinesses[cachedBusinesses.length - 1];
+    if (!last || !businessDirectoryHasMore) return;
+    businessDirectoryCursorStack[businessDirectoryPageIndex + 1] = { created_at: last.created_at, id: last.id };
+    businessDirectoryPageIndex++;
+    void loadTechnicalBusinesses(false);
   }
 
   async function refreshTechnical() {
