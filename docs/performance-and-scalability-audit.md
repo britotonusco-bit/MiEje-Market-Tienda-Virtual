@@ -244,3 +244,8 @@ Cambios solo en la rama. No se ha desplegado la Edge Function ni probado con gra
 
 ### 19.1. Registros de acceso
 El listado de accesos también usa cursor `created_at + id`, con 50 filas visibles por página. La Edge Function filtra los tres eventos de apertura/inicio de sesión admitidos antes de aplicar el cursor, evitando que eventos administrativos no relacionados consuman la página y oculten accesos antiguos. El panel de negocio pagina `panel.login` con el filtro de negocio ya aplicado.
+
+
+## 20. Publicaciones del administrador del negocio
+
+El listado privado de publicaciones del negocio dejó el tope fijo de 100. Ahora consulta 51 filas por solicitud, muestra 50 y usa cursor compuesto `created_at + id`. El filtro obligatorio `business_id` se mantiene en cada página; las acciones de despublicación siguen filtrando por el negocio actual y conservan las postulaciones relacionadas.
