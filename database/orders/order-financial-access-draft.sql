@@ -305,7 +305,8 @@ REVOKE SELECT (
   id, business_id, order_number, customer_name, customer_phone, customer_email,
   delivery_address, delivery_notes, payment_method, payment_status, status,
   delivery_tracking, subtotal, delivery_fee, total, public_tracking_token,
-  created_at, updated_at, customer_user_id
+  created_at, updated_at, customer_user_id, privacy_consent,
+  privacy_consent_version, privacy_consent_at
 ) ON TABLE public.orders FROM PUBLIC, anon, authenticated;
 
 GRANT SELECT (
@@ -322,7 +323,8 @@ REVOKE UPDATE (
   id, business_id, order_number, customer_name, customer_phone, customer_email,
   delivery_address, delivery_notes, payment_method, payment_status, status,
   delivery_tracking, subtotal, delivery_fee, total, public_tracking_token,
-  created_at, updated_at, customer_user_id
+  created_at, updated_at, customer_user_id, privacy_consent,
+  privacy_consent_version, privacy_consent_at
 ) ON TABLE public.orders FROM PUBLIC, anon, authenticated;
 GRANT UPDATE (status, delivery_tracking, updated_at)
 ON TABLE public.orders TO authenticated;
