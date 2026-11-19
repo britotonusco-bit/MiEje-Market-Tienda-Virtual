@@ -284,3 +284,39 @@ La implementación exige coordinar esquema, RPC, Edge Functions, página de acep
 ### Estado
 
 **Abierto — severidad alta.** La revisión estática confirmó los cuatro puntos del flujo descrito. No se ejecutó una prueba de navegador con enlace real, no se modificó Auth ni la base activa, y no se desplegó ninguna función. La próxima implementación debe hacerse en la rama de trabajo como un cambio coordinado y probarse con cuentas ficticias en staging antes de considerar cerrado el hallazgo.
+
+
+### Diseño técnico detallado para completar ACC-07 sin activar invitaciones cruzadas
+
+La invitación de Supabase confirma el correo y permite terminar la configuración de la cuenta. `verifyOtp` entrega una sesión autenticada; por eso, el hecho de que el correo esté confirmado no demuestra que la contraseña ya se haya configurado ni que una asignación concreta haya sido aceptada. La aplicación no debe tratar `email_confirmed_at` como señal de onboarding completado.
+
+#### Registro individual de invitación
+
+El flujo debe incorporar una entidad propia por invitación, independiente de `business_memberships`, con al menos:
+
+- `id`, `business_id`, `membership_id`, `user_id` (nullable hasta conocer la cuenta), `email_normalized`, `role`, `job_title`.
+- `status` restringido a `pending`, `accepted`, `revoked`, `expired`, `failed`.
+- `token_hash` único, nunca el token original; `created_at`, `expires_at`, `accepted_at`, `revoked_at`, `created_by`.
+- Restricción para impedir más de una invitación pendiente para la misma asignación/negocio y usuario/correo, sin impedir que una misma persona reciba invitaciones independientes de distintos negocios.
+- RLS habilitada y sin lectura pública. Solo RPC/Edge Function de servidor podrá crear, consultar o cambiar el estado.
+
+El token debe generarse con un generador criptográficamente seguro, incluirse en el `redirectTo` de esa invitación y guardarse únicamente como hash. La aceptación presentará ese token a una Edge Function autenticada; la función buscará su hash, comprobará expiración/estado y verificará que `auth.uid()` corresponde a la cuenta destinataria. Así, aceptar una invitación no activa por accidente otras membresías pendientes del mismo correo.
+
+#### Orden transaccional y recuperación
+
+1. Crear el registro de invitación y la asignación pendiente en una RPC transaccional, sin otorgar acceso.
+2. Enviar el correo con `inviteUserByEmail` desde servidor, pasando una URL de retorno que incluya el token de invitación de aplicación.
+3. Si el envío falla, dejar un estado recuperable y auditable; no presentar la invitación como enviada. La reconciliación debe reusar el mismo registro, sin crear cuentas o tokens duplicados.
+4. En la página de aceptación, verificar el enlace de Supabase, solicitar la contraseña y enviarla por HTTPS a una Edge Function dedicada. Esa función valida JWT, correo confirmado, token individual, estado pendiente y vigencia; actualiza la contraseña mediante Auth Admin desde servidor y llama a una RPC que acepta la invitación y activa solo la membresía asociada en una misma transacción de base de datos.
+5. Si la actualización de contraseña funciona pero la RPC de activación falla, la invitación permanece pendiente y se permite reintentar la finalización con el mismo token; no se crea otra cuenta ni se reactiva otra membresía.
+6. Al revocar, cambiar `status` a `revoked` en la misma operación que retira la asignación; la RPC de aceptación debe bloquear y volver a validar el registro para impedir carreras entre aceptar y revocar.
+7. `resolve-my-access` y todas las funciones/RLS que autorizan operaciones de negocio deben exigir membresía activa y ausencia de onboarding pendiente. La validación de panel no puede ser la única barrera.
+
+#### Compatibilidad y alcance
+
+- Las membresías históricas y las asignaciones a cuentas ya confirmadas deben clasificarse explícitamente como existentes/completadas; no convertirlas masivamente a pendientes.
+- La invitación Auth puede ser compartida por más de una asignación futura; por eso el estado de aceptación debe ser por invitación de aplicación, no un indicador global de la cuenta.
+- Los enlaces de Auth tienen expiración configurable (la documentación actual indica una hora por defecto) y pueden consumirse por sistemas de previsualización de correo. El proceso debe contemplar reenvío controlado y un enlace/acción de confirmación manual, sin desactivar la verificación de Auth.
+- No se deben usar `user_metadata` como fuente de autorización: es información editable por el usuario.
+
+**Decisión de implementación:** no crear una simple columna booleana `onboarding_completed` en `profiles` ni bloquear toda la cuenta por invitación. El estado debe ser por invitación y membresía para soportar varios negocios, invitaciones concurrentes y revocación aislada.
