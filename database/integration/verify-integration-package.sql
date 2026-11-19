@@ -1025,6 +1025,19 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'FALLO: faltan columnas para costo unitario e histórico.';
   END IF;
+  IF NOT EXISTS (
+       SELECT 1 FROM pg_trigger t
+       WHERE t.tgrelid='public.order_item_costs'::regclass
+         AND t.tgname='order_item_costs_immutable'
+         AND NOT t.tgisinternal
+         AND (t.tgtype & 16) = 16
+         AND (t.tgtype & 8) = 8
+     )
+     OR has_table_privilege('service_role','public.order_item_costs','UPDATE')
+     OR has_table_privilege('service_role','public.order_item_costs','DELETE')
+     OR has_table_privilege('service_role','public.order_item_costs','TRUNCATE') THEN
+    RAISE EXCEPTION 'FALLO: el costo histórico de las líneas puede modificarse o eliminarse.';
+  END IF;
 
 
   IF to_regclass('public.idx_financial_completed_business_type_date') IS NULL
