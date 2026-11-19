@@ -373,3 +373,54 @@ Una consulta estrictamente de solo lectura confirmó que la base activa todavía
 La cuenta web actualmente incluye autenticación, historial previsto y favoritos previstos, pero no ofrece todavía formularios para editar el perfil ni descargar/exportar los datos personales. Tampoco hay un flujo de autoservicio para solicitar eliminación de cuenta. Estas funciones quedan como trabajo pendiente y no se deben simular con controles que no ejecuten una operación real.
 
 Las políticas más restrictivas para perfiles y membresías se añadieron a `business-admin-boundaries.sql` en `correcciones-funcionales`; el verificador exige que no exista lectura global del propietario técnico. No se ejecutó la migración en Supabase activo.
+
+
+## Revisión complementaria de derechos y exposición de datos — 19 nov 2026
+
+### Comprobación adicional de la base activa
+
+Se consultó el catálogo del proyecto Supabase `cqixlrwbqatbhzmpygiz` en modo de solo lectura. La lista de migraciones registradas llega hasta `secure_public_job_application_submission` (12 migraciones); no incluye la migración `customer-account-migration.sql` ni las migraciones posteriores de permisos financieros.
+
+Hallazgos confirmados en el esquema activo:
+
+- `customer_favorites` y `orders.customer_user_id` no están instalados.
+- `profiles` permite SELECT por la política `profiles_select_self_or_owner`, que conserva lectura global para el propietario técnico.
+- `business_memberships` conserva `memberships_select_self_admin_owner`, con lectura global del propietario técnico.
+- `orders` concede a `authenticated` SELECT por columna sobre datos de contacto y entrega (`customer_name`, `customer_phone`, `customer_email`, `delivery_address`, `delivery_notes`), importes, estado/método de pago y `public_tracking_token`.
+- La política activa `orders_members_select` permite esa lectura a miembros del negocio y también conserva el bypass `private.is_platform_owner()`. Por tanto, los permisos de columna amplían la información accesible a empleados y administradores del negocio respecto del mínimo operativo.
+- `audit_logs` permite SELECT de `details` a usuarios autenticados sujetos a la política de auditoría. El contenido de ese JSON debe mantenerse minimizado y no debe contener secretos ni datos de contacto innecesarios.
+
+La rama ya contiene un diseño más restrictivo: elimina el bypass técnico directo de pedidos, retira SELECT general y concede un conjunto limitado de columnas operativas. Los importes se consultan mediante RPC autorizadas. El cambio sigue siendo un borrador hasta aplicar y probar el paquete en staging.
+
+### Alcance de la lectura operativa en la rama
+
+La concesión propuesta para los miembros del negocio mantiene visibles nombre, teléfono, dirección y notas de entrega, porque pueden ser necesarios para preparar y entregar el pedido. No concede lectura directa de correo, método/estado de pago, importes, token de seguimiento ni vínculo interno con la cuenta. Esta exposición operativa debe revisarse con el negocio y limitarse a empleados cuyas tareas realmente requieran esos datos; RLS por negocio no sustituye la minimización por función.
+
+### Procedimiento de consultas y reclamos
+
+Como referencia de diseño para Colombia, la Ley 1581 de 2012 reconoce, entre otros, los derechos a conocer, actualizar y rectificar datos, solicitar prueba de autorización, conocer el uso dado a los datos y acceder gratuitamente a ellos. La supresión o revocatoria no es automática en todos los casos: debe evaluarse frente a las condiciones legales y a deberes legales o contractuales de conservación.
+
+La ley establece, como regla general:
+- Consultas: máximo 10 días hábiles; si no es posible responder, se informa el motivo y la nueva fecha, que no puede superar 5 días hábiles adicionales.
+- Reclamos completos: máximo 15 días hábiles desde el día siguiente a su recepción; si no es posible responder, se informa el motivo y la nueva fecha, que no puede superar 8 días hábiles adicionales.
+- Si el reclamo está incompleto, se requiere completar dentro de los 5 días siguientes a su recepción.
+
+El sistema todavía no registra fechas de recepción, vencimientos, prórrogas, subsanaciones, responsable asignado, respuesta ni evidencia de notificación. Estos campos deben formar parte del futuro módulo de solicitudes de titulares. La clasificación entre consulta y reclamo debe definirse al recibir la solicitud, no inferirse solo por un botón de “eliminar cuenta”.
+
+**Fuente normativa consultada:** Ley 1581 de 2012, artículos 8, 11, 12 y 14 a 18, compilación oficial de Cancillería: https://cancilleria.gov.co/normograma/compilacion/docs/ley_1581_2012.htm. Esta nota es un criterio técnico de implementación, no sustituye revisión jurídica del aviso, de las finalidades ni de la relación entre MiEje Market y cada negocio.
+
+### Responsables y encargados del tratamiento
+
+No se debe asumir que MiEje Market o cada negocio tiene automáticamente una única calidad jurídica para todos los datos. La calidad de responsable o encargado depende de quién decide las finalidades y medios del tratamiento y de quién trata datos por cuenta de otro. Antes de habilitar solicitudes, definir por finalidad y conjunto de datos: quién responde al titular, quién ejecuta la instrucción, cómo se trasladan solicitudes entre plataforma y negocio y qué acuerdo documenta esas responsabilidades.
+
+### Decisión técnica recomendada
+
+No crear todavía un borrado automático de cuentas ni una exportación que prometa contener “todos los datos”. Primero debe existir un inventario de datos por finalidad y responsable, incluyendo Auth, perfiles, pedidos, artículos, favoritos, postulaciones, CV, Storage, logs y datos conservados por cada negocio. Después implementar un registro de solicitudes con acceso restringido, verificación proporcional de identidad, plazos, estados, trazabilidad y resolución parcial cuando ciertos registros deban conservarse.
+
+### Estado de esta revisión
+
+- Catálogo y políticas de Supabase: consulta de solo lectura completada.
+- Cambios en datos o configuración activa: ninguno.
+- Cambios funcionales de derechos de titulares: no implementados.
+- Documento de auditoría: ampliado con exposición efectiva de columnas y procedimiento de consultas/reclamos.
+- Pendiente: validar la política de datos con asesoría jurídica, decidir la asignación de responsabilidades por negocio, aplicar migraciones en staging y probar acceso con cuentas de distintos roles.
