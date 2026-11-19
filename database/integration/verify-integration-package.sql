@@ -1673,6 +1673,48 @@ BEGIN
     RAISE EXCEPTION 'FALLO: las RPC técnicas no están restringidas a service_role.';
   END IF;
 
+  -- Los perfiles son privados: cada usuario autenticado solo lee su fila.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='profiles'
+      AND policyname='profiles_select_self'
+      AND cmd='SELECT'
+      AND qual ILIKE '%auth.uid%'
+      AND qual ILIKE '%id%'
+      AND qual NOT ILIKE '%is_platform_owner%'
+  ) OR EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='profiles'
+      AND cmd='SELECT'
+      AND (coalesce(qual,'') ILIKE '%is_platform_owner%'
+        OR coalesce(with_check,'') ILIKE '%is_platform_owner%')
+  ) THEN
+    RAISE EXCEPTION 'FALLO: perfiles debe permitir lectura propia y no acceso global del propietario técnico.';
+  END IF;
+
+  IF has_column_privilege('authenticated','public.profiles','platform_role','UPDATE')
+     OR has_column_privilege('authenticated','public.profiles','is_blocked','UPDATE')
+     OR has_column_privilege('authenticated','public.profiles','blocked_reason','UPDATE') THEN
+    RAISE EXCEPTION 'FALLO: authenticated no puede modificar rol, bloqueo ni motivo de bloqueo del perfil.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='business_memberships'
+      AND policyname='memberships_select_self_or_admin'
+      AND cmd='SELECT'
+      AND qual ILIKE '%auth.uid%'
+      AND qual ILIKE '%business_admin%'
+  ) OR EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='business_memberships'
+      AND cmd='SELECT'
+      AND (coalesce(qual,'') ILIKE '%is_platform_owner%'
+        OR coalesce(with_check,'') ILIKE '%is_platform_owner%')
+  ) THEN
+    RAISE EXCEPTION 'FALLO: membresías debe limitar lectura a la cuenta propia o al administrador del negocio.';
+  END IF;
+
   -- Ninguna política de pedidos, partidas, cancelaciones o finanzas puede
   -- conservar un bypass del propietario técnico, aunque tenga otro nombre.
   IF EXISTS (
