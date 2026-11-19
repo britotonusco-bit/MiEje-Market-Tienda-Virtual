@@ -615,3 +615,6 @@ Gastos del administrador, movimientos de inventario y favoritos del cliente ya t
 
 
 El listado de auditoría general también incorpora cursor `created_at + id`. El panel técnico envía el cursor a la Edge Function, que valida fecha ISO e ID UUID y conserva límite máximo 100 para llamadas antiguas sin cursor. El panel administrativo pagina la consulta directa con el filtro de negocio/actor. El despliegue de la Edge Function sigue pendiente.
+
+
+El listado de pedidos cancelados/pagados pendientes de reembolso utiliza el RPC financiero paginado, conserva la condición de cancelación aprobada y pago confirmado, y muestra 50 por página. Depende del nuevo RPC borrador; validar en staging.
