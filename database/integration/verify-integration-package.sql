@@ -1389,6 +1389,39 @@ BEGIN
     RAISE EXCEPTION 'FALLO: el checkout no bloquea productos en orden determinista o no descuenta inventario.';
   END IF;
 
+  -- La aprobación de cancelación solo modifica el pedido y el inventario.
+  -- Nunca debe simular un reembolso ni cambiar el estado financiero a refunded.
+  IF position('payment_status = ''refunded''' IN lower(pg_get_functiondef(
+       'public.decide_order_cancellation(uuid,text,text)'::regprocedure
+     ))) > 0
+     OR position('insert into public.financial_transactions' IN lower(pg_get_functiondef(
+       'public.decide_order_cancellation(uuid,text,text)'::regprocedure
+     ))) > 0 THEN
+    RAISE EXCEPTION 'FALLO: la cancelación está registrando un reembolso o marcando dinero devuelto sin la operación financiera separada.';
+  END IF;
+
+  IF position('v_request.request_status <> ''pending''' IN lower(pg_get_functiondef(
+       'public.decide_order_cancellation(uuid,text,text)'::regprocedure
+     ))) = 0
+     OR position('v_request.order_status in (''delivered'',''cancelled'')' IN lower(pg_get_functiondef(
+       'public.decide_order_cancellation(uuid,text,text)'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: la decisión no bloquea solicitudes ya atendidas o pedidos terminados.';
+  END IF;
+
+  -- La reversión de costo solo corresponde a pedidos con ingreso real completado.
+  IF position('paid.transaction_type=''payment_received''' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0
+     OR position('paid.status=''completed''' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0
+     OR position('paid.currency=''cop''' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: el reporte puede revertir costos de pedidos cancelados sin un pago real completado en COP.';
+  END IF;
+
   IF position('for update of p' IN lower(pg_get_functiondef(
        'public.decide_order_cancellation(uuid,text,text)'::regprocedure
      ))) = 0
