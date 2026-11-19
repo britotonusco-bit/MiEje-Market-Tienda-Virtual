@@ -10,7 +10,7 @@ La vinculación del pedido con la cuenta se resuelve en el servidor: la Edge Fun
 
 Los favoritos se consultan por el usuario autenticado y las escrituras incluyen su ID. El borrador SQL añade RLS por propietario, impide reasignar filas porque no concede UPDATE y establece una restricción única por usuario/producto. La protección definitiva depende de aplicar y probar esa migración en staging.
 
-El historial se entrega mediante `get_customer_order_history()`, que exige sesión, perfil no bloqueado y filtra por `orders.customer_user_id = auth.uid()`. La función limita la consulta a los últimos 50 pedidos. La migración de clientes y las políticas de lectura relacionadas todavía son borradores; no debe anunciarse como funcional en el proyecto activo.
+El historial sí está conectado a la interfaz independiente `cuenta.html` mediante `cuenta.js`, que invoca `get_customer_order_history()` al abrir la cuenta. La RPC exige sesión, perfil no bloqueado y filtra por `orders.customer_user_id = auth.uid()`; limita la consulta a los últimos 50 pedidos. `app.js` no contiene esa llamada porque la pantalla de cuenta usa su propio archivo JavaScript. La migración de clientes y las políticas de lectura relacionadas todavía son borradores; por tanto, la interfaz existe, pero su funcionamiento depende de aplicar y probar las migraciones.
 
 ## Hallazgo crítico: consentimiento del checkout no persistido
 
@@ -52,3 +52,12 @@ Se implementó el flujo de consentimiento en la rama `correcciones-funcionales`:
 - `verify-integration-package.sql` comprueba las columnas, la restricción, la firma/permisos de la RPC y la generación de fecha en el servidor.
 
 **Estado:** cambios guardados en la rama; falta revisar el diff completo, validar las firmas SQL y probar en staging. No se aplicó ninguna migración ni se desplegó la Edge Function. La versión debe actualizarse coordinadamente en la política pública, el HTML, la Edge Function y el borrador SQL cuando se publique una nueva versión del aviso.
+
+
+## Revisión de la interfaz de cuenta
+
+La inspección de `cuenta.html` y `cuenta.js` confirmó que existen registro, inicio de sesión, cierre de sesión, recuperación mediante enlace a `recuperar-clave.html`, historial de pedidos y favoritos. La página carga historial y favoritos al detectar una sesión, y vuelve a actualizar el estado cuando cambia la autenticación.
+
+No se detectó una llamada de historial ausente: está en `cuenta.js`, no en `app.js`. La prueba de aislamiento entre dos clientes y el acceso real a la tabla de favoritos siguen pendientes de staging, porque las migraciones SQL aún no están aplicadas en el proyecto activo.
+
+La pantalla muestra un mensaje de error si falla la RPC del historial o la consulta de favoritos. No se modificó esta interfaz durante la corrección del consentimiento.
