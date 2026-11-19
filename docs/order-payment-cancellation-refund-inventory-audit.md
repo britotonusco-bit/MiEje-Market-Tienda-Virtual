@@ -99,3 +99,12 @@ Se detectó que el borrador permitía anular gastos pagados. El reporte financie
 ## 9. Costos históricos incompletos y ganancias estimadas
 
 El reporte agrega los costos guardados por línea de pedido. Si alguna línea no tiene `order_item_costs.unit_cost`, el costo de ventas queda subestimado si se interpreta el valor faltante como cero. Se ajustó el borrador para que `gross_profit_estimate` y `net_profit_estimate` devuelvan `NULL` cuando `missing_cost_lines` sea mayor que cero. El informe conserva el conteo de líneas sin costo y la marca `complete_cost_data`. Así se evita mostrar una ganancia numérica engañosa.
+
+
+## 10. Inmutabilidad del costo histórico por línea
+
+La inspección de solo lectura del esquema activo confirmó que `order_item_costs` tiene una fila como máximo por línea de pedido (PK `order_item_id`) y claves foráneas compuestas que vinculan la fila con el pedido y su negocio. También permite `unit_cost IS NULL`, condición que el reporte identifica como costo faltante. No había triggers en esa tabla y el rol `service_role` tenía privilegios de UPDATE, DELETE y TRUNCATE.
+
+Se añadió al borrador de límites de negocio un trigger que rechaza UPDATE y DELETE sobre snapshots, además de revocar esos privilegios y TRUNCATE a `service_role`. El checkout conserva INSERT para crear la fotografía original dentro de la transacción. El verificador ahora exige el trigger y la ausencia de esos privilegios.
+
+La tabla `product_costs` conserva el costo vigente del producto y puede actualizarse por el administrador del negocio. Esa actualización no modifica la fila histórica de `order_item_costs`. No se ejecutó esta protección en la base activa; debe probarse en staging.
