@@ -254,6 +254,24 @@
     if (expenseForm) expenseForm.elements.expense_date.value = today;
     form.elements.start_date.value = today.slice(0,8) + '01';
     form.elements.end_date.value = today;
+    document.querySelectorAll('[data-profit-period]').forEach(button => {
+      button.addEventListener('click', () => {
+        const period = button.dataset.profitPeriod;
+        const year = Number(today.slice(0,4));
+        const month = Number(today.slice(5,7));
+        if (period === 'day') {
+          form.elements.start_date.value = today;
+          form.elements.end_date.value = today;
+        } else if (period === 'month') {
+          form.elements.start_date.value = today.slice(0,8) + '01';
+          form.elements.end_date.value = today;
+        } else if (period === 'year') {
+          form.elements.start_date.value = String(year).padStart(4,'0') + '-01-01';
+          form.elements.end_date.value = String(year).padStart(4,'0') + '-12-31';
+        }
+        loadProfitReport();
+      });
+    });
     loadProfitReport();
   }
 
