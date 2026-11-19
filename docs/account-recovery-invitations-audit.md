@@ -142,3 +142,23 @@ También se reforzó `aceptar-invitacion.js`: después de verificar el enlace y 
 8. Enlace vencido/reutilizado o correo no confirmado: no activar la cuenta desde la página de aceptación.
 
 Estos cambios están únicamente en `correcciones-funcionales`; no se modificó Auth, no se enviaron correos y no se alteraron usuarios reales.
+
+
+## Recuperación de una invitación creada sin asignación — 19 nov 2026
+
+Se corrigió un caso parcial del flujo de invitaciones. Auth puede crear una cuenta y registrar `invited_at`, pero la RPC de membresía puede fallar después. Al repetir la operación, el sistema antes bloqueaba toda cuenta existente sin correo confirmado, dejando la invitación pendiente sin una vía de reconciliación desde el panel.
+
+Ahora:
+
+- La Edge Function identifica una cuenta no confirmada con `invited_at` como una invitación ya creada.
+- Para esa cuenta no vuelve a llamar `inviteUserByEmail`, no crea otra cuenta y no afirma que haya enviado otro correo.
+- Permite reintentar únicamente la RPC transaccional `create_business_membership_assignment`, que comprueba duplicados y registra la membresía y su auditoría.
+- Si la cuenta no está confirmada y no tiene `invited_at`, el sistema mantiene el bloqueo y no asigna acceso.
+- Si la membresía ya existe, el panel informa que la persona todavía debe aceptar la invitación y confirmar su correo.
+- Se corrigió el mensaje del error de envío: ya no promete reenviar la confirmación mediante un reintento.
+
+### Límites que siguen pendientes
+
+Este ajuste reconcilia la membresía cuando la invitación original sí fue creada. No reenvía correos ni renueva enlaces vencidos. Para eso se necesita definir y probar un canal de correo transaccional y un flujo explícito con límites de frecuencia y auditoría. Supabase documenta que `inviteUserByEmail` crea un usuario no confirmado cuando el correo no existe; `generateLink` genera el enlace pero no lo envía por sí mismo, y `resend` está documentado para confirmaciones de signup, no como reenvío administrativo genérico de invitaciones. No se debe tratar esos métodos como intercambiables.
+
+No se desplegó la Edge Function ni se modificó Auth o la base activa. La comprobación realizada es estática; quedan pendientes Deno check, prueba de invitación real, fallo simulado de RPC, reintento y aceptación del correo en staging.
