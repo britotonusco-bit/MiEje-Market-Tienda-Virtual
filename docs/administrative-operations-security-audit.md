@@ -12,7 +12,7 @@ Se compararon:
 - `database/security/administrative-membership-rpcs-draft.sql`.
 - `database/security/business-admin-boundaries.sql`.
 - `database/security/access-block-requests-draft.sql`.
-- `database/integration/verify-integration-package.sql).
+- `database/integration/verify-integration-package.sql`.
 - Políticas, privilegios, funciones y triggers activos mediante consultas SQL de solo lectura.
 
 No se modificó Auth, la base de datos activa, usuarios, membresías, negocios ni funciones desplegadas.
