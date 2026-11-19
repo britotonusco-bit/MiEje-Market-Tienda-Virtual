@@ -90,6 +90,11 @@ $function$;
 REVOKE ALL ON FUNCTION public.set_job_application_review_audit()
   FROM PUBLIC, anon, authenticated;
 
+-- Retira el trigger anterior del paquete base si todavía existe.
+-- La migración específica será la única fuente del sello de auditoría.
+DROP TRIGGER IF EXISTS job_applications_stamp_review
+  ON public.job_applications;
+
 DROP TRIGGER IF EXISTS trg_job_application_review_audit
   ON public.job_applications;
 
