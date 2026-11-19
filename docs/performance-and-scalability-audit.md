@@ -222,3 +222,7 @@ El cambio requiere que el RPC nuevo esté aplicado en staging junto con el resto
 
 ### Validación pendiente
 No se ha ejecutado la nueva RPC en Supabase, no se ha desplegado ni probado en navegador. Se requiere staging con más de 50 pedidos por cliente, más de 500 productos/publicaciones y pruebas de aislamiento entre dos cuentas y varios negocios. La consulta exacta de conteo y la carga total deben medirse con volumen real antes de producción.
+
+
+### Ajuste adicional: lotes de negocios
+Las consultas de productos y publicaciones dividen los IDs de negocios en lotes de 100 para evitar filtros `IN` excesivamente grandes. La Edge Function de métodos de pago acepta como máximo 200 IDs por solicitud; el cliente respeta ese contrato y procesa los negocios en grupos de 200. Los errores en publicaciones o métodos de pago se registran sin cancelar la carga de negocios y productos, manteniendo el comportamiento tolerante a fallos anterior.
