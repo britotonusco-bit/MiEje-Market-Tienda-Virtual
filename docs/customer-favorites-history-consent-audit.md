@@ -61,3 +61,17 @@ La inspección de `cuenta.html` y `cuenta.js` confirmó que existen registro, in
 No se detectó una llamada de historial ausente: está en `cuenta.js`, no en `app.js`. La prueba de aislamiento entre dos clientes y el acceso real a la tabla de favoritos siguen pendientes de staging, porque las migraciones SQL aún no están aplicadas en el proyecto activo.
 
 La pantalla muestra un mensaje de error si falla la RPC del historial o la consulta de favoritos. No se modificó esta interfaz durante la corrección del consentimiento.
+
+
+## Casos de prueba obligatorios en staging
+
+1. Enviar checkout sin marcar la casilla: la interfaz lo bloquea y la Edge Function debe responder HTTP 400 si se llama directamente.
+2. Enviar `privacy_consent=true` con una versión distinta: el servidor debe rechazarlo.
+3. Crear un pedido como invitado con aceptación válida: el pedido debe conservar `customer_user_id=NULL`, `privacy_consent=true`, la versión exacta y una fecha de PostgreSQL.
+4. Crear un pedido con sesión válida: el pedido debe quedar asociado al ID autenticado validado por Auth y guardar la misma evidencia.
+5. Reintentar con la misma clave y mismo contenido: debe recuperar el pedido original sin duplicarlo.
+6. Reutilizar la clave con otro valor de aceptación o versión: debe producir conflicto y no crear un segundo pedido.
+7. Intentar leer o modificar directamente las tres columnas de evidencia desde `authenticated`: debe fallar; la evidencia solo se consulta mediante acceso autorizado del servidor.
+8. Ejecutar el verificador integral: debe reconocer las cuatro firmas nuevas, los tres hashes de idempotencia y el timestamp generado en PostgreSQL.
+
+Estos casos no se han ejecutado todavía. La verificación realizada hasta ahora es estática sobre los archivos de la rama.
