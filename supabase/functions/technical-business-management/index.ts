@@ -743,7 +743,7 @@ Deno.serve(async (req: Request) => {
           || !["active", "suspended", "closed"].includes(status)) {
         return reply(400, { error: "Negocio y estado válido son obligatorios." });
       }
-      if (status === "suspended" && !reason) return reply(400, { error: "Indica el motivo de la suspensión." });
+      if (reason.length < 5) return reply(400, { error: "Indica un motivo de al menos cinco caracteres para cambiar el estado." });
 
       const { data, error } = await admin.rpc("set_technical_business_status", {
         p_business_id: businessId,
