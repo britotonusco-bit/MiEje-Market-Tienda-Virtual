@@ -519,3 +519,12 @@ La función `technical-business-management` activa sigue en versión 6 y usa esc
 La tabla activa `audit_logs` permite UPDATE/DELETE/TRUNCATE a `service_role` y no tiene trigger de inmutabilidad. Se añadió el borrador `database/security/audit-log-immutability-draft.sql` y se amplió `verify-integration-package.sql` para comprobar RPC invoker/search_path/grants, trigger del último administrador y protección append-only del registro de auditoría.
 
 La tabla `access_block_requests` tampoco aparece en la base activa. No se ejecutó SQL de escritura ni se desplegó código. Requiere staging y autorización antes de aplicar migraciones o funciones.
+
+
+### Moderación y solicitudes de bloqueo — comprobaciones adicionales
+
+La rama contiene la RPC `moderate_business_content_transactionally`, que valida al propietario técnico no bloqueado, bloquea la publicación, acepta solo decisiones aprobada/rechazada y escribe auditoría en la misma transacción. Repetir la misma decisión y nota no crea un segundo evento. Aprobar moderación no publica automáticamente: el estado `is_published` se conserva.
+
+El borrador `database/security/access-block-requests-draft.sql` permite solicitudes solo a administradores del negocio para miembros activos, evita duplicados pendientes por negocio/usuario, y resuelve exclusivamente desde la Edge Function técnica. La aprobación suspende solo la membresía del negocio indicado y protege al último administrador activo. Las resoluciones repetidas producen conflicto sin duplicar el evento.
+
+El verificador ahora comprueba el índice único, los permisos de inserción por columna, SECURITY INVOKER/search_path y la autorización/auditoría de ambas RPC. En la base activa consultada, `access_block_requests` y su RPC no existen; la RPC de moderación tampoco está instalada. La política activa de lectura de `business_content_pages` aún permite acceso global a `platform_owner`, mientras la rama lo limita. No se aplicó SQL.
