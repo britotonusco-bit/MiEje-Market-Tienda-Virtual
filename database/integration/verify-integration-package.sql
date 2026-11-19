@@ -1358,6 +1358,31 @@ BEGIN
     RAISE EXCEPTION 'FALLO: falta la restricción que valida el sentido de cada movimiento de inventario.';
   END IF;
 
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid='public.inventory_movements'::regclass
+      AND conname='inventory_movements_product_business_fk'
+      AND contype='f'
+      AND confdeltype='r'
+      AND convalidated
+      AND pg_get_constraintdef(oid) ILIKE '%(business_id, product_id)%'
+      AND pg_get_constraintdef(oid) ILIKE '%products(business_id, id)%'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid='public.inventory_movements'::regclass
+      AND conname='inventory_movements_delta_check'
+      AND contype='c' AND convalidated
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid='public.inventory_movements'::regclass
+      AND conname='inventory_movements_direction_check'
+      AND contype='c' AND convalidated
+      AND pg_get_constraintdef(oid) ILIKE '%sale%'
+      AND pg_get_constraintdef(oid) ILIKE '%cancellation_return%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: las restricciones de relación, delta y dirección del libro de inventario no están validadas.';
+  END IF;
+
   IF has_table_privilege('service_role','public.inventory_movements','INSERT')
      OR has_table_privilege('service_role','public.inventory_movements','UPDATE')
      OR has_table_privilege('service_role','public.inventory_movements','DELETE')
