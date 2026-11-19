@@ -11,6 +11,8 @@
   let cachedProducts = [];
   const PANEL_PAGE_SIZE = 50;
   let employeeOrderCursorStack = [null];
+  let businessOrderCursorStack = [null];
+  let businessOrderPageIndex = 0;
   let employeeOrderPageIndex = 0;
   let productCursorStack = [null];
   let productPageIndex = 0;
@@ -730,26 +732,56 @@
     await loadProducts();
   }
 
-  async function loadBusinessOrders() {
+  async function loadBusinessOrders(reset = true) {
     const target = document.querySelector('#ordersContainer');
+    if (reset) { businessOrderCursorStack = [null]; businessOrderPageIndex = 0; }
     target.innerHTML = '<div class="empty">Cargando pedidos…</div>';
-    const [ordersResult, financeResult] = await Promise.all([
-      db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,delivery_tracking,status,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100),
-      db.rpc('get_business_admin_order_financials', {
-        p_business_id: businessId,
-        p_refundable_only: false,
-        p_limit: 100
-      })
-    ]);
+    const cursor = businessOrderCursorStack[businessOrderPageIndex];
+    const { data: financeRows, error: financeError } = await db.rpc('get_business_admin_order_financials_page', {
+      p_business_id: businessId,
+      p_refundable_only: false,
+      p_limit: PANEL_PAGE_SIZE + 1,
+      p_before_created_at: cursor?.created_at || null,
+      p_before_order_id: cursor?.order_id || null
+    });
+    if (financeError) return showError(target, financeError);
+    const rows = financeRows || [];
+    const pageRows = rows.slice(0, PANEL_PAGE_SIZE);
+    const orderIds = pageRows.map(row => row.order_id);
+    const ordersResult = orderIds.length
+      ? await db.from('orders')
+          .select('id,customer_name,customer_phone,delivery_address,delivery_notes,delivery_tracking,order_items(product_name,quantity)')
+          .eq('business_id', businessId)
+          .in('id', orderIds)
+      : { data: [], error: null };
     if (ordersResult.error) return showError(target, ordersResult.error);
-    if (financeResult.error) return showError(target, financeResult.error);
-    const financeByOrder = new Map((financeResult.data || []).map(row => [row.order_id, row]));
-    renderOrders(target, (ordersResult.data || []).map(o => ({
-      ...o,
-      ...(financeByOrder.get(o.id) || {}),
-      id: o.id,
-      items: o.order_items || []
-    })), true);
+    const orderById = new Map((ordersResult.data || []).map(order => [order.id, order]));
+    const merged = pageRows.map(finance => {
+      const order = orderById.get(finance.order_id);
+      return {
+        ...(order || {}),
+        ...finance,
+        id: finance.order_id,
+        items: order?.order_items || []
+      };
+    });
+    renderOrders(target, merged, true);
+    appendCursorPager(target, {
+      page: businessOrderPageIndex + 1,
+      canPrevious: businessOrderPageIndex > 0,
+      hasMore: rows.length > PANEL_PAGE_SIZE,
+      previous: () => { businessOrderPageIndex--; void loadBusinessOrders(false); },
+      next: () => {
+        const last = pageRows[pageRows.length - 1];
+        if (!last) return;
+        businessOrderCursorStack[businessOrderPageIndex + 1] = {
+          created_at: last.created_at,
+          order_id: last.order_id
+        };
+        businessOrderPageIndex++;
+        void loadBusinessOrders(false);
+      }
+    });
   }
 
   async function loadEmployeeOrders(reset = true) {
