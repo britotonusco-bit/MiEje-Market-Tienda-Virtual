@@ -1509,7 +1509,7 @@
     const rows = fetchedRows.slice(0, PANEL_PAGE_SIZE);
     if (!rows.length && jobApplicationPageIndex === 0) { target.innerHTML = '<div class="empty">Todavía no se han recibido postulaciones.</div>'; return; }
     if (!rows.length) target.innerHTML = '<div class="empty">No hay más postulaciones en esta página.</div>';
-    target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Postulante</th><th>Contacto</th><th>Mensaje y respuestas</th><th>Hoja de vida</th><th>Estado</th><th>Notas internas</th><th>Guardar</th></tr></thead><tbody>' +
+    if (rows.length) target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Postulante</th><th>Contacto</th><th>Mensaje y respuestas</th><th>Hoja de vida</th><th>Estado</th><th>Notas internas</th><th>Guardar</th></tr></thead><tbody>' +
       rows.map(row => {
         const resumeLink = row.resume_path
           ? '<button type="button" class="small-button" data-download-resume="' + esc(row.id) + '" data-resume-path="' + esc(row.resume_path) + '">Descargar hoja de vida</button>'
@@ -2171,25 +2171,27 @@
       return;
     }
     if (!requests.length) target.innerHTML = '<div class="empty">No hay más solicitudes en esta página.</div>';
-    const rows = requests.map(r => {
-      const order = Array.isArray(r.orders) ? r.orders[0] : r.orders;
-      const decision = r.status === 'pending'
-        ? `<button class="small-button" data-cancellation-decision="approved" data-request="${esc(r.id)}">Aprobar</button> <button class="small-button" data-cancellation-decision="rejected" data-request="${esc(r.id)}">Rechazar</button>`
-        : esc(r.status === 'approved' ? 'Aprobada' : 'Rechazada');
-      return [
-        esc(order?.order_number ? `#${order.order_number}` : r.order_id),
-        esc(r.customer_reason),
-        esc(statusLabels[order?.status] || order?.status || '—'),
-        esc(r.status === 'pending' ? 'Pendiente' : r.status === 'approved' ? 'Aprobada' : 'Rechazada'),
-        dateTime(r.forwarded_at),
-        esc(r.admin_response || '—'),
-        decision
-      ];
-    });
-    target.innerHTML = tableHtml(['Pedido','Motivo','Estado del pedido','Solicitud','Fecha','Respuesta del administrador','Decisión'], rows);
-    target.querySelectorAll('[data-cancellation-decision][data-request]').forEach(button => {
-      button.addEventListener('click', () => decideCancellation(button.dataset.request, button.dataset.cancellationDecision, button));
-    });
+    if (requests.length) {
+      const rows = requests.map(r => {
+        const order = Array.isArray(r.orders) ? r.orders[0] : r.orders;
+        const decision = r.status === 'pending'
+          ? `<button class="small-button" data-cancellation-decision="approved" data-request="${esc(r.id)}">Aprobar</button> <button class="small-button" data-cancellation-decision="rejected" data-request="${esc(r.id)}">Rechazar</button>`
+          : esc(r.status === 'approved' ? 'Aprobada' : 'Rechazada');
+        return [
+          esc(order?.order_number ? `#${order.order_number}` : r.order_id),
+          esc(r.customer_reason),
+          esc(statusLabels[order?.status] || order?.status || '—'),
+          esc(r.status === 'pending' ? 'Pendiente' : r.status === 'approved' ? 'Aprobada' : 'Rechazada'),
+          dateTime(r.forwarded_at),
+          esc(r.admin_response || '—'),
+          decision
+        ];
+      });
+      target.innerHTML = tableHtml(['Pedido','Motivo','Estado del pedido','Solicitud','Fecha','Respuesta del administrador','Decisión'], rows);
+      target.querySelectorAll('[data-cancellation-decision][data-request]').forEach(button => {
+        button.addEventListener('click', () => decideCancellation(button.dataset.request, button.dataset.cancellationDecision, button));
+      });
+    }
     appendCursorPager(target, {
       page: cancellationPageIndex + 1,
       canPrevious: cancellationPageIndex > 0,
