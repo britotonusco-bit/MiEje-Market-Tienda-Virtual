@@ -623,3 +623,6 @@ El listado de pedidos cancelados/pagados pendientes de reembolso utiliza el RPC 
 El historial de pedidos del cliente incorpora `get_customer_order_history_page(integer,timestamptz,uuid)`: máximo 50 pedidos, cursor `created_at + id`, validación de usuario propietario y cuenta activa. La interfaz usa Anterior/Siguiente. La función antigua queda por compatibilidad.
 
 El catálogo público carga negocios, productos y publicaciones por bloques de 500 con conteo exacto y orden estable, sin límites fijos de 200/1.000/500. Todavía acumula los resultados en memoria; no es carga progresiva. Probar con volumen mayor a 500 filas en staging.
+
+
+Las consultas de productos/publicaciones agrupan IDs de negocio en lotes de 100; la Edge Function de métodos de pago recibe lotes de hasta 200 conforme a su validación. Los errores de estos dos conjuntos opcionales no deben interrumpir la carga del directorio y los productos.
