@@ -2221,3 +2221,86 @@ $verify$;
 -- Comprobación adicional, también de solo lectura:
 -- ejecutar después de este bloque:
 -- database/orders/verify-order-financial-access.sql
+
+
+-- Invitaciones individuales: la membresía pendiente nunca debe autorizar acceso.
+DO $verify_invitations$
+DECLARE
+  v_role_helper text;
+  v_accept text;
+  v_revoke text;
+BEGIN
+  IF to_regclass('public.business_invitations') IS NULL THEN
+    RAISE EXCEPTION 'FALLO: falta public.business_invitations.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_class c
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname='public' AND c.relname='business_invitations'
+      AND c.relrowsecurity
+  ) THEN
+    RAISE EXCEPTION 'FALLO: business_invitations requiere RLS.';
+  END IF;
+
+  IF has_table_privilege('anon','public.business_invitations','SELECT')
+     OR has_table_privilege('authenticated','public.business_invitations','SELECT')
+     OR has_table_privilege('authenticated','public.business_invitations','INSERT')
+     OR has_table_privilege('authenticated','public.business_invitations','UPDATE')
+     OR has_table_privilege('authenticated','public.business_invitations','DELETE')
+     OR NOT has_table_privilege('service_role','public.business_invitations','SELECT')
+     OR NOT has_table_privilege('service_role','public.business_invitations','INSERT')
+     OR NOT has_table_privilege('service_role','public.business_invitations','UPDATE') THEN
+    RAISE EXCEPTION 'FALLO: privilegios de business_invitations no son exclusivos del servidor.';
+  END IF;
+
+  IF to_regprocedure('public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz)') IS NULL
+     OR to_regprocedure('public.attach_business_invitation_user(uuid,uuid)') IS NULL
+     OR to_regprocedure('public.mark_business_invitation_failed(uuid,uuid,text)') IS NULL
+     OR to_regprocedure('public.accept_business_invitation(uuid,uuid,text)') IS NULL
+     OR to_regprocedure('public.revoke_business_invitation(uuid,uuid,text)') IS NULL THEN
+    RAISE EXCEPTION 'FALLO: faltan RPCs del ciclo de invitación.';
+  END IF;
+
+  IF has_function_privilege('anon','public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz)','EXECUTE')
+     OR has_function_privilege('authenticated','public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz)','EXECUTE')
+     OR has_function_privilege('authenticated','public.accept_business_invitation(uuid,uuid,text)','EXECUTE')
+     OR has_function_privilege('authenticated','public.revoke_business_invitation(uuid,uuid,text)','EXECUTE')
+     OR NOT has_function_privilege('service_role','public.accept_business_invitation(uuid,uuid,text)','EXECUTE')
+     OR NOT has_function_privilege('service_role','public.revoke_business_invitation(uuid,uuid,text)','EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: RPCs de invitación expuestas a clientes o no disponibles al servidor.';
+  END IF;
+
+  v_role_helper := pg_get_functiondef('private.has_business_role(uuid,text[])'::regprocedure);
+  IF position('m.status = ''active''' IN lower(v_role_helper)) = 0 THEN
+    RAISE EXCEPTION 'FALLO: has_business_role no excluye membresías pendientes/suspendidas.';
+  END IF;
+
+  v_accept := pg_get_functiondef(
+    'public.accept_business_invitation(uuid,uuid,text)'::regprocedure
+  );
+  v_revoke := pg_get_functiondef(
+    'public.revoke_business_invitation(uuid,uuid,text)'::regprocedure
+  );
+
+  IF position('for update' IN lower(v_accept)) = 0
+     OR position('token_hash' IN lower(v_accept)) = 0
+     OR position('blocked_reason' IN lower(v_accept)) = 0
+     OR position('for update' IN lower(v_revoke)) = 0
+     OR position('auth_user_deleted' IN lower(v_revoke)) = 0 THEN
+    RAISE EXCEPTION 'FALLO: aceptación/revocación no verifican token, bloquean filas o preservan Auth.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE schemaname='public'
+      AND indexname='business_invitations_one_pending_email_idx'
+      AND indexdef ILIKE '%UNIQUE%'
+      AND indexdef ILIKE '%business_id%'
+      AND indexdef ILIKE '%email_normalized%'
+      AND indexdef ILIKE '%status = ''pending''%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: falta índice único para invitaciones pendientes por negocio/correo.';
+  END IF;
+END
+$verify_invitations$;
