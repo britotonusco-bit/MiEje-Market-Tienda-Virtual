@@ -15,6 +15,8 @@
   let blockRequestPageIndex = 0;
   let cachedProducts = [];
   const PANEL_PAGE_SIZE = 50;
+  const memberSelectStates = new Map();
+  const blockTargetPageState = { businessId: null, cursors: [null], page: 0 };
   let employeeOrderCursorStack = [null];
   let businessOrderCursorStack = [null];
   let businessOrderPageIndex = 0;
@@ -1169,31 +1171,62 @@
       : '<div class="empty">Selecciona un negocio para administrar sus usuarios y accesos. La información comercial permanece en su panel administrativo.</div>';
   }
 
-  async function loadTechnicalMembers(id, targetSelector = '#memberTargetSelect') {
-    const target = document.querySelector(targetSelector); if (!target) return;
+  async function loadTechnicalMembers(id, targetSelector = '#memberTargetSelect', reset = true) {
+    const target = document.querySelector(targetSelector);
+    if (!target) return;
+    const state = memberSelectStates.get(targetSelector) || { businessId: null, cursors: [null], page: 0 };
+    if (reset || state.businessId !== id) {
+      state.businessId = id;
+      state.cursors = [null];
+      state.page = 0;
+    }
+    memberSelectStates.set(targetSelector, state);
     target.innerHTML = '<option value="">Cargando cuentas…</option>';
-    if (!id) { target.innerHTML = '<option value="">Selecciona primero un negocio</option>'; return; }
+    if (!id) {
+      target.innerHTML = '<option value="">Selecciona primero un negocio</option>';
+      renderMemberSelectPager(target, state, () => {});
+      return;
+    }
     try {
-      const rows = [];
-      let cursor = null;
-      while (true) {
-        const result = await callTechnicalFunction({
-          action: 'list_business_members', business_id: id, limit: PANEL_PAGE_SIZE + 1,
-          before_created_at: cursor?.created_at || undefined,
-          before_id: cursor?.id || undefined
-        });
-        const fetched = result.members || [];
-        const pageRows = fetched.slice(0, PANEL_PAGE_SIZE);
-        rows.push(...pageRows);
-        if (fetched.length <= PANEL_PAGE_SIZE) break;
-        const last = pageRows[pageRows.length - 1];
-        if (!last) break;
-        cursor = { created_at: last.created_at, id: last.id };
-      }
+      const cursor = state.cursors[state.page];
+      const result = await callTechnicalFunction({
+        action: 'list_business_members', business_id: id, limit: PANEL_PAGE_SIZE + 1,
+        before_created_at: cursor?.created_at || undefined,
+        before_id: cursor?.id || undefined
+      });
+      const fetched = result.members || [];
+      const rows = fetched.slice(0, PANEL_PAGE_SIZE);
       target.innerHTML = '<option value="">Selecciona una cuenta</option>' + rows.map(m => `<option value="${esc(m.id)}" data-role="${esc(m.role)}" data-job-title="${esc(m.job_title || '')}">${esc(m.profiles?.display_name || shortId(m.user_id))} · ${esc(m.email || 'sin correo')} · ${m.role === 'business_admin' ? 'Administrador' : 'Empleado'} · ${esc(m.job_title || 'Cargo no registrado')}${m.status !== 'active' ? ' · Suspendido' : ''}</option>`).join('');
+      state.hasMore = fetched.length > PANEL_PAGE_SIZE;
+      state.last = rows[rows.length - 1] || null;
+      renderMemberSelectPager(target, state, direction => {
+        if (direction === 'next' && state.hasMore && state.last) {
+          state.cursors[state.page + 1] = { created_at: state.last.created_at, id: state.last.id };
+          state.page++;
+        } else if (direction === 'previous' && state.page > 0) state.page--;
+        void loadTechnicalMembers(id, targetSelector, false);
+      });
+      if (!rows.length) target.innerHTML = '<option value="">No hay cuentas en esta página</option>';
     } catch (error) {
       target.innerHTML = `<option value="">Error al cargar las cuentas: ${esc(error.message || 'Error de consulta')}</option>`;
+      renderMemberSelectPager(target, state, () => {});
     }
+  }
+
+  function renderMemberSelectPager(target, state, onPage) {
+    const parent = target.parentElement;
+    if (!parent) return;
+    let pager = parent.querySelector('[data-member-select-pager]');
+    if (!pager) {
+      pager = document.createElement('div');
+      pager.dataset.memberSelectPager = 'true';
+      pager.className = 'toolbar';
+      pager.style.marginTop = '8px';
+      target.insertAdjacentElement('afterend', pager);
+    }
+    pager.innerHTML = `<button type="button" class="small-button" data-member-prev ${state.page <= 0 ? 'disabled' : ''}>Anterior</button><span class="inline-note">Página ${state.page + 1} · máximo ${PANEL_PAGE_SIZE} cuentas</span><button type="button" class="small-button" data-member-next ${!state.hasMore ? 'disabled' : ''}>Siguiente</button>`;
+    pager.querySelector('[data-member-prev]')?.addEventListener('click', () => onPage('previous'));
+    pager.querySelector('[data-member-next]')?.addEventListener('click', () => onPage('next'));
   }
 
   function fillMemberAssignment() {
@@ -1784,7 +1817,7 @@
     message.className = error ? 'message error' : 'message success';
   }
 
-  async function loadBlockTargetUsers() {
+  async function loadBlockTargetUsers(reset = true) {
     const target = document.querySelector('#blockTargetUser');
     if (!target) return;
     if (panel !== 'business_admin' || !isBusinessOwner) {
@@ -1793,13 +1826,23 @@
       if (note) note.classList.remove('hidden');
       return;
     }
+    if (reset || blockTargetPageState.businessId !== businessId) {
+      blockTargetPageState.businessId = businessId;
+      blockTargetPageState.cursors = [null];
+      blockTargetPageState.page = 0;
+    }
     target.innerHTML = '<option value="">Cargando usuarios del negocio…</option>';
-    const { data, error } = await db.from('business_memberships')
-      .select('user_id,role,profiles(display_name)')
+    const cursor = blockTargetPageState.cursors[blockTargetPageState.page];
+    let query = db.from('business_memberships')
+      .select('id,user_id,role,created_at,profiles(display_name)')
       .eq('business_id', businessId)
       .eq('status', 'active')
       .neq('user_id', currentUser.id)
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(PANEL_PAGE_SIZE + 1);
+    if (cursor) query = query.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
+    const { data, error } = await query;
     if (error) {
       target.innerHTML = '<option value="">No se pudieron cargar los usuarios</option>';
       const message = document.querySelector('#blockRequestMessage');
@@ -1807,13 +1850,26 @@
       console.warn('Block request target users:', error);
       return;
     }
-    const users = data || [];
+    const fetched = data || [];
+    const users = fetched.slice(0, PANEL_PAGE_SIZE);
     target.innerHTML = '<option value="">Selecciona una cuenta</option>' + users.map(member => {
       const profile = Array.isArray(member.profiles) ? member.profiles[0] : member.profiles;
       const name = profile?.display_name || shortId(member.user_id);
       const role = member.role === 'business_admin' ? 'Administrador' : 'Empleado';
       return `<option value="${esc(member.user_id)}">${esc(name)} · ${role}</option>`;
     }).join('');
+    blockTargetPageState.hasMore = fetched.length > PANEL_PAGE_SIZE;
+    blockTargetPageState.last = users[users.length - 1] || null;
+    renderMemberSelectPager(target, blockTargetPageState, direction => {
+      if (direction === 'next' && blockTargetPageState.hasMore && blockTargetPageState.last) {
+        blockTargetPageState.cursors[blockTargetPageState.page + 1] = {
+          created_at: blockTargetPageState.last.created_at,
+          id: blockTargetPageState.last.id
+        };
+        blockTargetPageState.page++;
+      } else if (direction === 'previous' && blockTargetPageState.page > 0) blockTargetPageState.page--;
+      void loadBlockTargetUsers(false);
+    });
     if (!users.length) target.innerHTML = '<option value="">No hay otras cuentas activas en este negocio</option>';
   }
 
