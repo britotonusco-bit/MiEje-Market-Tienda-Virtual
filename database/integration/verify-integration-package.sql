@@ -688,6 +688,35 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'FALLO: la RPC de historial no valida sesión, perfil activo, propiedad y search_path seguro.';
   END IF;
+  
+  IF to_regprocedure('public.get_customer_order_history_page(integer,timestamptz,uuid)') IS NULL THEN
+    RAISE EXCEPTION 'FALLO: falta la RPC paginada del historial del cliente.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='public'
+      AND p.proname='get_customer_order_history_page'
+      AND p.prosecdef
+      AND p.proconfig @> ARRAY['search_path=""']::text[]
+      AND position('auth.uid()' IN lower(pg_get_functiondef(p.oid))) > 0
+      AND position('customer_user_id = v_actor' IN lower(pg_get_functiondef(p.oid))) > 0
+      AND position('is_blocked = false' IN lower(pg_get_functiondef(p.oid))) > 0
+      AND position('p_before_created_at' IN lower(pg_get_functiondef(p.oid))) > 0
+      AND position('p_before_order_id' IN lower(pg_get_functiondef(p.oid))) > 0
+      AND position('order by o.created_at desc, o.id desc' IN lower(pg_get_functiondef(p.oid))) > 0
+      AND position('p_limit + 1' IN lower(pg_get_functiondef(p.oid))) > 0
+  ) THEN
+    RAISE EXCEPTION 'FALLO: la RPC paginada debe validar sesión, propietario, cuenta activa y cursor compuesto.';
+  END IF;
+
+  IF NOT has_function_privilege('authenticated',
+       'public.get_customer_order_history_page(integer,timestamptz,uuid)','EXECUTE')
+     OR has_function_privilege('anon',
+       'public.get_customer_order_history_page(integer,timestamptz,uuid)','EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: permisos incorrectos en el historial paginado del cliente.';
+  END IF;
 
   IF NOT EXISTS (
     SELECT 1
