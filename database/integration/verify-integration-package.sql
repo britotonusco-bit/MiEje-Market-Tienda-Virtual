@@ -1908,6 +1908,9 @@ BEGIN
      OR position('audit_logs' IN pg_get_functiondef(
        'public.update_business_membership_assignment(uuid,text,text,uuid)'::regprocedure
      )) = 0
+     OR position('char_length(v_reason) < 5' IN pg_get_functiondef(
+       'public.suspend_business_membership(uuid,text,uuid)'::regprocedure
+     )) = 0
      OR position('FOR UPDATE' IN upper(pg_get_functiondef(
        'public.suspend_business_membership(uuid,text,uuid)'::regprocedure
      ))) = 0
