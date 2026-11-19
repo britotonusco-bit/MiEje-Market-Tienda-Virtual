@@ -195,3 +195,17 @@ La revisión encontró que el historial necesitaba dos protecciones adicionales:
 **Criterio de conciliación:** para cada producto, `products.inventory` debe coincidir con la suma de `inventory_movements.quantity_delta`. Un resultado distinto de cero requiere investigar el historial y la secuencia de instalación; no se debe inventar un ajuste para ocultar la diferencia.
 
 **Pendiente:** ejecutar primero la migración de movimientos, luego la línea base, y finalmente la consulta de conciliación en staging. También faltan pruebas de concurrencia, rollback y permisos con dos negocios. No se ejecutó ninguna de estas operaciones en la base activa.
+
+### 17. Integridad de las líneas históricas de pedidos
+
+La revisión confirmó que el checkout ya conserva `product_name` y `unit_price` como datos snapshot en `order_items`. Por eso, los cambios posteriores al nombre o precio del producto no deben reescribir lo que el cliente compró. Se reforzó el diseño:
+
+- La FK `order_items_product_id_fkey` conserva `ON DELETE RESTRICT`: un producto que ya aparece en un pedido no puede borrarse físicamente. Debe desactivarse para dejar de venderlo.
+- El nuevo trigger `order_items_history_guard` impide UPDATE y DELETE de las líneas históricas.
+- Al insertar una línea, el trigger exige un `product_id` válido y verifica que el producto pertenezca al mismo negocio que el pedido.
+- La aprobación de una cancelación ahora se detiene si encuentra líneas históricas con `product_id IS NULL`. Esto protege pedidos antiguos afectados por la FK anterior `ON DELETE SET NULL`: no se cancela ni se declara restituido inventario que no puede identificarse con seguridad.
+- El verificador integral comprueba el trigger, la FK restrictiva, la validación de negocio y el bloqueo de cancelaciones con referencias ausentes. También comprueba que checkout conserve nombre y precio en la definición de la RPC.
+
+**Limitación importante:** las líneas históricas que ya perdieron su `product_id` no se pueden reconstruir automáticamente con certeza. Deben identificarse y resolverse mediante revisión del negocio antes de aprobar su cancelación. No se deben asociar a productos por similitud de nombre ni inventar cantidades.
+
+**Pendiente:** ejecutar las migraciones y pruebas en staging, incluyendo cambio de nombre/precio posterior a una venta, intento de borrar producto vendido, inserción de línea con producto de otro negocio, intento de editar/borrar una línea histórica y cancelación de un pedido antiguo con referencia NULL. No se ejecutó SQL en la base activa.
