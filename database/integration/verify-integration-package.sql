@@ -53,6 +53,12 @@ BEGIN
     RAISE EXCEPTION 'FALLO: la RPC no registra la fecha de consentimiento desde PostgreSQL.';
   END IF;
 
+  IF position('privacy-2026-11-19-v1' IN pg_get_functiondef(
+       'public.create_public_order_for_customer_with_payment_method(uuid,uuid,uuid,text,text,text,text,text,text,boolean,text,jsonb)'::regprocedure
+     )) = 0 THEN
+    RAISE EXCEPTION 'FALLO: la RPC no exige la versión de aviso de privacidad configurada para el checkout.';
+  END IF;
+
   IF to_regclass('public.customer_favorites') IS NULL
      OR to_regclass('private.checkout_idempotency') IS NULL
      OR to_regclass('private.checkout_rate_limit_reservations') IS NULL
