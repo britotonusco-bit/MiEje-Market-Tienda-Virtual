@@ -612,3 +612,6 @@ Los listados de postulaciones laborales y solicitudes de cancelación del panel 
 
 
 Gastos del administrador, movimientos de inventario y favoritos del cliente ya tienen paginación por cursor (50 filas). Los gastos ordenan por `expense_date + id`; inventario y favoritos por `created_at + id`. Los movimientos consultan nombres de productos solo para los IDs de la página. Pendientes: historial de pedidos de cliente, auditoría, reembolsos y catálogo público.
+
+
+El listado de auditoría general también incorpora cursor `created_at + id`. El panel técnico envía el cursor a la Edge Function, que valida fecha ISO e ID UUID y conserva límite máximo 100 para llamadas antiguas sin cursor. El panel administrativo pagina la consulta directa con el filtro de negocio/actor. El despliegue de la Edge Function sigue pendiente.
