@@ -144,3 +144,16 @@ La implementación está en rama y requiere pruebas de integración con Supabase
 En `app.js` se sustituyó el filtrado completo de productos para cada negocio por una agrupación previa en un `Map` indexado por `business_id`. La asignación de productos a negocios pasa de recorrer repetidamente el catálogo a una pasada de agrupación y consultas directas por negocio. Esto reduce trabajo en memoria cuando aumenta el número de negocios y productos.
 
 La carga remota todavía conserva los topes de 200 negocios, 1.000 productos y 500 publicaciones; no se considera resuelto el límite de catálogo. No se añadieron solicitudes de paginación al storefront en este cambio porque el carrito, la ficha de producto, favoritos y el asistente dependen de tener los productos de cada tienda disponibles localmente. Ese cambio requiere una estrategia de carga por tienda y persistencia de producto seleccionada para el carrito.
+
+
+## 13. Paginación de pedidos del administrador
+
+Se añadió el RPC borrador `get_business_admin_order_financials_page` y se conectó a `panel-live.js`:
+- La página financiera es la fuente de orden y cursor.
+- Se solicitan 51 filas para mostrar 50 y detectar si existe página siguiente.
+- El cursor está compuesto por `created_at + order_id`, con orden descendente estable.
+- Los datos operativos (cliente, entrega y líneas) se recuperan solo para los IDs financieros de esa página y se vuelven a filtrar por `business_id`.
+- Si falta alguno de los pedidos operativos correspondientes, la interfaz muestra error y no presenta una página parcialmente cruzada.
+- La función comprueba sesión, negocio activo, rol `business_admin` y que el cursor llegue completo.
+
+El RPC es un borrador SQL adicional. Debe aplicarse primero en staging, probarse con timestamps repetidos, páginas vacías, más de 50 pedidos, cambios concurrentes y usuarios de dos negocios. La función antigua de hasta 100 registros se conserva por compatibilidad, pero el panel utiliza la nueva función paginada.
