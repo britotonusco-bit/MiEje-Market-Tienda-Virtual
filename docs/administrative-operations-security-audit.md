@@ -116,3 +116,72 @@ La función desplegada no contiene acción `deleteUser` ni eliminación global d
 La rama tiene un diseño transaccional más seguro, pero la función activa sigue siendo la versión 6, con escrituras directas y sin las RPC ni el trigger de último administrador. El historial de auditoría activo permite alteración por service_role. Estos hallazgos impiden dar por cerrada la seguridad administrativa de producción.
 
 No se ejecutó SQL de escritura, no se desplegó código y no se modificaron datos reales.
+
+
+## Revisión adicional — moderación y solicitudes de bloqueo
+
+### MOD-01 — La RPC de moderación de la rama bloquea y audita de forma atómica
+
+`moderate_business_content_transactionally`:
+- Valida que el actor sea propietario técnico y no esté bloqueado.
+- Bloquea la publicación con `FOR UPDATE`.
+- Acepta únicamente `approved` o `rejected`.
+- Rechazar retira la publicación de la vista pública.
+- Repetir exactamente la misma decisión y nota no vuelve a escribir ni genera un segundo evento.
+- Un cambio real actualiza moderación y escribe auditoría en la misma transacción.
+
+La función no publica automáticamente al aprobar: conserva el valor actual de `is_published`. La aprobación de moderación y la decisión comercial de publicar quedan separadas.
+
+### MOD-02 — La política activa de contenido conserva lectura global técnica
+
+En Supabase activo, `business_content_pages_admin_read` permite SELECT mediante `private.is_platform_owner()`. La rama reemplaza esa política por:
+- Lectura pública de publicaciones aprobadas y publicadas en negocios activos.
+- Lectura administrativa únicamente del negocio activo propio.
+
+La RPC técnica de moderación no está instalada en el proyecto activo. La tabla sí existe y tiene RLS, pero no se verificó moderación segura de extremo a extremo en producción.
+
+### BLK-01 — Las solicitudes de bloqueo no existen todavía en Supabase activo
+
+Las consultas de solo lectura devolvieron:
+- `public.access_block_requests`: inexistente.
+- `public.resolve_access_block_request(uuid,text,text,uuid)`: inexistente.
+
+Por tanto, la pantalla/acción de solicitudes preparada en la rama no debe considerarse operativa en el proyecto activo.
+
+### BLK-02 — Controles del borrador de solicitudes
+
+La rama:
+- Solo permite a un administrador activo solicitar bloqueo de un integrante activo del mismo negocio.
+- No permite que el administrador solicite su propio bloqueo.
+- Limita la escritura autenticada a negocio, solicitante, objetivo y motivo.
+- Usa índice único parcial para impedir dos solicitudes pendientes del mismo usuario/negocio.
+- Solo permite resolver al propietario técnico no bloqueado.
+- Bloquea la solicitud y, para aprobación, el negocio y la membresía.
+- Evita bloquear al último administrador activo.
+- Suspende únicamente la membresía del negocio indicado, no el perfil global.
+- Registra la decisión en `audit_logs` dentro de la transacción.
+- Una solicitud ya resuelta no se procesa de nuevo; la repetición devuelve conflicto y no genera otro evento.
+
+Las solicitudes globales no se pueden crear por la política: `business_id` debe ser distinto de NULL. Si el negocio se elimina, la FK deja la solicitud histórica con `business_id = NULL`; puede rechazarse, pero no aprobarse porque ya no existe una membresía de ese negocio.
+
+### BLK-03 — Verificador reforzado
+
+Se amplió `verify-integration-package.sql` para comprobar:
+- Índice único parcial de solicitudes pendientes por negocio/usuario.
+- Privilegios de inserción por columna, sin permitir que el usuario fije estado o datos de resolución.
+- RPC de resolución como SECURITY INVOKER, `search_path` vacío, bloqueo de fila, validación de propietario, protección del último administrador y auditoría.
+- RPC de moderación con bloqueo, autorización y auditoría.
+
+### Pruebas pendientes
+
+- Enviar dos solicitudes simultáneas para el mismo integrante/negocio; debe sobrevivir una sola.
+- Intentar insertar la solicitud con otro `requested_by`, estado aprobado o `resolved_by`; debe rechazarse.
+- Resolver simultáneamente una misma solicitud con aprobación y rechazo; solo una decisión debe completarse.
+- Repetir la resolución tras una respuesta perdida; debe devolver conflicto sin duplicar auditoría ni volver a suspender.
+- Intentar bloquear al último administrador; la transacción debe revertirse.
+- Confirmar que una cuenta suspendida en un negocio conserva su membresía en los demás.
+- Moderar dos veces la misma publicación con la misma decisión/nota; la segunda llamada no debe generar auditoría adicional.
+- Moderar con actor AAL1 o perfil bloqueado; la Edge Function debe rechazarlo.
+- Comprobar que un administrador de negocio no puede leer publicaciones privadas de otro negocio ni datos de moderación globales.
+
+No se ejecutaron migraciones, escrituras SQL ni despliegues.
