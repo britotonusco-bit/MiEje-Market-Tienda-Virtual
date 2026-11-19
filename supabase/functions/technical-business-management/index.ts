@@ -419,6 +419,11 @@ Deno.serve(async (req: Request) => {
         .order("id", { ascending: false })
         .limit(limit);
       if (businessId) query = query.eq("business_id", businessId);
+      const actionFilter = textValue(body.action_filter, 40);
+      if (actionFilter && actionFilter !== "panel_access") {
+        return reply(400, { error: "El filtro de auditoría solicitado no es válido." });
+      }
+      if (actionFilter === "panel_access") query = query.in("action", ["panel.login", "log_login", "panel_open"]);
       if (beforeCreatedAt && beforeId) {
         query = query.or(`created_at.lt.${beforeCreatedAt},and(created_at.eq.${beforeCreatedAt},id.lt.${beforeId})`);
       }
