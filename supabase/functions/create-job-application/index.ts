@@ -75,7 +75,15 @@ Deno.serve(async (req: Request) => {
 
   let body: Record<string, unknown>;
   try {
-    body = await req.json();
+    const rawBody = await req.text();
+    if (new TextEncoder().encode(rawBody).byteLength > 65536) {
+      return reply(413, { error: "La solicitud supera el tamaño permitido." });
+    }
+    const parsed: unknown = JSON.parse(rawBody);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return reply(400, { error: "La solicitud debe contener un objeto JSON." });
+    }
+    body = parsed as Record<string, unknown>;
   } catch {
     return reply(400, { error: "La solicitud no contiene JSON válido." });
   }
