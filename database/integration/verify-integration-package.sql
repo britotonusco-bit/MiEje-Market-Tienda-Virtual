@@ -34,6 +34,15 @@ BEGIN
     RAISE EXCEPTION 'FALLO: falta la evidencia versionada y fechada del consentimiento de privacidad en pedidos.';
   END IF;
 
+  IF has_column_privilege('authenticated','public.orders','privacy_consent','SELECT')
+     OR has_column_privilege('authenticated','public.orders','privacy_consent_version','SELECT')
+     OR has_column_privilege('authenticated','public.orders','privacy_consent_at','SELECT')
+     OR has_column_privilege('authenticated','public.orders','privacy_consent','UPDATE')
+     OR has_column_privilege('authenticated','public.orders','privacy_consent_version','UPDATE')
+     OR has_column_privilege('authenticated','public.orders','privacy_consent_at','UPDATE') THEN
+    RAISE EXCEPTION 'FALLO: los usuarios autenticados no deben leer ni modificar directamente la evidencia del consentimiento.';
+  END IF;
+
   IF to_regprocedure('public.create_public_order_for_customer_with_payment_method(uuid,uuid,uuid,text,text,text,text,text,text,boolean,text,jsonb)') IS NULL
      OR NOT has_function_privilege('service_role',
        'public.create_public_order_for_customer_with_payment_method(uuid,uuid,uuid,text,text,text,text,text,text,boolean,text,jsonb)','EXECUTE')
