@@ -81,6 +81,7 @@ DECLARE
   v_email text := pg_catalog.lower(pg_catalog.btrim(p_email));
   v_job_title text := pg_catalog.btrim(p_job_title);
   v_invitation public.business_invitations%ROWTYPE;
+  v_expired_id uuid;
 BEGIN
   IF p_business_id IS NULL OR p_actor_id IS NULL
      OR p_email IS NULL OR p_role IS NULL OR p_job_title IS NULL
@@ -115,6 +116,25 @@ BEGIN
     RAISE EXCEPTION 'No se pueden invitar usuarios a un negocio inactivo.'
       USING ERRCODE = '23514';
   END IF;
+
+  -- Libera invitaciones vencidas del mismo correo antes de crear una nueva.
+  FOR v_expired_id IN
+    UPDATE public.business_invitations
+    SET status = 'expired', updated_at = pg_catalog.now()
+    WHERE business_id = p_business_id
+      AND email_normalized = v_email
+      AND status = 'pending'
+      AND expires_at <= pg_catalog.now()
+    RETURNING id
+  LOOP
+    INSERT INTO public.audit_logs (
+      business_id, actor_id, action, entity_type, entity_id, details
+    ) VALUES (
+      p_business_id, NULL, 'business.invitation_expired',
+      'business_invitation', v_expired_id::text,
+      pg_catalog.jsonb_build_object('source', 'prepare_replacement')
+    );
+  END LOOP;
 
   INSERT INTO public.business_invitations (
     business_id, email_normalized, role, job_title,
@@ -431,6 +451,63 @@ BEGIN
 END;
 $function$;
 
+-- Marca como vencida una invitación cuyo plazo ya terminó.
+-- Conserva la membresía suspendida y libera el índice único de pendientes.
+CREATE OR REPLACE FUNCTION public.expire_business_invitation(
+  p_invitation_id uuid
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_business_id uuid;
+  v_invitation public.business_invitations%ROWTYPE;
+BEGIN
+  SELECT i.business_id INTO v_business_id
+  FROM public.business_invitations i
+  WHERE i.id = p_invitation_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'No se encontró la invitación.' USING ERRCODE = 'P0002';
+  END IF;
+
+  PERFORM 1 FROM public.businesses b
+  WHERE b.id = v_business_id
+  FOR UPDATE;
+
+  SELECT i.* INTO v_invitation
+  FROM public.business_invitations i
+  WHERE i.id = p_invitation_id AND i.business_id = v_business_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'La invitación cambió durante la operación.'
+      USING ERRCODE = '40001';
+  END IF;
+
+  IF v_invitation.status = 'pending'
+     AND v_invitation.expires_at <= pg_catalog.now() THEN
+    UPDATE public.business_invitations
+    SET status = 'expired', updated_at = pg_catalog.now()
+    WHERE id = v_invitation.id;
+
+    INSERT INTO public.audit_logs (
+      business_id, actor_id, action, entity_type, entity_id, details
+    ) VALUES (
+      v_business_id, NULL, 'business.invitation_expired',
+      'business_invitation', v_invitation.id::text,
+      pg_catalog.jsonb_build_object('source', 'expiry_check')
+    );
+    RETURN pg_catalog.jsonb_build_object('ok', true, 'status', 'expired');
+  END IF;
+
+  RETURN pg_catalog.jsonb_build_object(
+    'ok', true, 'status', v_invitation.status
+  );
+END;
+$function$;
+
 -- Revoca únicamente la invitación/membresía de este negocio. Nunca elimina auth.users.
 CREATE OR REPLACE FUNCTION public.revoke_business_invitation(
   p_invitation_id uuid,
@@ -543,13 +620,13 @@ REVOKE ALL ON FUNCTION public.prepare_business_invitation(uuid,text,text,text,te
 REVOKE ALL ON FUNCTION public.attach_business_invitation_user(uuid,uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.mark_business_invitation_failed(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.accept_business_invitation(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION public.revoke_business_invitation(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.expire_business_invitation(uuid) FROM PUBLIC, anon, authenticated;\nREVOKE ALL ON FUNCTION public.revoke_business_invitation(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz) TO service_role;
 GRANT EXECUTE ON FUNCTION public.attach_business_invitation_user(uuid,uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.mark_business_invitation_failed(uuid,uuid,text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.accept_business_invitation(uuid,uuid,text) TO service_role;
-GRANT EXECUTE ON FUNCTION public.revoke_business_invitation(uuid,uuid,text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.expire_business_invitation(uuid) TO service_role;\nGRANT EXECUTE ON FUNCTION public.revoke_business_invitation(uuid,uuid,text) TO service_role;
 
 -- Verificación manual posterior en staging:
 -- 1) Una invitación pendiente produce membresía suspended con la marca exacta.
