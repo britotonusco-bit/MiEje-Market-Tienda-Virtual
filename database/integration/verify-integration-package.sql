@@ -1897,6 +1897,35 @@ BEGIN
     RAISE EXCEPTION 'FALLO: el cambio de estado no conserva en auditoría el motivo de la decisión, incluida la reactivación.';
   END IF;
 
+  -- Los cambios de rol y estado deben serializarse por negocio y proteger
+  -- al último administrador activo dentro de la misma transacción.
+  IF position('FOR UPDATE' IN upper(pg_get_functiondef(
+       'public.update_business_membership_assignment(uuid,text,text,uuid)'::regprocedure
+     ))) = 0
+     OR position('v_remaining_admins' IN pg_get_functiondef(
+       'public.update_business_membership_assignment(uuid,text,text,uuid)'::regprocedure
+     )) = 0
+     OR position('audit_logs' IN pg_get_functiondef(
+       'public.update_business_membership_assignment(uuid,text,text,uuid)'::regprocedure
+     )) = 0
+     OR position('FOR UPDATE' IN upper(pg_get_functiondef(
+       'public.suspend_business_membership(uuid,text,uuid)'::regprocedure
+     ))) = 0
+     OR position('v_remaining_admins' IN pg_get_functiondef(
+       'public.suspend_business_membership(uuid,text,uuid)'::regprocedure
+     )) = 0
+     OR position('audit_logs' IN pg_get_functiondef(
+       'public.suspend_business_membership(uuid,text,uuid)'::regprocedure
+     )) = 0
+     OR position('FOR UPDATE' IN upper(pg_get_functiondef(
+       'public.reactivate_business_membership(uuid,text,uuid)'::regprocedure
+     ))) = 0
+     OR position('audit_logs' IN pg_get_functiondef(
+       'public.reactivate_business_membership(uuid,text,uuid)'::regprocedure
+     )) = 0 THEN
+    RAISE EXCEPTION 'FALLO: las RPC de membresías deben bloquear filas, proteger el último administrador y auditar los cambios.';
+  END IF;
+
   -- Las RPC de administración deben ser SECURITY INVOKER con search_path vacío.
   -- La autorización procede del actor validado por la Edge Function y del
   -- service_role; no deben añadir un segundo bypass SECURITY DEFINER.
