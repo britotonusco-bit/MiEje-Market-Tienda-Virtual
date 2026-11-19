@@ -3,6 +3,9 @@
   const message = $("#customerMessage");
   let client;
   let activeUserId = null;
+  const FAVORITES_PAGE_SIZE = 50;
+  let favoriteCursorStack = [null];
+  let favoritePageIndex = 0;
 
   function say(text, kind = "") {
     message.textContent = text;
@@ -25,6 +28,8 @@
   async function showSession(session) {
     if (!session) {
       activeUserId = null;
+      favoriteCursorStack = [null];
+      favoritePageIndex = 0;
       $("#accountAccess").hidden = false;
       $("#customerDashboard").hidden = true;
       $("#customerOrders").replaceChildren();
@@ -61,25 +66,32 @@
         <ul>${(order.items || []).map(item => `<li>${escapeHtml(item.product_name)} × ${Number(item.quantity)} — ${money(item.line_total ?? Number(item.unit_price) * Number(item.quantity))}</li>`).join("")}</ul>
       </article>`).join("");
   }
-  async function loadFavorites(userId) {
+  async function loadFavorites(userId, reset = true) {
     const target = $("#customerFavorites");
+    if (reset) { favoriteCursorStack = [null]; favoritePageIndex = 0; }
     target.innerHTML = '<p class="muted">Cargando favoritos…</p>';
-    const { data, error } = await client.from("customer_favorites")
+    let query = client.from("customer_favorites")
       .select("id,product_id,created_at,products(id,name,price,image_url,business_id)")
       .eq("user_id", userId)
-      .order("created_at", { ascending:false });
+      .order("created_at", { ascending:false }).order("id", { ascending:false })
+      .limit(FAVORITES_PAGE_SIZE + 1);
+    const cursor = favoriteCursorStack[favoritePageIndex];
+    if (cursor) query = query.or("created_at.lt." + cursor.created_at + ",and(created_at.eq." + cursor.created_at + ",id.lt." + cursor.id + ")");
+    const { data, error } = await query;
     if (activeUserId !== userId) return;
     if (error) {
       target.textContent = "No fue posible cargar los favoritos. Comprueba que la migración de clientes esté aplicada.";
       console.warn("Customer favorites:", error);
       return;
     }
-    const favorites = data || [];
-    if (!favorites.length) {
+    const fetchedRows = data || [];
+    const favorites = fetchedRows.slice(0, FAVORITES_PAGE_SIZE);
+    if (!favorites.length && favoritePageIndex === 0) {
       target.innerHTML = '<p class="muted">Aún no has guardado productos favoritos.</p>';
       return;
     }
-    target.innerHTML = favorites.map(item => {
+    if (!favorites.length) target.innerHTML = '<p class="muted">No hay más favoritos en esta página.</p>';
+    if (favorites.length) target.innerHTML = favorites.map(item => {
       const product = item.products;
       return `
         <article class="security-note">
@@ -88,6 +100,33 @@
           <button class="button secondary" type="button" data-remove-favorite="${escapeHtml(item.id)}">Quitar de favoritos</button>
         </article>`;
     }).join("");
+    const pager = document.createElement("div");
+    pager.className = "form-grid";
+    pager.style.alignItems = "center";
+    pager.style.marginTop = "12px";
+    const previous = document.createElement("button");
+    previous.type = "button";
+    previous.className = "button secondary";
+    previous.textContent = "Anterior";
+    previous.disabled = favoritePageIndex === 0;
+    previous.addEventListener("click", () => { favoritePageIndex--; void loadFavorites(userId, false); });
+    const label = document.createElement("span");
+    label.className = "muted";
+    label.textContent = "Página " + (favoritePageIndex + 1);
+    const next = document.createElement("button");
+    next.type = "button";
+    next.className = "button secondary";
+    next.textContent = "Siguiente";
+    next.disabled = fetchedRows.length <= FAVORITES_PAGE_SIZE;
+    next.addEventListener("click", () => {
+      const last = favorites[favorites.length - 1];
+      if (!last) return;
+      favoriteCursorStack[favoritePageIndex + 1] = { created_at: last.created_at, id: last.id };
+      favoritePageIndex++;
+      void loadFavorites(userId, false);
+    });
+    pager.append(previous, label, next);
+    target.appendChild(pager);
   }
 
   document.addEventListener("DOMContentLoaded", async () => {
