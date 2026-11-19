@@ -113,18 +113,31 @@ BEGIN
     RAISE EXCEPTION 'Las notas no pueden superar 2000 caracteres.' USING ERRCODE = '22023';
   END IF;
 
+  -- Leer primero el negocio sin bloquear. Una cuenta ajena no debe poder
+  -- retener locks de pedidos de otra tienda conociendo su identificador.
+  SELECT o.business_id INTO v_order.business_id
+  FROM public.orders o
+  WHERE o.id = p_order_id;
+
+  IF NOT FOUND
+     OR NOT private.business_is_active(v_order.business_id)
+     OR NOT private.has_business_role(v_order.business_id, ARRAY['business_admin']::text[]) THEN
+    RAISE EXCEPTION 'No se encontró el pedido o no tienes permiso para procesarlo.'
+      USING ERRCODE = '42501';
+  END IF;
+
+  -- Después de autorizar, bloquear y volver a comprobar el mismo negocio.
   SELECT * INTO v_order
   FROM public.orders
   WHERE id = p_order_id
+    AND business_id = v_order.business_id
   FOR UPDATE;
 
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'No se encontró el pedido.' USING ERRCODE = 'P0002';
-  END IF;
-
-  IF NOT private.business_is_active(v_order.business_id)
+  IF NOT FOUND
+     OR NOT private.business_is_active(v_order.business_id)
      OR NOT private.has_business_role(v_order.business_id, ARRAY['business_admin']::text[]) THEN
-    RAISE EXCEPTION 'Solo el administrador activo de este negocio puede confirmar pagos.' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'El pedido cambió o ya no tienes permiso para procesarlo.'
+      USING ERRCODE = '42501';
   END IF;
 
   IF v_order.status = 'cancelled' OR v_order.payment_status IN ('refunded','failed') THEN
