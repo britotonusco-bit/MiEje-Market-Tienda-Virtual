@@ -17,6 +17,10 @@
   let jobApplicationPageIndex = 0;
   let cancellationCursorStack = [null];
   let cancellationPageIndex = 0;
+  let expenseCursorStack = [null];
+  let expensePageIndex = 0;
+  let inventoryCursorStack = [null];
+  let inventoryPageIndex = 0;
   let employeeOrderPageIndex = 0;
   let productCursorStack = [null];
   let productPageIndex = 0;
@@ -337,27 +341,46 @@
     )+'<p class="muted">Periodo: '+esc(data.start_date)+' a '+esc(data.end_date)+'. '+esc(data.basis)+'</p>';
   }
 
-  async function loadBusinessExpenses() {
+  async function loadBusinessExpenses(reset = true) {
     const target = document.querySelector('#businessExpensesContainer');
     if (!target || !businessId || panel !== 'business_admin') return;
+    if (reset) { expenseCursorStack = [null]; expensePageIndex = 0; }
     target.innerHTML = '<div class="empty">Cargando gastos…</div>';
-    const { data, error } = await db.from('business_expenses')
+    let query = db.from('business_expenses')
       .select('id,expense_date,category,description,amount,payment_status,payment_method,transaction_reference,supplier,receipt_path,notes,paid_at,status,void_reason,voided_at,created_at')
       .eq('business_id', businessId)
-      .order('expense_date', { ascending: false })
-      .limit(250);
+      .order('expense_date', { ascending: false }).order('id', { ascending: false })
+      .limit(PANEL_PAGE_SIZE + 1);
+    const cursor = expenseCursorStack[expensePageIndex];
+    if (cursor) query = query.or('expense_date.lt.' + cursor.expense_date + ',and(expense_date.eq.' + cursor.expense_date + ',id.lt.' + cursor.id + ')');
+    const { data, error } = await query;
     if (error) {
       target.innerHTML = '<div class="empty">No se pudieron cargar los gastos. Comprueba que las políticas de lectura del administrador estén aplicadas. '+esc(error.message)+'</div>';
       return;
     }
-    renderBusinessExpenses(data || []);
+    const fetchedRows = data || [];
+    const rows = fetchedRows.slice(0, PANEL_PAGE_SIZE);
+    renderBusinessExpenses(rows, {
+      page: expensePageIndex + 1,
+      canPrevious: expensePageIndex > 0,
+      hasMore: fetchedRows.length > PANEL_PAGE_SIZE,
+      previous: () => { expensePageIndex--; void loadBusinessExpenses(false); },
+      next: () => {
+        const last = rows[rows.length - 1];
+        if (!last) return;
+        expenseCursorStack[expensePageIndex + 1] = { expense_date: last.expense_date, id: last.id };
+        expensePageIndex++;
+        void loadBusinessExpenses(false);
+      }
+    });
   }
 
-  function renderBusinessExpenses(items) {
+  function renderBusinessExpenses(items, pageInfo = null) {
     const target = document.querySelector('#businessExpensesContainer');
     if (!target) return;
     if (!items.length) {
       target.innerHTML = '<div class="empty">Todavía no hay gastos registrados en este negocio.</div>';
+      if (pageInfo) appendCursorPager(target, pageInfo);
       return;
     }
     const rows = items.map(item => {
@@ -375,7 +398,8 @@
         : 'Pendiente';
       return '<tr><td>'+esc(item.expense_date)+'</td><td>'+esc(paidDate)+'</td><td><strong>'+esc(item.description)+'</strong><br><small>'+esc(item.category)+(item.supplier ? ' · '+esc(item.supplier) : '')+'</small></td><td>'+esc(money(item.amount))+'</td><td>'+esc(status)+'</td><td>'+esc(payment)+(item.transaction_reference ? '<br><small>Ref.: '+esc(item.transaction_reference)+'</small>' : '')+'</td><td>'+receipt+'</td><td>'+actions+(item.status === 'voided' ? '<small>Motivo: '+esc(item.void_reason || '—')+'</small>' : '')+'</td></tr>';
     });
-    target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha del gasto</th><th>Fecha de pago</th><th>Detalle</th><th>Valor</th><th>Estado</th><th>Pago</th><th>Comprobante</th><th>Acciones</th></tr></thead><tbody>'+rows.join('')+'</tbody></table></div><p class="muted">Se muestran hasta 250 registros recientes. El reporte financiero agrupa los gastos por fecha de pago, no por fecha del gasto. Los gastos anulados se conservan en el historial y no se incluyen como gastos pagados.</p>';
+    target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha del gasto</th><th>Fecha de pago</th><th>Detalle</th><th>Valor</th><th>Estado</th><th>Pago</th><th>Comprobante</th><th>Acciones</th></tr></thead><tbody>'+rows.join('')+'</tbody></table></div><p class="muted">Se muestran 50 registros por página. El reporte financiero agrupa los gastos por fecha de pago, no por fecha del gasto. Los gastos anulados se conservan en el historial y no se incluyen como gastos pagados.</p>';
+    if (pageInfo) appendCursorPager(target, pageInfo);
   }
 
   function handleExpenseControlChange(event) {
@@ -876,29 +900,41 @@
     });
   }
 
-  async function loadInventoryMovements() {
+  async function loadInventoryMovements(reset = true) {
     const target = document.querySelector('#inventoryMovementsContainer');
     if (!target) return;
+    if (reset) { inventoryCursorStack = [null]; inventoryPageIndex = 0; }
     target.innerHTML = '<div class="empty">Cargando historial de inventario…</div>';
-    const { data, error } = await db.from('inventory_movements')
+    let query = db.from('inventory_movements')
       .select('id,product_id,movement_type,quantity_before,quantity_after,quantity_delta,reason,created_at')
       .eq('business_id', businessId)
-      .order('created_at', { ascending: false })
-      .limit(100);
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+      .limit(PANEL_PAGE_SIZE + 1);
+    const cursor = inventoryCursorStack[inventoryPageIndex];
+    if (cursor) query = query.or('created_at.lt.' + cursor.created_at + ',and(created_at.eq.' + cursor.created_at + ',id.lt.' + cursor.id + ')');
+    const { data, error } = await query;
     if (error) return showError(target, error);
-    const productNames = new Map(cachedProducts.map(product => [product.id, product.name]));
+    const fetchedRows = data || [];
+    const rows = fetchedRows.slice(0, PANEL_PAGE_SIZE);
+    const productIds = [...new Set(rows.map(row => row.product_id).filter(Boolean))];
+    const productResult = productIds.length
+      ? await db.from('products').select('id,name').eq('business_id', businessId).in('id', productIds)
+      : { data: [], error: null };
+    if (productResult.error) return showError(target, productResult.error);
+    const productNames = new Map((productResult.data || []).map(product => [product.id, product.name]));
     const labels = {
       initial: 'Inventario inicial',
       adjustment: 'Ajuste manual',
       sale: 'Venta',
       cancellation_return: 'Devolución por cancelación'
     };
-    if (!data?.length) {
+    if (!rows.length && inventoryPageIndex === 0) {
       target.innerHTML = '<div class="empty">Todavía no hay movimientos registrados. Los movimientos aparecerán cuando se cree un producto o cambien sus existencias.</div>';
       return;
     }
-    target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th>Antes</th><th>Después</th><th>Variación</th><th>Motivo</th></tr></thead><tbody>' +
-      data.map(row => {
+    if (!rows.length) target.innerHTML = '<div class="empty">No hay más movimientos en esta página.</div>';
+    if (rows.length) target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th>Antes</th><th>Después</th><th>Variación</th><th>Motivo</th></tr></thead><tbody>' +
+      rows.map(row => {
         const delta = Number(row.quantity_delta);
         const deltaText = (delta > 0 ? '+' : '') + number(delta);
         const dateText = new Date(row.created_at).toLocaleString('es-CO', {
@@ -910,6 +946,19 @@
           number(row.quantity_before) + '</td><td>' + number(row.quantity_after) +
           '</td><td>' + esc(deltaText) + '</td><td>' + esc(row.reason) + '</td></tr>';
       }).join('') + '</tbody></table></div>';
+    appendCursorPager(target, {
+      page: inventoryPageIndex + 1,
+      canPrevious: inventoryPageIndex > 0,
+      hasMore: fetchedRows.length > PANEL_PAGE_SIZE,
+      previous: () => { inventoryPageIndex--; void loadInventoryMovements(false); },
+      next: () => {
+        const last = rows[rows.length - 1];
+        if (!last) return;
+        inventoryCursorStack[inventoryPageIndex + 1] = { created_at: last.created_at, id: last.id };
+        inventoryPageIndex++;
+        void loadInventoryMovements(false);
+      }
+    });
   }
 
   async function loadTechnical() {
