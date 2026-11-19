@@ -34,6 +34,39 @@ CREATE TABLE IF NOT EXISTS public.inventory_movements (
     )
 );
 
+-- CREATE TABLE IF NOT EXISTS no añade constraints a tablas ya existentes.
+-- Validar el historial previo antes de instalar la regla de dirección.
+DO $inventory_direction$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM public.inventory_movements
+    WHERE NOT (
+      (movement_type = 'initial' AND quantity_delta > 0)
+      OR (movement_type = 'sale' AND quantity_delta < 0)
+      OR (movement_type = 'cancellation_return' AND quantity_delta > 0)
+      OR (movement_type = 'adjustment' AND quantity_delta <> 0)
+    )
+  ) THEN
+    RAISE EXCEPTION 'Hay movimientos históricos cuya dirección no coincide con su tipo. Revisar antes de aplicar la restricción.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.inventory_movements'::regclass
+      AND conname = 'inventory_movements_direction_check'
+  ) THEN
+    ALTER TABLE public.inventory_movements
+      ADD CONSTRAINT inventory_movements_direction_check
+      CHECK (
+        (movement_type = 'initial' AND quantity_delta > 0)
+        OR (movement_type = 'sale' AND quantity_delta < 0)
+        OR (movement_type = 'cancellation_return' AND quantity_delta > 0)
+        OR (movement_type = 'adjustment' AND quantity_delta <> 0)
+      );
+  END IF;
+END;
+$inventory_direction$;
+
 -- Conservar la relación histórica entre una línea de pedido y su producto.
 -- Los productos vendidos deben desactivarse, no borrarse: una cancelación posterior
 -- necesita la referencia para restituir existencias y el historial debe seguir íntegro.
