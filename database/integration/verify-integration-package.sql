@@ -527,6 +527,58 @@ BEGIN
     RAISE EXCEPTION 'FALLO: los permisos de actualización/lectura de pedidos no coinciden con el modelo.';
   END IF;
 
+  -- Un cambio operativo de estado/seguimiento nunca debe poder alterar
+  -- importes, identidad del cliente, método de pago ni snapshots del pedido.
+  IF NOT has_column_privilege('authenticated','public.orders','status','UPDATE')
+     OR NOT has_column_privilege('authenticated','public.orders','delivery_tracking','UPDATE')
+     OR has_column_privilege('authenticated','public.orders','subtotal','UPDATE')
+     OR has_column_privilege('authenticated','public.orders','delivery_fee','UPDATE')
+     OR has_column_privilege('authenticated','public.orders','total','UPDATE')
+     OR has_column_privilege('authenticated','public.orders','payment_method','UPDATE')
+     OR has_column_privilege('authenticated','public.orders','payment_method_name','UPDATE')
+     OR has_column_privilege('authenticated','public.orders','payment_status','UPDATE')
+     OR has_column_privilege('authenticated','public.orders','customer_name','UPDATE')
+     OR has_column_privilege('authenticated','public.orders','customer_phone','UPDATE')
+     OR has_column_privilege('authenticated','public.orders','customer_email','UPDATE')
+     OR has_column_privilege('authenticated','public.orders','delivery_address','UPDATE')
+     OR has_column_privilege('authenticated','public.orders','customer_user_id','UPDATE')
+     OR has_column_privilege('authenticated','public.orders','public_tracking_token','UPDATE')
+     OR has_column_privilege('authenticated','public.order_items','unit_price','UPDATE')
+     OR has_column_privilege('authenticated','public.order_items','quantity','UPDATE')
+     OR has_column_privilege('authenticated','public.order_items','product_name','UPDATE') THEN
+    RAISE EXCEPTION 'FALLO: los paneles pueden alterar importes, datos originales o líneas históricas del pedido.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid='public.orders'::regclass
+      AND conname='orders_status_check'
+      AND contype='c'
+      AND pg_get_constraintdef(oid) ILIKE '%received%'
+      AND pg_get_constraintdef(oid) ILIKE '%on_the_way%'
+      AND pg_get_constraintdef(oid) ILIKE '%cancelled%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: los estados almacenados no coinciden con el flujo operativo vigente.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger t
+    JOIN pg_class c ON c.oid=t.tgrelid
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+    JOIN pg_proc p ON p.oid=t.tgfoid
+    WHERE n.nspname='public' AND c.relname='orders'
+      AND t.tgname='orders_enforce_status_transition'
+      AND NOT t.tgisinternal
+      AND p.proname='enforce_order_status_transition'
+      AND position('OLD.status' IN pg_get_functiondef(p.oid)) > 0
+      AND position('NEW.status' IN pg_get_functiondef(p.oid)) > 0
+      AND position('subtotal' IN lower(pg_get_functiondef(p.oid))) = 0
+      AND position('delivery_fee' IN lower(pg_get_functiondef(p.oid))) = 0
+      AND position('NEW.total' IN lower(pg_get_functiondef(p.oid))) = 0
+  ) THEN
+    RAISE EXCEPTION 'FALLO: falta el trigger de transición de estado o inspecciona campos financieros.';
+  END IF;
+
   IF NOT EXISTS (
     SELECT 1 FROM pg_policies
     WHERE schemaname='public' AND tablename='customer_favorites'
