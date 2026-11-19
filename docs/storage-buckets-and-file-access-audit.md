@@ -160,3 +160,34 @@ Supabase confirma que los buckets privados aplican RLS a las descargas, mientras
 - Limpieza de archivos huérfanos: pendiente de verificar y coordinar.
 
 **Conclusión:** Storage no está listo para producción. El error de ruta en las políticas activas puede impedir la gestión autenticada de imágenes y el bucket de comprobantes falta por completo. Las hojas de vida están en un bucket privado, pero todavía requieren pruebas de aislamiento y controles adicionales sobre el contenido de los archivos. No se hicieron cambios en Supabase activo ni se desplegaron funciones.
+
+## 8. Revisión complementaria de Storage en Supabase activo — 19 nov 2026
+
+Se repitió la consulta en modo solo lectura sobre storage.buckets, storage.objects, pg_policies y los privilegios de storage.objects.
+
+**Resultado observado:**
+- Los buckets existentes continúan siendo business-assets (público, 5 MB, PNG/JPEG/WEBP) y job-applications-private (privado, 5 MB, PDF/DOC/DOCX).
+- En ambos buckets se observaron cero objetos. Por tanto, no se identificaron archivos existentes que pudieran descargarse, pero tampoco fue posible probar una descarga o carga real.
+- storage.objects tiene RLS habilitado.
+- anon y authenticated tienen privilegios SQL generales sobre storage.objects, pero RLS limita las filas: no se encontró una policy para anon en los buckets privados; authenticated solo tiene la policy SELECT prevista para hojas de vida y políticas de negocio para activos comerciales. No hay políticas directas de INSERT/UPDATE/DELETE sobre el bucket privado de CV.
+- service_role conserva privilegios amplios sobre Storage. Esto es propio del rol de servicio y permite que las Edge Functions operen sin RLS; su clave debe permanecer exclusivamente en secretos del servidor y nunca enviarse al navegador.
+
+**Diferencia precisa entre base activa y rama:**
+- La policy activa job_application_documents_business_admin_read limita por bucket, carpeta del negocio activo y rol business_admin, pero no exige que el objeto coincida con una fila de job_applications ni con su resume_path exacto. La política de database/security/storage-policy-fix.sql añade esa relación entre negocio, postulación y ruta, y valida el nombre UUID del archivo con extensión permitida.
+- Las policies activas de business-assets siguen usando storage.foldername(b.name) en vez de storage.foldername(objects.name). El verificador de la rama ya detecta ese error; el archivo storage-policy-fix.sql sustituye las cuatro policies con una ruta de objeto correctamente validada.
+- No se ejecutó storage-policy-fix.sql, no se cambió ninguna policy activa y no se desplegó ninguna Edge Function.
+
+**Controles del panel y de las Edge Functions revisados:**
+- panel-live.js consulta postulaciones filtrando por business_id, y solo solicita un enlace firmado de 300 segundos cuando el administrador pulsa Descargar.
+- create-job-application crea rutas con UUID de negocio, postulación y archivo; la carga se entrega mediante token firmado, no mediante una policy INSERT pública.
+- cleanup-job-application-data valida el formato de la ruta antes de borrar un objeto huérfano y conserva los CV asociados a postulaciones.
+- La limpieza requiere el secreto separado JOB_APPLICATION_CLEANUP_SECRET; el service_role se utiliza únicamente en el servidor.
+
+**Pendientes antes de producción:**
+1. Aplicar el paso 7 (storage-policy-fix.sql) únicamente en staging y ejecutar pruebas A/B de administrador, empleado, visitante y negocio suspendido.
+2. Probar la carga de una imagen y la descarga de un CV con dos negocios distintos, incluyendo intento de usar la ruta de otro negocio.
+3. Incorporar análisis antimalware o un proceso de cuarentena/validación de documentos antes de que el personal abra CVs.
+4. Definir una política de retención para postulaciones y CV asociados; la limpieza actual solo cubre sesiones temporales y archivos huérfanos.
+5. Mantener service_role y JOB_APPLICATION_CLEANUP_SECRET solo en el entorno de servidor.
+
+El verificador integral se amplió para exigir que las cuatro policies de business-assets usen la ruta real del objeto y que la policy privada vincule negocio, postulación y resume_path. Estas verificaciones siguen pendientes de ejecución en staging.
