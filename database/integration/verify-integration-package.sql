@@ -2258,6 +2258,7 @@ BEGIN
      OR to_regprocedure('public.attach_business_invitation_user(uuid,uuid)') IS NULL
      OR to_regprocedure('public.mark_business_invitation_failed(uuid,uuid,text)') IS NULL
      OR to_regprocedure('public.accept_business_invitation(uuid,uuid,text)') IS NULL
+     OR to_regprocedure('public.expire_business_invitation(uuid)') IS NULL
      OR to_regprocedure('public.revoke_business_invitation(uuid,uuid,text)') IS NULL THEN
     RAISE EXCEPTION 'FALLO: faltan RPCs del ciclo de invitación.';
   END IF;
@@ -2265,6 +2266,7 @@ BEGIN
   IF has_function_privilege('anon','public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz)','EXECUTE')
      OR has_function_privilege('authenticated','public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz)','EXECUTE')
      OR has_function_privilege('authenticated','public.accept_business_invitation(uuid,uuid,text)','EXECUTE')
+     OR has_function_privilege('authenticated','public.expire_business_invitation(uuid)','EXECUTE')
      OR has_function_privilege('authenticated','public.revoke_business_invitation(uuid,uuid,text)','EXECUTE')
      OR NOT has_function_privilege('service_role','public.accept_business_invitation(uuid,uuid,text)','EXECUTE')
      OR NOT has_function_privilege('service_role','public.revoke_business_invitation(uuid,uuid,text)','EXECUTE') THEN
