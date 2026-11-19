@@ -626,3 +626,6 @@ El catálogo público carga negocios, productos y publicaciones por bloques de 5
 
 
 Las consultas de productos/publicaciones agrupan IDs de negocio en lotes de 100; la Edge Function de métodos de pago recibe lotes de hasta 200 conforme a su validación. Los errores de estos dos conjuntos opcionales no deben interrumpir la carga del directorio y los productos.
+
+
+Los listados técnicos de negocios, miembros, moderación y solicitudes de bloqueo usan cursor `created_at + id` en la Edge Function `technical-business-management`, con límite por consulta de 51 filas. El panel muestra 50 por página para moderación/solicitudes y pagina localmente la tabla de negocios. Los negocios y miembros se recorren por bloques para conservar los datos completos necesarios en selectores. La función Edge todavía requiere despliegue y pruebas en staging.
