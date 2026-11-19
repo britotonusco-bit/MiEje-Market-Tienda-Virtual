@@ -109,6 +109,7 @@
       document.querySelector('#createBusinessForm')?.addEventListener('submit', createBusiness);
       document.querySelector('#inviteMemberForm')?.addEventListener('submit', inviteBusinessMember);
       document.querySelector('#businessSearch')?.addEventListener('input', () => {
+        businessDirectoryRequestId++;
         if (businessDirectorySearchTimer) window.clearTimeout(businessDirectorySearchTimer);
         businessDirectorySearchTimer = window.setTimeout(() => { void loadTechnicalBusinesses(true); }, 250);
       });
@@ -989,12 +990,14 @@
   let businessDirectoryCounts = { total: 0, active: 0, suspended: 0 };
   let technicalAuditCount = 0;
   let businessDirectorySearchTimer = null;
+  let businessDirectoryRequestId = 0;
 
   async function loadTechnicalBusinesses(reset = true) {
     if (reset) {
       businessDirectoryCursorStack = [null];
       businessDirectoryPageIndex = 0;
     }
+    const requestId = ++businessDirectoryRequestId;
     const cursor = businessDirectoryCursorStack[businessDirectoryPageIndex];
     const search = document.querySelector('#businessSearch')?.value.trim() || '';
     const result = await callTechnicalFunction({
@@ -1003,6 +1006,7 @@
       before_created_at: cursor?.created_at || undefined,
       before_id: cursor?.id || undefined
     });
+    if (requestId !== businessDirectoryRequestId) return;
     cachedBusinesses = result.businesses || [];
     businessDirectoryHasMore = Boolean(result.has_more);
     businessDirectoryCounts = {
