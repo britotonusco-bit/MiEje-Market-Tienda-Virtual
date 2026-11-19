@@ -1043,6 +1043,14 @@ BEGIN
      LIKE '%AT TIME ZONE ''America/Bogota'')::date%' THEN
     RAISE EXCEPTION 'FALLO: el reporte no revierte el costo de inventario en la fecha de aprobación de cancelación.';
   END IF;
+  IF position('CASE WHEN missing_cost_lines=0' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0
+     OR position('THEN NULL END' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: el reporte presenta ganancias numéricas aunque falten costos históricos.';
+  END IF;
   IF NOT has_function_privilege('authenticated','public.get_business_admin_profit_report(uuid,date,date)','EXECUTE')
      OR has_function_privilege('anon','public.get_business_admin_profit_report(uuid,date,date)','EXECUTE')
      OR NOT (
