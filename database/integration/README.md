@@ -635,3 +635,6 @@ Los registros de acceso se paginan en bloques de 50 con cursor `created_at + id`
 
 
 El listado de publicaciones del administrador del negocio se pagina en bloques de 50 con cursor `created_at + id`, manteniendo el filtro `business_id` en cada consulta. Despublicar sigue limitado al negocio seleccionado y no elimina postulaciones.
+
+
+Los movimientos financieros de plataforma y la nómina del panel técnico se consultan por separado en páginas de 50, con cursor compuesto `occurred_at + id` para finanzas y `created_at + id` para nómina. El endpoint valida ambos cursores y conserva la protección del panel técnico y MFA.
