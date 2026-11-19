@@ -37,17 +37,36 @@ ALTER TABLE public.job_applications
 REVOKE UPDATE ON TABLE public.job_applications
   FROM PUBLIC, anon, authenticated;
 
+-- Revoca también concesiones UPDATE por columna que pudieran existir de
+-- instalaciones anteriores. No se presupone una lista fija de columnas.
+DO $permissions$
+DECLARE
+  v_columns text;
+BEGIN
+  SELECT string_agg(pg_catalog.format('%I', a.attname), ', ' ORDER BY a.attnum)
+    INTO v_columns
+  FROM pg_catalog.pg_attribute a
+  WHERE a.attrelid = 'public.job_applications'::regclass
+    AND a.attnum > 0
+    AND NOT a.attisdropped
+    AND a.attname NOT IN ('status', 'admin_notes');
+
+  IF v_columns IS NOT NULL THEN
+    EXECUTE pg_catalog.format(
+      'REVOKE UPDATE (%s) ON TABLE public.job_applications FROM PUBLIC, anon, authenticated',
+      v_columns
+    );
+  END IF;
+END;
+$permissions$;
+
+REVOKE UPDATE (status, admin_notes)
+  ON TABLE public.job_applications
+  FROM PUBLIC, anon, authenticated;
+
 GRANT UPDATE (status, admin_notes)
   ON TABLE public.job_applications
   TO authenticated;
-
-REVOKE UPDATE (
-  id, business_id, content_page_id, applicant_name, applicant_contact,
-  applicant_message, form_responses, privacy_consent,
-  privacy_consent_version, privacy_consent_at, resume_path,
-  reviewed_by, reviewed_at, created_at
-) ON TABLE public.job_applications
-  FROM PUBLIC, anon, authenticated;
 
 
 -- Los metadatos de auditoría se generan en PostgreSQL. El cliente no puede
