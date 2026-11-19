@@ -406,3 +406,6 @@ El nuevo paso 18 agrega `privacy_consent_version` y `privacy_consent_at` a `job_
 Las respuestas de `create-job-application` llevan `Cache-Control: no-store, private, max-age=0`, `Pragma: no-cache` y `X-Content-Type-Options: nosniff`, para evitar almacenar tokens de carga en cachés compartidas o navegadores.
 
 El verificador integral comprueba RLS, grants, políticas de administrador por negocio, permisos de columnas, privacidad del bucket y privilegios de las RPC. Las pruebas A/B y el análisis antimalware siguen pendientes.
+
+
+El limitador de `create-job-application` usa solo `cf-connecting-ip`, encabezado establecido por el proxy de borde. La función rechaza la petición si no está disponible; no debe reintroducirse un fallback al primer valor de `X-Forwarded-For` sin demostrar que el proxy lo sanea. El verificador exige que `consume_job_application_rate_limit` sea ejecutable solo por `service_role`.
