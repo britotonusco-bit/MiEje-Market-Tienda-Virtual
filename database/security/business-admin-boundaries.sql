@@ -601,6 +601,38 @@ FOR EACH ROW EXECUTE FUNCTION private.prevent_business_scope_change();
 REVOKE ALL ON FUNCTION private.prevent_business_scope_change() FROM PUBLIC, anon, authenticated;
 
 
+-- El costo unitario guardado al crear una línea de pedido es una fotografía
+-- histórica. No debe poder modificarse ni eliminarse después, ni siquiera
+-- mediante el rol de servidor usado por las Edge Functions.
+CREATE OR REPLACE FUNCTION private.prevent_order_item_cost_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''
+AS $function$
+BEGIN
+  RAISE EXCEPTION 'El costo histórico de una línea de pedido es inmutable.'
+    USING ERRCODE = '42501';
+END;
+$function$;
+
+DROP TRIGGER IF EXISTS order_item_costs_immutable
+  ON public.order_item_costs;
+CREATE TRIGGER order_item_costs_immutable
+BEFORE UPDATE OR DELETE ON public.order_item_costs
+FOR EACH ROW
+EXECUTE FUNCTION private.prevent_order_item_cost_mutation();
+
+REVOKE ALL ON FUNCTION private.prevent_order_item_cost_mutation()
+FROM PUBLIC, anon, authenticated;
+
+-- El checkout (función SECURITY DEFINER) inserta la fotografía. El rol de
+-- servidor no necesita actualizarla, borrarla ni truncar el historial.
+REVOKE UPDATE, DELETE, TRUNCATE
+ON TABLE public.order_item_costs
+FROM PUBLIC, anon, authenticated, service_role;
+
+
 -- Eliminar bypass técnico y limitar los campos que el administrador puede
 -- modificar directamente en productos, métodos de pago y costos.
 DROP POLICY IF EXISTS product_costs_admin_insert ON public.product_costs;
