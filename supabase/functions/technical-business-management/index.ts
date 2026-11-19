@@ -841,6 +841,7 @@ Deno.serve(async (req: Request) => {
           requested_by_name: names.get(request.requested_by) ?? null,
           target_user_name: names.get(request.target_user_id) ?? null,
         })),
+        has_more: requestRows.length === limit,
       });
     }
 
