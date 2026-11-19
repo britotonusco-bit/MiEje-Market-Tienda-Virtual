@@ -51,7 +51,7 @@ function createInvitationToken(): string {
   crypto.getRandomValues(bytes);
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -596,7 +596,7 @@ Deno.serve(async (req: Request) => {
       const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
       if (!uuidPattern.test(businessId)
-          || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)
+          || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
           || !["business_admin", "employee"].includes(role)
           || displayName.length < 3
           || jobTitle.length < 2) {
