@@ -138,18 +138,22 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
 
-  -- Obtener las referencias sin bloquear y fijar un orden de bloqueo estable:
-  -- primero el pedido y después la solicitud. request_order_cancellation()
-  -- también bloquea primero el pedido, evitando invertir el orden entre flujos.
+  -- Resolver el negocio sin bloquear y autorizar antes de tomar locks.
+  -- Así una cuenta de otra tienda no puede retener la solicitud o el pedido.
   SELECT r.business_id, r.order_id
   INTO v_business_id, v_order_id
   FROM public.order_cancellation_requests r
   WHERE r.id = p_request_id;
 
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'No se encontró la solicitud.' USING ERRCODE = 'P0002';
+  IF NOT FOUND
+     OR NOT private.business_is_active(v_business_id)
+     OR NOT private.has_business_role(v_business_id, ARRAY['business_admin']::text[]) THEN
+    RAISE EXCEPTION 'No se encontró la solicitud o no tienes permiso para decidirla.'
+      USING ERRCODE = '42501';
   END IF;
 
+  -- Mantener el orden de bloqueo compartido con request_order_cancellation:
+  -- primero el pedido y después la solicitud.
   SELECT o.status
   INTO v_order_status
   FROM public.orders o
@@ -158,7 +162,8 @@ BEGIN
   FOR UPDATE;
 
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'No se encontró el pedido asociado a la solicitud.' USING ERRCODE = 'P0002';
+    RAISE EXCEPTION 'La solicitud no tiene un pedido válido en este negocio.'
+      USING ERRCODE = 'P0002';
   END IF;
 
   SELECT r.id, r.business_id, r.order_id, r.status AS request_status,
@@ -170,14 +175,11 @@ BEGIN
     AND r.order_id = v_order_id
   FOR UPDATE;
 
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'La solicitud cambió o ya no existe.' USING ERRCODE = 'P0002';
-  END IF;
-
-
-  IF NOT private.business_is_active(v_request.business_id)
-     OR NOT private.has_business_role(v_request.business_id, ARRAY['business_admin']::text[]) THEN
-    RAISE EXCEPTION 'Solo el administrador activo de este negocio puede decidir la solicitud.' USING ERRCODE = '42501';
+  IF NOT FOUND
+     OR NOT private.business_is_active(v_business_id)
+     OR NOT private.has_business_role(v_business_id, ARRAY['business_admin']::text[]) THEN
+    RAISE EXCEPTION 'La solicitud cambió o ya no tienes permiso para decidirla.'
+      USING ERRCODE = '42501';
   END IF;
 
   IF v_request.request_status <> 'pending' THEN
