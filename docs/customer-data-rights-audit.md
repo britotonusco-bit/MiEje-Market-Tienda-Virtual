@@ -276,3 +276,18 @@ Se reforzó el flujo de postulaciones en `correcciones-funcionales`:
 **Dependencia del esquema:** no se encontró en el repositorio una migración completa de creación de `job_applications`, `job_application_upload_sessions` y `job_application_rate_limits`. La nueva migración añade columnas sobre las tablas existentes; no sustituye el DDL base. Recuperar y revisar el esquema aprobado antes de preparar un staging desde cero.
 
 No se aplicó SQL ni se desplegó la Edge Function. No se ejecutaron pruebas dinámicas ni análisis antimalware. Las comprobaciones nuevas del verificador están preparadas para staging.
+
+
+### Ajustes complementarios del flujo de vacantes — 19 nov 2026
+
+La Edge Function ahora devuelve cabeceras `no-store` y `nosniff` para todas sus respuestas, incluida la respuesta que contiene el token temporal de carga. El limitador por IP dejó de usar `X-Forwarded-For` como alternativa: ese encabezado puede contener valores enviados por el cliente si el proxy no lo reemplaza. Se confía únicamente en `cf-connecting-ip`; si el proxy no proporciona ese dato, la solicitud se rechaza en vez de omitir el control.
+
+El verificador integral también comprueba que:
+- las tres tablas privadas tengan RLS;
+- los roles públicos no puedan consultar ni alterar sesiones o contadores;
+- el administrador solo pueda actualizar estado y notas, no cambiar la pertenencia del negocio, la identidad del postulante ni la ruta del CV;
+- la política Storage de lectura relacione el archivo con la fila de postulación y el negocio;
+- no existan políticas de escritura directa sobre el bucket privado;
+- las RPC de registro, rate limit y limpieza sean ejecutables únicamente por `service_role`.
+
+La política de retención sigue abierta: la limpieza elimina sesiones temporales y archivos huérfanos, pero no decide cuándo borrar postulaciones completas o CV ya asociados. Ese plazo requiere una decisión documentada del responsable del tratamiento y revisión jurídica; no se fijó automáticamente.
