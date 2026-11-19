@@ -117,3 +117,20 @@ La consulta de solo lectura al proyecto Supabase independiente encontró que las
 Se amplió el verificador para revisar tanto `USING` (`qual`) como `WITH CHECK`, y para incluir las políticas INSERT y UPDATE de `product_costs`. La verificación anterior solo revisaba `qual` y podía dejar pasar un bypass en `WITH CHECK`.
 
 La consulta también confirmó que `order_item_costs` no tiene triggers y que `service_role` conserva UPDATE, DELETE y TRUNCATE. El borrador ahora instala el trigger de inmutabilidad y revoca esos privilegios. No se ejecutaron cambios en Supabase.
+
+
+## 12. Conciliación por fecha efectiva y presentación de costos faltantes
+
+La lectura estática del reporte confirmó que:
+- los cobros y reembolsos se agrupan por la fecha de confirmación financiera `financial_transactions.completed_at`;
+- la reversión del costo de inventario se ubica en la fecha de decisión de la cancelación `order_cancellation_requests.decided_at`;
+- los gastos solo entran cuando están pagados y se filtran por `business_expenses.paid_at`;
+- los límites de cada periodo se calculan con la zona horaria `America/Bogota`, incluyendo el día final mediante un límite superior exclusivo.
+
+El índice único parcial `order_cancellation_one_approved_per_order` impide que un pedido genere más de una cancelación aprobada y, por tanto, que la reversión de su costo se contabilice dos veces. Los índices únicos de pagos y reembolsos completados también forman parte de las protecciones requeridas.
+
+Se detectó un problema de presentación: el RPC devuelve `NULL` para la ganancia bruta y neta cuando faltan costos históricos, pero el formateador monetario del panel convertía ese `NULL` en `$0`. Se corrigió la interfaz para mostrar **“No disponible”** en esos dos indicadores y explicar que el resultado no debe interpretarse como cero. Los importes de cobros, reembolsos y costos siguen visibles para facilitar la conciliación.
+
+El verificador de integración ahora exige las tres fechas efectivas y la zona horaria Bogotá, además de comprobar la definición del índice único de cancelaciones aprobadas. Esto es una comprobación estática del SQL, no una prueba de ejecución.
+
+**Pendiente:** probar en staging pedidos pagados y cancelados en periodos distintos, reembolsos realizados en una fecha posterior, gastos creados un día y pagados otro, y rangos que cruzan medianoche en Bogotá. No se ejecutó SQL ni se modificó Supabase.
