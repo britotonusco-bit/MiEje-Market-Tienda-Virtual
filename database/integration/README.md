@@ -474,3 +474,16 @@ La consulta de solo lectura confirmó que Storage tiene RLS habilitado y que los
 La política privada corregida no habilita INSERT, UPDATE ni DELETE para visitantes o usuarios autenticados. La carga de CV continúa usando token firmado desde la Edge Function; la descarga administrativa se solicita bajo demanda con enlace firmado de 300 segundos. El verificador integral ahora comprueba la ruta real de business-assets y la relación exacta entre objeto, negocio y postulación.
 
 Antes de producción, aplicar el paso 7 solo en staging, probar dos negocios y los roles administrador/empleado/visitante, y comprobar que un archivo de otro negocio no pueda descargarse aunque se conozca su ruta. También siguen pendientes el análisis antimalware y la política de conservación de CV asociados.
+
+
+## Auditoría de Edge Functions y automatizaciones — 19 nov 2026
+
+Informe: `docs/edge-functions-automation-audit.md`.
+
+El contraste con Supabase activo encontró versiones desplegadas anteriores a la rama en checkout, seguimiento público, postulaciones y panel técnico. En particular, el seguimiento activo aún devuelve el total del pedido y texto de seguimiento sin el filtrado actual; checkout y postulaciones no incluyen las versiones de consentimiento actuales; y la función técnica activa no aplica el requisito MFA AAL2 ya incorporado en la rama.
+
+La función `get-public-storefront` activa no selecciona `id` de los métodos de pago aunque la respuesta intenta devolverlo; la rama ya corrige la selección. `cleanup-job-application-data` y `get-platform-public-settings` no aparecen desplegadas.
+
+No se encontró `pg_cron` instalado ni las relaciones `cron.job` y `cron.job_run_details`. Por ello, la limpieza de sesiones y archivos temporales no tiene un programador SQL activo demostrado. El secreto `JOB_APPLICATION_CLEANUP_SECRET` debe configurarse fuera del repositorio y usarse desde un scheduler privado; nunca insertar su valor literal en una migración o en el frontend.
+
+Durante esta revisión se limitaron a 64 KB los cuerpos JSON de `technical-business-management` y `create-job-application` y se exige que sean objetos JSON. Estos cambios solo están en la rama; no se desplegaron. El informe detalla las pruebas requeridas en staging, el estado de auditoría de `audit_logs` y los riesgos residuales de rate limiting y retención.
