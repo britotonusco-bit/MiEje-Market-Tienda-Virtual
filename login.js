@@ -154,7 +154,7 @@
       say('Tu cuenta tiene acceso a varios negocios. Selecciona dónde deseas trabajar.');
     } catch (error) {
       say(error.message || 'No se pudo iniciar sesión. Comprueba tus datos.', 'error');
-      if (client) await client.auth.signOut();
+      if (client) await client.auth.signOut({ scope: 'local' });
     } finally {
       setBusy(false);
     }

@@ -2,10 +2,29 @@
 (() => {
   "use strict";
 
+  const JOB_APPLICATION_PRIVACY_CONSENT_VERSION = "job-application-2026-11-19-v1";
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
   const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+
+  // Mantiene la tienda utilizable cuando una imagen pública ya no existe o no responde.
+  document.addEventListener("error", event => {
+    const image = event.target;
+    if (!(image instanceof HTMLImageElement)) return;
+    const container = image.closest(".business-image, .product-card, .store-hero");
+    if (!container) return;
+    image.hidden = true;
+    container.classList.add("image-unavailable");
+    if (!container.querySelector(".image-fallback")) {
+      const fallback = document.createElement("span");
+      fallback.className = "image-fallback";
+      fallback.setAttribute("role", "img");
+      fallback.setAttribute("aria-label", "Imagen no disponible");
+      fallback.textContent = "Imagen no disponible";
+      container.append(fallback);
+    }
+  }, true);
 
   const money = value => new Intl.NumberFormat("es-CO", {
     style: "currency",
@@ -22,21 +41,16 @@
   };
 
   const categoryInfo = {
-    Comidas: {
-      description: "Restaurantes, comidas rápidas y sabores de la región."
-    },
-    Moda: {
-      description: "Prendas, accesorios y estilo para todos los días."
-    },
-    Tecnología: {
-      description: "Accesorios y productos tecnológicos."
-    },
-    Mercado: {
-      description: "Frutas, verduras y productos para tu despensa."
-    },
-    Hogar: {
-      description: "Detalles para hacer tu casa más acogedora."
-    }
+    Hogar: { description: "Artículos para el hogar y electrodomésticos." },
+    Salud: { description: "Productos de salud y cuidado personal." },
+    Muebles: { description: "Muebles y soluciones para tus espacios." },
+    Tecnología: { description: "Celulares, accesorios y productos tecnológicos." },
+    Belleza: { description: "Belleza, maquillaje y cuidado personal." },
+    Mascotas: { description: "Productos y accesorios para tus mascotas." },
+    Juguetes: { description: "Juguetes, juegos y novedades." },
+    Moda: { description: "Prendas, accesorios y tendencias." },
+    Comidas: { description: "Restaurantes, comidas rápidas y sabores de la región." },
+    Mercado: { description: "Frutas, verduras y productos para tu despensa." }
   };
 
   let businesses = [
@@ -182,48 +196,138 @@
   let selectedCategory = "Todas";
   let currentBusinessId = null;
   let cart = [];
+  let favoriteProductIds = new Set();
+  let favoriteUserId = null;
+  let pendingCheckoutRequest = null;
   let toastTimer;
+  const checkoutSessionKey = "mieje:checkout-pending:v2";
+
+  async function getCheckoutFingerprint(payload) {
+    const bytes = new TextEncoder().encode(JSON.stringify(payload));
+    const digest = await window.crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  function readPendingCheckout() {
+    const raw = window.localStorage.getItem(checkoutSessionKey);
+    if (!raw) return null;
+
+    let saved;
+    try {
+      saved = JSON.parse(raw);
+    } catch (error) {
+      console.warn("La clave temporal del checkout estaba dañada y se descartó.", error);
+      window.localStorage.removeItem(checkoutSessionKey);
+      return null;
+    }
+
+    if (typeof saved?.fingerprint !== "string"
+        || !/^[0-9a-f]{64}$/i.test(saved.fingerprint)
+        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(saved.idempotencyKey || "")) {
+      window.localStorage.removeItem(checkoutSessionKey);
+      return null;
+    }
+    return { fingerprint: saved.fingerprint, idempotencyKey: saved.idempotencyKey };
+  }
+
+  function restorePendingCheckout(fingerprint) {
+    const saved = readPendingCheckout();
+    return saved?.fingerprint === fingerprint ? saved : null;
+  }
+
+  function savePendingCheckout(request) {
+    try {
+      window.localStorage.setItem(checkoutSessionKey, JSON.stringify(request));
+      return true;
+    } catch (error) {
+      console.warn("No se pudo guardar la clave temporal del checkout.", error);
+      return false;
+    }
+  }
+
+  function clearPendingCheckout() {
+    pendingCheckoutRequest = null;
+    try {
+      window.localStorage.removeItem(checkoutSessionKey);
+    } catch (error) {
+      console.warn("No se pudo limpiar la clave temporal del checkout.", error);
+    }
+  }
 
   const getBusiness = id => businesses.find(business => business.id === id);
   const getProduct = (business, productId) =>
     business?.products.find(product => product.id === productId);
 
+  async function fetchAllVisibleRows(buildQuery, pageSize = 500) {
+    const collected = [];
+    let offset = 0;
+    let expectedCount = null;
+    while (expectedCount === null || offset < expectedCount) {
+      const { data, error, count } = await buildQuery().range(offset, offset + pageSize - 1);
+      if (error) throw error;
+      const page = data || [];
+      if (expectedCount === null && Number.isFinite(count)) expectedCount = count;
+      if (!page.length) break;
+      collected.push(...page);
+      offset += page.length;
+      if (expectedCount === null && page.length < pageSize) break;
+    }
+    return collected;
+  }
+
   async function loadRegisteredBusinesses() {
     try {
       if (!window.supabase || !window.MIEJE_SUPABASE_URL || !window.MIEJE_SUPABASE_PUBLISHABLE_KEY) return;
       const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
-      const { data: rows, error } = await client.from("businesses")
-        .select("id,name,slug,business_type,category,description,tagline,city,contact_phone,whatsapp_support,opening_hours,logo_url,status,suspension_reason,public_suspension_message,delivery_fee,minimum_order_amount")
-        .order("created_at", { ascending: false }).limit(200);
-      if (error) throw error;
+      const rows = await fetchAllVisibleRows(() => client.from("businesses")
+        .select("id,name,slug,business_type,category,description,tagline,city,contact_phone,whatsapp_support,opening_hours,logo_url,status,public_suspension_message,delivery_fee,minimum_order_amount", { count: "exact" })
+        .order("name", { ascending: true }).order("id", { ascending: true }));
       if (!rows?.length) return;
       const activeBusinessIds = rows.filter(row => row.status === "active").map(row => row.id);
       let products = [];
-      if (activeBusinessIds.length) {
-        const { data: productRows, error: productError } = await client.from("products")
-          .select("id,business_id,name,description,image_url,price,inventory,is_active")
-          .in("business_id", activeBusinessIds).eq("is_active", true).order("created_at", { ascending: false }).limit(1000);
-        if (productError) throw productError;
-        products = productRows || [];
-      }
       let paymentMethods = [];
-      if (activeBusinessIds.length) {
-        const { data: paymentData, error: paymentError } = await client.functions.invoke("get-public-storefront", { body: { business_ids: activeBusinessIds } });
-        if (paymentError) console.warn("No se pudieron cargar las formas de pago públicas.", paymentError);
-        else paymentMethods = paymentData?.payment_methods || [];
-      }
       let publicContentPages = [];
-      if (activeBusinessIds.length) {
-        const { data: contentRows, error: contentError } = await client.from('business_content_pages')
-          .select('id,business_id,content_type,title,body,content')
-          .in('business_id', activeBusinessIds)
-          .eq('is_published', true)
-          .eq('moderation_status', 'approved')
-          .order('created_at', { ascending: false })
-          .limit(500);
-        if (contentError) console.warn('No se pudieron cargar las publicaciones públicas.', contentError);
-        else publicContentPages = contentRows || [];
+      for (let index = 0; index < activeBusinessIds.length; index += 100) {
+        const businessBatch = activeBusinessIds.slice(index, index + 100);
+        const batchProducts = await fetchAllVisibleRows(() => client.from("products")
+          .select("id,business_id,name,description,image_url,price,inventory,is_active,created_at", { count: "exact" })
+          .in("business_id", businessBatch).eq("is_active", true)
+          .order("created_at", { ascending: false }).order("id", { ascending: false }));
+        products.push(...batchProducts);
       }
+      try {
+        for (let index = 0; index < activeBusinessIds.length; index += 100) {
+          const businessBatch = activeBusinessIds.slice(index, index + 100);
+          const batchContent = await fetchAllVisibleRows(() => client.from('business_content_pages')
+            .select('id,business_id,content_type,title,body,content,created_at', { count: "exact" })
+            .in('business_id', businessBatch)
+            .eq('is_published', true)
+            .eq('moderation_status', 'approved')
+            .order('created_at', { ascending: false }).order('id', { ascending: false }));
+          publicContentPages.push(...batchContent);
+        }
+      } catch (contentError) {
+        console.warn('No se pudieron cargar las publicaciones públicas.', contentError);
+      }
+      // La Edge Function limita cada solicitud a 200 negocios.
+      try {
+        for (let index = 0; index < activeBusinessIds.length; index += 200) {
+          const businessBatch = activeBusinessIds.slice(index, index + 200);
+          const { data: paymentData, error: paymentError } = await client.functions.invoke("get-public-storefront", {
+            body: { business_ids: businessBatch }
+          });
+          if (paymentError) throw paymentError;
+          paymentMethods.push(...(paymentData?.payment_methods || []));
+        }
+      } catch (paymentError) {
+        paymentMethods = [];
+        console.warn("No se pudieron cargar las formas de pago públicas.", paymentError);
+      }
+      const productsByBusiness = new Map();
+      products.forEach(product => {
+        if (!productsByBusiness.has(product.business_id)) productsByBusiness.set(product.business_id, []);
+        productsByBusiness.get(product.business_id).push(product);
+      });
       const contentPagesByBusiness = new Map();
       publicContentPages.forEach(page => {
         if (!contentPagesByBusiness.has(page.business_id)) contentPagesByBusiness.set(page.business_id, []);
@@ -250,7 +354,6 @@
         phone: row.contact_phone || "",
         rating: "Nuevo",
         isActive: row.status === "active",
-        suspensionReason: row.suspension_reason || "",
         publicSuspensionMessage: row.public_suspension_message || "Esta tienda no está disponible temporalmente.",
         storeSettings: {
           whatsapp_number: row.whatsapp_support || "",
@@ -262,7 +365,7 @@
         slug: row.slug,
         deliveryFee: Number(row.delivery_fee || 0),
         minimumOrderAmount: Number(row.minimum_order_amount || 0),
-        products: products.filter(product => product.business_id === row.id).map(product => ({
+        products: (productsByBusiness.get(row.id) || []).map(product => ({
           id: product.id,
           name: product.name,
           description: product.description || "Producto disponible en esta tienda.",
@@ -273,6 +376,21 @@
       }));
       const registeredIds = new Set(registered.map(business => business.id));
       businesses = [...registered, ...businesses.filter(business => !registeredIds.has(business.id))];
+
+      const { data: authData, error: authError } = await client.auth.getUser();
+      if (authError) throw authError;
+      if (!authData.user) {
+        favoriteProductIds = new Set();
+        favoriteUserId = null;
+        return;
+      }
+
+      const { data: favoriteRows, error: favoritesError } = await client.from("customer_favorites")
+        .select("product_id")
+        .eq("user_id", authData.user.id);
+      if (favoritesError) throw favoritesError;
+      favoriteProductIds = new Set((favoriteRows || []).map(row => row.product_id));
+      favoriteUserId = authData.user.id;
     } catch (error) {
       console.warn("No se pudo cargar el directorio de negocios registrados; se mantiene la vista local de demostración.", error);
     }
@@ -331,11 +449,54 @@
   }
 
   function renderFeatured() {
-    $("#featuredGrid").innerHTML = businesses.slice(0, 3).map(businessCard).join("");
+    const availableBusinesses = businesses.filter(business => business.isActive !== false);
+    $("#featuredGrid").innerHTML = availableBusinesses.slice(0, 3).map(businessCard).join("");
+  }
+
+  function renderPublicSections() {
+    const activeBusinesses = businesses.filter(business => business.isActive !== false);
+    const products = activeBusinesses.flatMap(business =>
+      (business.products || []).map(product => ({ business, product }))
+    ).filter(item => item.business.isRegistered === true);
+    const productGrid = $("#featuredProductsGrid");
+    if (productGrid) {
+      productGrid.innerHTML = products.slice(0, 8).map(({ business, product }) => productCard(business, product)).join("");
+      $("#featuredProductsEmpty")?.classList.toggle("hidden", products.length > 0);
+    }
+
+    const promotions = activeBusinesses.flatMap(business =>
+      (business.contentPages || []).filter(page => page.content_type === "promotion").map(page => ({ business, page }))
+    );
+    const promotionGrid = $("#publicPromotionsGrid");
+    if (promotionGrid) {
+      promotionGrid.innerHTML = promotions.slice(0, 6).map(({ business, page }) => `
+        <article class="info-panel public-content-card">
+          <p class="eyebrow">${escapeHtml(business.name)}</p>
+          <h3>${escapeHtml(page.title)}</h3>
+          <p>${escapeHtml(page.body)}</p>
+          <button class="button secondary" type="button" data-action="open-store" data-business="${escapeHtml(business.id)}">Ver promoción en la tienda</button>
+        </article>`).join("");
+      $("#publicPromotionsEmpty")?.classList.toggle("hidden", promotions.length > 0);
+    }
+
+    const jobs = activeBusinesses.flatMap(business =>
+      (business.contentPages || []).filter(page => page.content_type === "job_form").map(page => ({ business, page }))
+    );
+    const jobsGrid = $("#publicJobsGrid");
+    if (jobsGrid) {
+      jobsGrid.innerHTML = jobs.slice(0, 6).map(({ business, page }) => `
+        <article class="info-panel public-content-card">
+          <p class="eyebrow">${escapeHtml(business.name)}</p>
+          <h3>${escapeHtml(page.title)}</h3>
+          <p>${escapeHtml(page.body)}</p>
+          <button class="button secondary" type="button" data-action="open-store" data-business="${escapeHtml(business.id)}">Ver convocatoria y postularme</button>
+        </article>`).join("");
+      $("#publicJobsEmpty")?.classList.toggle("hidden", jobs.length > 0);
+    }
   }
 
   function renderChips() {
-    const categories = ["Todas", ...Object.keys(categoryInfo)];
+    const categories = ["Todas", "Hogar", "Salud", "Muebles", "Tecnología", "Belleza", "Mascotas", "Juguetes", "Moda"];
 
     $("#categoryChips").innerHTML = categories.map(category => `
       <button type="button"
@@ -348,8 +509,20 @@
     const query = $("#listingSearch").value.trim().toLocaleLowerCase("es");
 
     const filtered = businesses.filter(business => {
-      const matchesCategory =
-        selectedCategory === "Todas" || business.category === selectedCategory;
+      const categoryAliases = {
+        Hogar: ["hogar", "electrodoméstico", "electrodomestico"],
+        Salud: ["salud", "farmacia", "cuidado personal"],
+        Muebles: ["mueble", "mobiliario"],
+        Tecnología: ["tecnología", "tecnologia", "celular", "móvil", "movil"],
+        Belleza: ["belleza", "maquillaje", "cosmética", "cosmetica"],
+        Mascotas: ["mascota", "veterinaria", "animal"],
+        Juguetes: ["juguete", "juego"],
+        Moda: ["moda", "ropa", "calzado", "accesorio"]
+      };
+      const businessCategory = String(business.category || "").toLocaleLowerCase("es");
+      const matchesCategory = selectedCategory === "Todas" ||
+        (categoryAliases[selectedCategory] || [selectedCategory.toLocaleLowerCase("es")])
+          .some(alias => businessCategory.includes(alias));
 
       const searchable = [
         business.name,
@@ -384,6 +557,102 @@
     showView("listing");
   }
 
+  async function toggleFavorite(productId, button) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(productId)) {
+      showToast("Este producto no está disponible para guardarse como favorito.");
+      return;
+    }
+    if (!window.supabase || !window.MIEJE_SUPABASE_URL || !window.MIEJE_SUPABASE_PUBLISHABLE_KEY) {
+      showToast("No fue posible conectar con tu cuenta.");
+      return;
+    }
+    button.disabled = true;
+    try {
+      const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
+      const { data: userData, error: userError } = await client.auth.getUser();
+      if (userError || !userData.user) {
+        favoriteProductIds = new Set();
+        favoriteUserId = null;
+        renderListing();
+        window.location.href = "cuenta.html";
+        return;
+      }
+      if (favoriteUserId !== userData.user.id) {
+        const { data: favoriteRows, error: favoritesError } = await client.from("customer_favorites")
+          .select("product_id")
+          .eq("user_id", userData.user.id);
+        if (favoritesError) throw favoritesError;
+        favoriteProductIds = new Set((favoriteRows || []).map(row => row.product_id));
+        favoriteUserId = userData.user.id;
+      }
+      const { data: existing, error: lookupError } = await client.from("customer_favorites")
+        .select("id").eq("user_id", userData.user.id).eq("product_id", productId).maybeSingle();
+      if (lookupError) throw lookupError;
+      if (existing) {
+        const { error } = await client.from("customer_favorites").delete().eq("id", existing.id);
+        if (error) throw error;
+        favoriteProductIds.delete(productId);
+        document.querySelectorAll('[data-action="favorite"]').forEach(favoriteButton => {
+          if (favoriteButton.dataset.product === productId) favoriteButton.textContent = "♡ Guardar";
+        });
+        showToast("Producto retirado de tus favoritos.");
+      } else {
+        const { error } = await client.from("customer_favorites").insert({ user_id:userData.user.id, product_id:productId });
+        if (error) throw error;
+        favoriteProductIds.add(productId);
+        document.querySelectorAll('[data-action="favorite"]').forEach(favoriteButton => {
+          if (favoriteButton.dataset.product === productId) favoriteButton.textContent = "♥ Guardado";
+        });
+        showToast("Producto agregado a tus favoritos.");
+      }
+    } catch (error) {
+      console.warn("No se pudo actualizar el favorito.", error);
+      showToast(error.message || "No fue posible actualizar tus favoritos.");
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function closeProductDetails() {
+    const modal = $("#productDetailModal");
+    if (!modal) return;
+    modal.classList.add("hidden");
+    modal.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("modal-open");
+  }
+
+  function openProductDetails(businessId, productId) {
+    const business = getBusiness(businessId);
+    const product = business && getProduct(business, productId);
+    if (!business || !product) {
+      showToast("No encontramos la información de este producto.");
+      return;
+    }
+    const canOrder = business.isRegistered === true && business.isActive !== false && Number(product.inventory || 0) > 0;
+    const saved = favoriteProductIds.has(product.id);
+    $("#productDetailContent").innerHTML = `
+      <div class="product-detail-layout">
+        <div class="product-detail-image"><img src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}"></div>
+        <div class="product-detail-copy">
+          <p class="eyebrow">${escapeHtml(business.category || "Negocio local")}</p>
+          <h2 id="productDetailTitle">${escapeHtml(product.name)}</h2>
+          <p class="product-detail-store">Vendido por <strong>${escapeHtml(business.name)}</strong></p>
+          <p class="product-detail-description">${escapeHtml(product.description || "Consulta con la tienda para conocer más detalles.")}</p>
+          <p class="product-detail-price">${money(product.price)}</p>
+          <p class="product-detail-stock">${canOrder ? (Number(product.inventory) > 5 ? "Disponible" : "Últimas unidades disponibles") : business.isActive === false ? "Tienda temporalmente no disponible" : "Agotado o no disponible para compra en línea"}</p>
+          <div class="product-detail-actions">
+            <button type="button" class="btn lime" data-action="detail-add" data-business="${escapeHtml(business.id)}" data-product="${escapeHtml(product.id)}" ${canOrder ? "" : "disabled"}>Agregar al carrito</button>
+            ${business.isRegistered === true ? `<button type="button" class="btn secondary" data-action="favorite" data-product="${escapeHtml(product.id)}">${saved ? "♥ Guardado" : "♡ Guardar en favoritos"}</button>` : ""}
+          </div>
+        </div>
+      </div>`;
+    const modal = $("#productDetailModal");
+    modal.classList.remove("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("modal-open");
+    modal.querySelector(".product-detail-close")?.focus();
+  }
+
   function productCard(business, product) {
     const canOrder = business.isRegistered === true && business.isActive !== false && Number(product.inventory || 0) > 0;
     const buttonText = !business.isRegistered ? "Demostración" : Number(product.inventory || 0) > 0 ? "+ Agregar" : "Agotado";
@@ -391,7 +660,7 @@
       <article class="product-card">
         <img src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}" loading="lazy">
         <div class="product-info">
-          <h4>${escapeHtml(product.name)}</h4>
+          <button type="button" class="product-detail-link" data-action="product-details" data-business="${escapeHtml(business.id)}" data-product="${escapeHtml(product.id)}"><h4>${escapeHtml(product.name)}</h4></button>
           <p>${escapeHtml(product.description)}</p>
           <div class="product-bottom">
             <span class="product-price">${money(product.price)}</span>
@@ -399,6 +668,7 @@
               data-action="add"
               data-business="${escapeHtml(business.id)}"
               data-product="${escapeHtml(product.id)}">${buttonText}</button>
+            ${business.isRegistered === true ? `<button type="button" class="add-button" data-action="favorite" data-product="${escapeHtml(product.id)}">${favoriteProductIds.has(product.id) ? "♥ Guardado" : "♡ Guardar"}</button>` : ""}
           </div>
         </div>
       </article>`;
@@ -433,7 +703,7 @@
     const contentPagesHtml = contentPages.map(page => {
       const fields = Array.isArray(page.content?.form_fields) ? page.content.form_fields : [];
       const customFields = page.content_type === "job_form" ? fields.map((field, index) => `<label>${escapeHtml(field)}<input name="custom_field_${index}" required maxlength="500"></label>`).join("") : "";
-      return `<section class="info-panel"><h3>${escapeHtml(page.title)}</h3><p>${escapeHtml(page.body)}</p>${page.content_type === "job_form" ? `<form class="job-application-form" data-job-page="${escapeHtml(page.id)}"><div aria-hidden="true" style="position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden"><label>No completar este campo<input name="website" tabindex="-1" autocomplete="off"></label></div><label>Nombre completo<input name="applicant_name" required maxlength="120"></label><label>Teléfono o correo<input name="applicant_contact" required maxlength="180"></label>${customFields}<label>Experiencia y mensaje<textarea name="applicant_message" rows="3" maxlength="2000"></textarea></label><label>Hoja de vida (PDF, DOC o DOCX; máximo 5 MB)<input type="file" name="resume" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label><label><input type="checkbox" name="privacy_consent" required> Autorizo el tratamiento de mis datos para gestionar esta postulación.</label><button class="button primary" type="submit">Enviar postulación</button></form>` : ""}</section>`;
+      return `<section class="info-panel"><h3>${escapeHtml(page.title)}</h3><p>${escapeHtml(page.body)}</p>${page.content_type === "job_form" ? `<form class="job-application-form" data-job-page="${escapeHtml(page.id)}"><div aria-hidden="true" style="position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden"><label>No completar este campo<input name="website" tabindex="-1" autocomplete="off"></label></div><label>Nombre completo<input name="applicant_name" required maxlength="120"></label><label>Teléfono o correo<input name="applicant_contact" required maxlength="180"></label>${customFields}<label>Experiencia y mensaje<textarea name="applicant_message" rows="3" maxlength="2000"></textarea></label><label>Hoja de vida (PDF, DOC o DOCX; máximo 5 MB)<input type="file" name="resume" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label><label><input type="checkbox" name="privacy_consent" data-policy-version="${JOB_APPLICATION_PRIVACY_CONSENT_VERSION}" required> Autorizo el tratamiento de mis datos para gestionar esta postulación.</label><button class="button primary" type="submit">Enviar postulación</button></form>` : ""}</section>`;
     }).join("");
 
     $("#storeContent").innerHTML = `
@@ -450,7 +720,9 @@
         <section>
           <h2 class="store-section-title">Productos de esta tienda</h2>
           <div class="product-grid">
-            ${business.products.map(product => productCard(business, product)).join("")}
+            ${business.products.length
+              ? business.products.map(product => productCard(business, product)).join("")
+              : '<p class="empty-products" role="status">Esta tienda todavía no tiene productos publicados.</p>'}
           </div>
         </section>
 
@@ -471,6 +743,7 @@
           <section class="assistant-panel">
             <h3>Asistente de ${business.name}</h3>
             <p>Pregunta por productos, precios, horario o ubicación. Las respuestas se basan en la información visible del negocio y su catálogo.</p>
+            <p class="muted">Este asistente es una ayuda básica y no es un canal de soporte ni permite gestionar pedidos o reclamos. No compartas contraseñas, códigos, datos de pago, teléfonos ni direcciones personales.</p>
             <div id="chatMessages" class="chat-messages">
               <div class="chat-bubble">¡Hola! Soy el asistente de ${escapeHtml(business.name)}. ¿Qué deseas saber?</div>
             </div>
@@ -815,6 +1088,24 @@
         addToCart(actionButton.dataset.business, actionButton.dataset.product);
       }
 
+      if (action === "product-details") {
+        openProductDetails(actionButton.dataset.business, actionButton.dataset.product);
+      }
+
+      if (action === "close-product-detail") {
+        closeProductDetails();
+      }
+
+      if (action === "detail-add") {
+        addToCart(actionButton.dataset.business, actionButton.dataset.product);
+        closeProductDetails();
+        openCart();
+      }
+
+      if (action === "favorite") {
+        void toggleFavorite(actionButton.dataset.product, actionButton);
+      }
+
       if (action === "quantity") {
         const item = cart.find(entry => entry.key === actionButton.dataset.key);
 
@@ -872,6 +1163,10 @@
       if (!business || !window.supabase || !window.MIEJE_SUPABASE_URL || !window.MIEJE_SUPABASE_PUBLISHABLE_KEY) { showToast("No se pudo enviar la postulación en este momento."); return; }
       const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
       const formData = new FormData(jobForm);
+      if (formData.get("privacy_consent") !== "on") {
+        showToast("Autoriza el tratamiento de datos antes de enviar tu postulación.");
+        return;
+      }
       const applicationData = Object.fromEntries([...formData.entries()].filter(([key]) => key.startsWith("custom_field_")).map(([key, value]) => [key, String(value).trim()]));
       const resumeFile = formData.get("resume");
       const submitButton = jobForm.querySelector('button[type="submit"]');
@@ -884,6 +1179,8 @@
           const { data: uploadRequest, error: requestError } = await client.functions.invoke("create-job-application", {
             body: {
               action: "request_upload",
+              privacy_consent: formData.get("privacy_consent") === "on",
+              privacy_consent_version: JOB_APPLICATION_PRIVACY_CONSENT_VERSION,
               website: String(formData.get("website") || ""),
               business_id: business.id,
               content_page_id: jobForm.dataset.jobPage,
@@ -916,7 +1213,8 @@
             applicant_contact: String(formData.get("applicant_contact") || "").trim(),
             applicant_message: String(formData.get("applicant_message") || "").trim(),
             form_responses: applicationData,
-            privacy_consent: formData.get("privacy_consent") === "on"
+            privacy_consent: formData.get("privacy_consent") === "on",
+            privacy_consent_version: JOB_APPLICATION_PRIVACY_CONSENT_VERSION
           }
         });
         if (submitError || !submitted?.ok) throw submitError || new Error("No se pudo registrar la postulación.");
@@ -961,8 +1259,18 @@
     const address = String(form.get("address") || "").trim();
     const customerName = String(form.get("customerName") || "").trim();
     const customerPhone = String(form.get("phone") || "").trim();
+    const privacyConsent = event.currentTarget.elements.namedItem("privacyConsent");
+    const privacyConsentAccepted = privacyConsent instanceof HTMLInputElement && privacyConsent.checked === true;
+    const privacyConsentVersion = privacyConsent instanceof HTMLInputElement
+      ? String(privacyConsent.dataset.policyVersion || "")
+      : "";
     if (!paymentMethodId || !deliveryMethod || !address || !customerName || !customerPhone) {
       showToast("Completa tus datos, la dirección y la forma de pago.");
+      return;
+    }
+    if (!privacyConsentAccepted) {
+      showToast("Debes aceptar el tratamiento de datos para registrar el pedido.");
+      privacyConsent?.focus();
       return;
     }
     if (!window.supabase || !window.MIEJE_SUPABASE_URL || !window.MIEJE_SUPABASE_PUBLISHABLE_KEY) {
@@ -973,23 +1281,71 @@
     button.disabled = true;
     button.textContent = "Registrando pedido…";
     try {
+      if (!window.crypto?.randomUUID) throw new Error("Este navegador no permite validar de forma segura el intento de compra. Actualiza el navegador e inténtalo de nuevo.");
+      const checkoutPayload = {
+        business_id: business.id,
+        customer_name: customerName,
+        customer_phone: customerPhone,
+        delivery_address: address,
+        delivery_notes: `Método de entrega: ${deliveryMethod === "delivery" ? "Domicilio" : deliveryMethod}`,
+        payment_method_id: paymentMethodId,
+        privacy_consent: privacyConsentAccepted,
+        privacy_consent_version: privacyConsentVersion,
+        items: cart.map(item => ({ product_id: item.productId, quantity: item.quantity }))
+      };
       const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
-      const { data, error } = await client.functions.invoke("create-public-order", {
-        body: {
-          business_id: business.id,
-          customer_name: customerName,
-          customer_phone: customerPhone,
-          delivery_address: address,
-          delivery_notes: `Método de entrega: ${deliveryMethod === "delivery" ? "Domicilio" : deliveryMethod}`,
-          payment_method_id: paymentMethodId,
-          items: cart.map(item => ({ product_id: item.productId, quantity: item.quantity }))
-        }
+      const { data: sessionData, error: sessionError } = await client.auth.getSession();
+      if (sessionError) throw new Error("No fue posible verificar la sesión del cliente. Vuelve a intentarlo.");
+      const requestFingerprint = await getCheckoutFingerprint({
+        ...checkoutPayload,
+        customer_user_id: sessionData.session?.user?.id || null
       });
-      if (error) throw new Error(error.message || "No se pudo registrar el pedido.");
+      const savedPendingCheckout = readPendingCheckout();
+      const unresolvedRequest = pendingCheckoutRequest || savedPendingCheckout;
+      if (unresolvedRequest && unresolvedRequest.fingerprint !== requestFingerprint) {
+        throw new Error("Hay un intento de compra anterior que aún no tiene confirmación. Vuelve a ingresar exactamente los mismos datos y productos para consultar su resultado. No cambies el pedido hasta resolver ese intento.");
+      }
+      if (!pendingCheckoutRequest) {
+        pendingCheckoutRequest = restorePendingCheckout(requestFingerprint) || {
+          fingerprint: requestFingerprint,
+          idempotencyKey: window.crypto.randomUUID()
+        };
+        if (!savePendingCheckout(pendingCheckoutRequest)) {
+          pendingCheckoutRequest = null;
+          throw new Error("No se pudo guardar de forma segura el intento de compra en este navegador. No se envió el pedido. Revisa el almacenamiento del navegador e inténtalo nuevamente.");
+        }
+      }
+      const { data, error } = await client.functions.invoke("create-public-order", {
+        body: { ...checkoutPayload, idempotency_key: pendingCheckoutRequest.idempotencyKey }
+      });
+      if (error) {
+        let serverMessage = "";
+        let responseStatus = 0;
+        try {
+          const response = error.context;
+          responseStatus = Number(response?.status || 0);
+          if (response && typeof response.clone === "function") {
+            const payload = await response.clone().json();
+            if (typeof payload?.error === "string") serverMessage = payload.error;
+          }
+        } catch (parseError) {
+          console.warn("No se pudo leer el detalle del error del checkout.", parseError);
+        }
+
+        // Los errores 4xx conocidos indican que el servidor rechazó la compra
+        // antes de crearla. Una colisión de clave es la excepción: se conserva
+        // el intento porque podría existir un pedido asociado a esa clave.
+        const isIdempotencyConflict = serverMessage.toLocaleLowerCase("es").includes("clave de este intento");
+        if ([400, 409, 429].includes(responseStatus) && !isIdempotencyConflict) {
+          clearPendingCheckout();
+        }
+        throw new Error(serverMessage || error.message || "No se pudo registrar el pedido.");
+      }
       if (!data?.ok || !data.order) throw new Error(data?.error || "El servidor no confirmó el registro del pedido.");
       const order = data.order;
+      clearPendingCheckout();
       const tracking = order.public_tracking_token ? `\nCódigo privado de seguimiento: ${order.public_tracking_token}` : "";
-      window.alert(`Pedido registrado correctamente.\nNúmero de pedido: #${order.order_number}\nTotal: ${money(order.total)}${tracking}\n\nGuarda el código de seguimiento para consultar el estado de tu pedido.`);
+      window.alert(`Pedido registrado correctamente.\nNúmero de pedido: #${order.order_number}\nTotal: ${money(order.total)}\nMétodo de pago: ${order.payment_method_name || "el seleccionado en el checkout"}${tracking}\n\nGuarda el código de seguimiento para consultar el estado de tu pedido.`);
       cart = [];
       event.currentTarget.reset();
       updateCart();
@@ -1020,7 +1376,7 @@
       const order = data.order;
       const labels = { pending: "Recibido", confirmed: "Confirmado", preparing: "En preparación", ready: "Listo", out_for_delivery: "En camino", delivered: "Entregado", cancelled: "Cancelado" };
       const created = order.created_at ? new Intl.DateTimeFormat("es-CO", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Bogota" }).format(new Date(order.created_at)) : "—";
-      result.innerHTML = `<div class="info-panel"><strong>Pedido #${escapeHtml(order.order_number)}</strong><p>Negocio: ${escapeHtml(order.business_name || "—")}</p><p>Estado: <strong>${escapeHtml(labels[order.status] || order.status)}</strong></p><p>Fecha: ${escapeHtml(created)}</p><p>Total: ${money(order.total)}</p>${order.delivery_tracking ? `<p>Seguimiento: ${escapeHtml(order.delivery_tracking)}</p>` : ""}</div>`;
+      result.innerHTML = `<div class="info-panel"><strong>Pedido #${escapeHtml(order.order_number)}</strong><p>Negocio: ${escapeHtml(order.business_name || "—")}</p><p>Estado: <strong>${escapeHtml(labels[order.status] || order.status)}</strong></p><p>Fecha: ${escapeHtml(created)}</p>${order.delivery_tracking ? `<p>Seguimiento: ${escapeHtml(order.delivery_tracking)}</p>` : ""}</div>`;
     } catch (error) {
       result.textContent = error.message || "No se pudo consultar el pedido.";
     } finally {
@@ -1029,11 +1385,57 @@
   });
 
   document.addEventListener("keydown", event => {
-    if (event.key === "Escape") closeCart();
+    if (event.key === "Escape") {
+      closeProductDetails();
+      closeCart();
+    }
   });
 
+
+  async function loadPlatformBranding() {
+    if (!window.supabase || !window.MIEJE_SUPABASE_URL || !window.MIEJE_SUPABASE_PUBLISHABLE_KEY) return;
+    try {
+      const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
+      const { data, error } = await client.functions.invoke("get-platform-public-settings", { body: {} });
+      if (error || !data?.ok) return;
+      const settings = data.settings || {};
+      const siteName = String(settings.site_name || "MiEje Market").slice(0, 120);
+      const description = String(settings.site_description || "").slice(0, 2000);
+      document.title = siteName + " | Tienda virtual";
+      const brandText = document.querySelector(".logo > span:last-child");
+      if (brandText) {
+        brandText.textContent = siteName;
+        const tagline = document.createElement("small");
+        tagline.textContent = "Lo nuestro, más cerca";
+        brandText.append(tagline);
+      }
+      const footerBrand = document.querySelector("#platformFooterLogo");
+      if (footerBrand) footerBrand.textContent = siteName;
+      const heroDescription = document.querySelector("#platformHeroDescription");
+      if (heroDescription && description) heroDescription.textContent = description;
+      const logoMark = document.querySelector("#platformLogoMark");
+      if (logoMark && settings.logo_url) {
+        logoMark.textContent = "";
+        logoMark.style.backgroundImage = 'url("' + String(settings.logo_url).replace(/["\\\\]/g, "") + '")';
+        logoMark.style.backgroundSize = "contain";
+        logoMark.style.backgroundPosition = "center";
+        logoMark.style.backgroundRepeat = "no-repeat";
+      }
+      const hero = document.querySelector("#platformHero");
+      if (hero && settings.hero_image_url) {
+        hero.style.backgroundImage = 'linear-gradient(90deg, rgba(8,18,24,.88), rgba(8,18,24,.28)), url("' + String(settings.hero_image_url).replace(/["\\\\]/g, "") + '")';
+        hero.style.backgroundSize = "cover";
+        hero.style.backgroundPosition = "center";
+      }
+    } catch (error) {
+      console.warn("No se pudo cargar la identidad pública de MiEje Market.", error);
+    }
+  }
+
+  loadPlatformBranding();
   loadRegisteredBusinesses().finally(() => {
     renderFeatured();
+    renderPublicSections();
     renderListing();
     updateCart();
   });

@@ -1,0 +1,640 @@
+# Diseño de operaciones administrativas transaccionales
+
+Fecha: 16 nov 2026  
+Rama de trabajo: `correcciones-funcionales`
+
+## Propósito y límites
+
+Este documento define el diseño previo a implementar RPC administrativas. No es una migración ejecutable.
+
+No se aplicó SQL, no se modificó Supabase, no se enviaron invitaciones, no se alteraron usuarios o membresías y no se desplegó código. La implementación queda pendiente de verificar el esquema real y los permisos efectivos del proyecto independiente.
+
+## Regla general
+
+Las operaciones que modifican filas de PostgreSQL y sus eventos de auditoría deben ocurrir dentro de una sola transacción. Si falla la escritura de auditoría, la modificación principal también debe revertirse.
+
+Las llamadas externas, como el envío de correo de invitación, no forman parte de una transacción PostgreSQL. No se debe simular atomicidad entre la base de datos y el proveedor de correo.
+
+## Arquitectura propuesta
+
+1. La Edge Function autentica al usuario con `auth.getUser(token)`, verifica que el perfil no esté bloqueado, exige `platform_owner` y valida MFA `aal2`.
+2. La Edge Function valida los datos de entrada y llama una función SQL con una cuenta de servicio que nunca se expone al navegador.
+3. La función SQL vuelve a comprobar los requisitos críticos de negocio y el actor recibido: perfil existente, no bloqueado y rol técnico correcto. La autorización no debe depender solo de que el navegador o la Edge Function hayan enviado un identificador.
+4. La función SQL modifica las filas y escribe `audit_logs` dentro de la misma transacción.
+5. La función SQL no debe conceder permisos a `PUBLIC`, `anon` ni `authenticated`. El permiso de ejecución se limita al rol servidor previsto.
+6. Preferir `SECURITY INVOKER`. No añadir `SECURITY DEFINER` para resolver errores de permisos. Si una función requiere privilegios elevados por una razón demostrada, documentar el motivo, fijar `search_path` vacío y calificar todos los objetos con su esquema.
+7. La función devuelve un resultado explícito: actualizado, no encontrado, conflicto de estado, actor no autorizado o error. No debe ocultar fallos de auditoría.
+
+### Exposición de funciones y tablas
+
+Antes de elegir la ruta RPC, confirmar qué esquemas están expuestos en Data API y cómo se invocarán las funciones desde Edge Functions. Una función en un esquema no expuesto no estará disponible por la ruta REST normal. Si se usa una función en `public`, sus permisos EXECUTE deben restringirse expresamente; estar en un esquema expuesto no significa que deba ser pública.
+
+Además, desde el 30 de octubre de 2026 las tablas nuevas de `public` no quedan expuestas automáticamente a Data API en los proyectos existentes. Los GRANT de tablas y el RLS deben diseñarse por separado; los permisos de ejecución de funciones también se controlan por separado. No agregar GRANT genéricos para resolver errores. Referencia: https://supabase.com/changelog/45329-breaking-change-tables-not-exposed-to-data-and-graphql-api-automatically
+
+## Operaciones que deben ser atómicas
+
+### A. Cambiar rol o cargo de una membresía
+
+Contrato lógico propuesto:
+- Entrada: identificador de membresía, nuevo rol permitido, cargo, actor técnico.
+- Bloquear la fila del negocio con `FOR UPDATE` para serializar cambios administrativos dentro de ese negocio.
+- Bloquear y leer la membresía objetivo.
+- Comprobar que el negocio y la membresía existen y que el estado permite la operación.
+- Impedir retirar o cambiar el último rol de administrador activo.
+- Actualizar rol/cargo y registrar en auditoría el valor anterior y el nuevo.
+- Confirmar ambos cambios juntos.
+
+### B. Suspender una membresía
+
+Contrato lógico propuesto:
+- Entrada: membresía, motivo obligatorio, actor técnico.
+- Bloquear primero la fila del negocio y después la membresía.
+- Si se trata de un administrador activo, contar los demás administradores activos bajo el mismo bloqueo.
+- Rechazar la operación si deja el negocio sin administrador activo.
+- Actualizar estado y motivo; insertar auditoría con el motivo.
+- Si la auditoría falla, revertir la suspensión.
+
+### C. Reactivar una membresía
+
+Contrato lógico propuesto:
+- Entrada: membresía, motivo obligatorio, actor técnico.
+- Bloquear negocio y membresía.
+- Comprobar que el negocio continúa activo en el momento de confirmar la operación.
+- Reactivar y registrar auditoría dentro de la misma transacción.
+- Rechazar si el negocio está suspendido o cerrado.
+
+### D. Cambiar estado del negocio
+
+Contrato lógico propuesto:
+- Entrada: negocio, estado permitido, motivo y mensaje público cuando corresponda, actor técnico.
+- Bloquear la fila del negocio.
+- Comparar el estado anterior y el solicitado para detectar solicitudes repetidas o cambios concurrentes.
+- Actualizar estado y datos de suspensión.
+- Registrar estado anterior, nuevo estado y motivo en auditoría.
+- Confirmar en una sola transacción.
+
+Debe definirse funcionalmente si `closed` es reversible antes de implementar la operación.
+
+### E. Moderar contenido
+
+Contrato lógico propuesto:
+- Entrada: contenido, decisión aprobada/rechazada, nota, actor técnico.
+- Bloquear la fila del contenido.
+- Guardar el estado de moderación anterior.
+- Aplicar decisión; el rechazo debe retirar la publicación.
+- Registrar auditoría con valores anterior y nuevo.
+- Evitar que una decisión concurrente sobrescriba silenciosamente otra.
+
+### F. Crear negocio
+
+La inserción del negocio y su evento de auditoría deben ser atómicos. El técnico solo crea la ficha base; no configura los datos comerciales de la tienda.
+
+## Invitaciones: flujo durable, no transacción distribuida
+
+El envío de correo no puede revertirse si falla una escritura posterior en PostgreSQL. Diseño recomendado:
+
+1. Crear un registro de invitación pendiente con identificador idempotente, negocio, correo normalizado, rol, cargo, actor y estado.
+2. Aplicar una restricción única que impida invitaciones duplicadas activas para la misma combinación de negocio y correo.
+3. Para cuentas existentes, consultar el perfil y estado Auth; rechazar explícitamente perfiles bloqueados. No asignar automáticamente acceso a una cuenta no confirmada sin un flujo definido de confirmación/recuperación.
+4. Para cuentas nuevas, enviar el correo desde el servidor después de guardar la solicitud pendiente.
+5. Si el proveedor confirma el envío, cambiar el estado de invitación a enviada. Si falla, conservar el estado pendiente/error y permitir reintento controlado.
+6. Crear o activar la membresía con una operación idempotente que valide el estado del negocio y del usuario.
+7. Auditar cada transición de estado de la invitación.
+8. No reenviar correo ni crear otra membresía por un reintento del mismo identificador.
+
+Estados sugeridos: `pending`, `sending`, `sent`, `accepted`, `failed`, `expired`, `cancelled`. Definir los estados exactos y las transiciones permitidas antes de crear la tabla.
+
+La invitación a un usuario existente debe ser un flujo de asignación distinto al correo de invitación de una cuenta nueva. El sistema debe comunicar con claridad cuál de los dos casos ocurrió.
+
+## Pruebas de aceptación antes de producción
+
+1. Error provocado al insertar auditoría: ni la mutación ni el evento quedan parcialmente aplicados.
+2. Dos solicitudes simultáneas para suspender administradores distintos: nunca se elimina el último administrador activo.
+3. Cambio de rol simultáneo con suspensión: resultado serializado y consistente.
+4. Reactivación concurrente con suspensión/cierre del negocio: no se activa membresía en negocio inactivo.
+5. Dos moderaciones simultáneas: una detecta conflicto o se ejecuta en orden serial, con auditoría correcta.
+6. Reintento de la misma invitación: no duplica membresía ni correo.
+7. Usuario existente bloqueado: no recibe membresía.
+8. Correo enviado y fallo posterior: queda un estado recuperable, sin perder la trazabilidad.
+9. Usuario sin MFA AAL2 o sin rol técnico: la Edge Function rechaza la operación.
+10. Llamada directa a RPC por `anon` o `authenticated`: permiso denegado.
+11. Revisión de grants, RLS y Security Advisor después de aplicar cambios en un entorno de ensayo.
+
+## Bloqueos previos a escribir SQL ejecutable
+
+- Verificar las definiciones actuales de `audit_logs`, `businesses`, `business_memberships`, `profiles` y `business_content_pages` en el proyecto independiente.
+- Verificar claves, índices únicos, tipos de identificadores, columnas obligatorias y restricciones.
+- Verificar permisos del rol que ejecutará las funciones y si el esquema destino está expuesto a Data API.
+- Verificar el contrato de respuesta que espera la Edge Function.
+- Preparar un entorno aislado para pruebas de concurrencia. El proyecto actual no dispone de staging y no debe usarse producción para pruebas destructivas.
+
+## Estado
+
+- Diseño transaccional: documentado.
+- SQL ejecutable: no creado.
+- Edge Function: no modificada.
+- Supabase: sin cambios.
+- Pruebas: pendientes.
+- Despliegue/fusión: no realizados.
+
+
+## Verificación de esquema en Supabase independiente — solo lectura
+
+Consulta realizada el 16 nov 2026 sobre el proyecto independiente. No se modificaron datos.
+
+- `audit_logs`: `id` es `bigint GENERATED ALWAYS AS IDENTITY`; `entity_id` es `text`; `details` es `jsonb NOT NULL DEFAULT '{}'`; `business_id` y `actor_id` admiten NULL. La inserción normal puede omitir `id`.
+- `business_memberships`: identificadores UUID; restricción única `(business_id, user_id)); roles permitidos `business_admin` y `employee`; estados `active` y `suspended`; índice por `(business_id, role, status)).
+- `businesses`: identificador UUID; slug único; estados permitidos `active`, `suspended`, `closed`.
+- `profiles`: `id` enlaza con `auth.users`; `platform_role` solo admite `user` y `platform_owner`; existe `is_blocked`.
+- `business_content_pages`: UUID; estados de moderación `pending`, `approved`, `rejected`; existen `moderated_by` y `moderated_at`.
+- En `business_memberships` solo se observó el trigger de `updated_at`; el trigger de protección del último administrador del borrador **no está instalado** en el proyecto consultado.
+- En `businesses` y `business_content_pages` también se observó únicamente el trigger de `updated_at`.
+- Los helpers `private.has_business_role` y `private.business_is_active` existen como `SECURITY DEFINER`, con `search_path` vacío. En la comprobación de permisos, `authenticated` puede ejecutarlos y `anon` no; `service_role` no tiene permiso efectivo de ejecución. Las nuevas funciones servidoras no deben depender de esos helpers sin resolver primero su modelo de permisos.
+
+### Consecuencia para la implementación
+
+El esquema actual sí permite diseñar RPC transaccionales para las operaciones administrativas descritas, pero primero hay que incorporar y revisar el trigger del último administrador en una migración de ensayo. La Edge Function con `service_role` debe ejecutar funciones que usen permisos compatibles con ese rol; no se debe dar acceso global a los helpers privados ni cambiar sus privilegios sin necesidad.
+
+La verificación fue de metadatos, restricciones, índices, triggers y definiciones de funciones. No demuestra que las operaciones se comporten correctamente bajo concurrencia; eso requiere un entorno de ensayo con datos de prueba.
+
+
+## Revisión del contrato real de la Edge Function — solo lectura
+
+Consulta realizada el 16 nov 2026 sobre `supabase/functions/technical-business-management/index.ts` en `correcciones-funcionales`. No se modificó ni desplegó la función.
+
+### Hallazgos confirmados
+
+- `create_business`: inserta el negocio y luego escribe auditoría en una segunda petición. Si falla auditoría, devuelve `201` con advertencia; el negocio queda creado sin evento correspondiente.
+- `invite_member`: para usuarios nuevos envía primero el correo de Auth; después crea/actualiza perfil, crea membresía y registra auditoría en llamadas separadas. Un fallo posterior puede dejar invitación enviada sin membresía o membresía sin auditoría. Para usuarios existentes no se observa una comprobación de `profiles.is_blocked` antes de asignar acceso.
+- `update_member_assignment`: lee y cuenta administradores desde la Edge Function, actualiza membresía y registra auditoría por separado. La comprobación del último administrador no está serializada en la misma transacción.
+- `block_member`: cuenta administradores, suspende membresía y escribe auditoría en operaciones separadas. Dos solicitudes concurrentes pueden superar la comprobación de último administrador; un fallo de auditoría no revierte la suspensión.
+- `unblock_member`: comprueba el estado del negocio antes de reactivar, pero la lectura y actualización no comparten bloqueo transaccional; la auditoría también va separada.
+- `set_business_status`: actualiza estado del negocio y después registra auditoría. No compara el estado anterior esperado para detectar una transición concurrente.
+- `moderate_business_content`: lee el contenido, actualiza moderación y después registra auditoría. La lectura y escritura no bloquean la fila; una decisión concurrente puede ser sobrescrita.
+- `create_platform_financial_record` y `create_payroll_record`: crean el registro y luego intentan auditarlo por separado. Si falla auditoría, el registro financiero queda guardado y la función devuelve advertencia.
+- `update_platform_ai_settings`: actualiza configuración y audita por separado; informa advertencia si la auditoría falla.
+- `update_platform_public_settings`: actualiza configuración y luego audita. Si falla auditoría, responde con error aunque la configuración ya quedó modificada.
+- `resolve_payroll_record` y `resolve_block_request` ya llaman RPC dedicadas. Deben revisarse como ejemplos del patrón transaccional, sin asumir que su implementación o permisos estén validados solo por la llamada desde Edge Function.
+
+### Orden recomendado para cerrar los huecos
+
+1. **Primero:** `update_member_assignment`, `block_member` y `unblock_member`, usando una única operación de base de datos que bloquee la fila del negocio, valide el último administrador, cambie la membresía y escriba auditoría.
+2. **Segundo:** `set_business_status` y `moderate_business_content`, con bloqueo de fila, comprobación del estado anterior y auditoría en la misma transacción.
+3. **Tercero:** `create_business`, `create_platform_financial_record`, `create_payroll_record` y las dos operaciones de configuración, para eliminar escrituras parciales sin auditoría.
+4. **Cuarto:** rediseñar `invite_member` con registro durable/idempotente de invitación y separación entre envío externo de correo y confirmación de membresía. No se debe prometer atomicidad entre PostgreSQL y el proveedor de correo.
+
+### Contrato técnico a conservar
+
+La Edge Function ya valida el JWT, consulta el perfil y exige MFA `aal2` cuando `platform_role` es `platform_owner`. Las nuevas RPC deben recibir el identificador del actor desde el servidor, volver a verificar `profiles.platform_role = 'platform_owner'` y `is_blocked = false`, y limitar EXECUTE al rol de servidor. El cliente no debe poder invocarlas directamente.
+
+La operación de membresía debe bloquear siempre primero la fila del negocio y después la membresía objetivo. Todas las rutas que cambien rol o estado deben respetar ese mismo orden de bloqueo para evitar interbloqueos y carreras. La auditoría debe insertar el estado anterior y el nuevo, sin incluir datos personales innecesarios.
+
+### Estado actualizado
+
+- Esquema real y columnas de las cinco tablas principales: inspeccionados.
+- Contrato y secuencia de acciones administrativas de la Edge Function: inspeccionados.
+- Huecos de atomicidad: identificados y documentados.
+- SQL RPC: todavía no creado ni aplicado.
+- Edge Function: sin cambios.
+- Supabase: sin cambios.
+- Pruebas de concurrencia y fallos de auditoría: pendientes de un entorno aislado.
+
+
+## Revisión del trigger de último administrador en la rama
+
+El archivo `database/security/business-admin-boundaries.sql` de esta rama ya contiene `private.guard_last_active_business_admin()` y el trigger `guard_last_active_business_admin` sobre `public.business_memberships` para cambios de `role`, `status` o eliminación. El trigger cuenta administradores activos restantes y bloquea la fila del negocio antes de permitir retirar al último.
+
+Esta protección está únicamente en el archivo de la rama: la consulta de metadatos del proyecto Supabase independiente confirmó que el trigger todavía no está instalado allí. No debe considerarse activo en producción.
+
+El trigger es una defensa adicional, no sustituye las RPC transaccionales: no escribe `audit_logs`, no valida el actor técnico, no gestiona la transición de estado del negocio y no resuelve la carrera de reactivación contra una suspensión/cierre del negocio. Las RPC de membresía deben adquirir explícitamente el bloqueo del negocio antes de actualizar la membresía y escribir auditoría en la misma transacción. Mantener el mismo orden de bloqueo en todas las operaciones administrativas reduce el riesgo de interbloqueos.
+
+El trigger está declarado como `SECURITY INVOKER` (sin cláusula `SECURITY DEFINER`) y revoca EXECUTE a `PUBLIC`, `anon` y `authenticated`; el disparador se invoca por la operación de tabla, pero su cuerpo depende de los permisos de lectura del rol que ejecuta la actualización. Antes de habilitarlo, hay que verificar esos permisos con el rol servidor en un entorno aislado.
+
+
+## Primer borrador de RPC de membresías — revisión de esquema y permisos
+
+Consulta de solo lectura al proyecto independiente, 16 nov 2026:
+
+- La columna public.business_memberships.job_title **no existe todavía en Supabase**. La Edge Function de la rama ya selecciona e inserta esa columna en list_business_members, invite_member y update_member_assignment. Por tanto, desplegar esa Edge Function antes de incorporar la columna produciría errores de esquema en esas acciones.
+- La migración de rama database/security/business-admin-boundaries.sql añade job_title, establece su validación de longitud y prepara permisos de lectura. El borrador de RPC también contiene un ADD COLUMN IF NOT EXISTS defensivo; la secuencia debe mantenerse documentada para no tratar el campo como disponible antes de aplicar el cambio de esquema.
+- Se verificó que service_role tiene USAGE en public, SELECT/UPDATE sobre businesses y business_memberships, SELECT sobre profiles e INSERT sobre audit_logs. Esto respalda el patrón SECURITY INVOKER para las RPC servidoras, sin conceder ejecución a los roles cliente.
+
+### Borrador preparado
+
+Archivo: database/security/administrative-membership-rpcs-draft.sql.
+
+Incluye tres RPC servidoras:
+
+1. update_business_membership_assignment: cambio de rol/cargo, validación del último administrador, bloqueo de negocio antes de membresía y auditoría atómica.
+2. suspend_business_membership: suspensión con motivo, comprobación de último administrador y auditoría atómica.
+3. reactivate_business_membership: reactivación solo si el negocio está activo y el perfil de destino no está bloqueado, con auditoría atómica.
+
+Las funciones vuelven a validar que el actor sea platform_owner y no esté bloqueado. El borrador restringe EXECUTE a service_role, usa SECURITY INVOKER y search_path vacío. Se añadió bloqueo FOR SHARE al leer los perfiles del actor y del usuario reactivado/asignado para evitar que un bloqueo global concurrente pase inadvertido durante la operación. El cambio de rol/cargo devuelve sin mutación cuando los valores ya coinciden, evitando auditorías duplicadas por reintentos idénticos.
+
+### Límites pendientes antes de integrar
+
+- El borrador SQL no se ha ejecutado ni probado contra PostgreSQL; la verificación de sintaxis y concurrencia requiere staging.
+- La Edge Function aún no invoca estas RPC: sigue usando las operaciones separadas que se identificaron en la auditoría. No se debe considerar corregido el comportamiento hasta adaptar la función y probarla.
+- La protección del último administrador del trigger sigue sin estar instalada en Supabase. El borrador de business-admin-boundaries.sql debe revisarse y probarse junto con estas RPC.
+- set_business_status también actualiza la fila del negocio. Su futura RPC deberá conservar el mismo orden de bloqueo para que las transiciones de negocio y las operaciones de membresía se serialicen de forma predecible.
+
+### Estado actualizado
+
+- Primer borrador SQL de membresías: guardado en rama.
+- Revisión de permisos service_role: verificada por consulta de solo lectura.
+- job_title en Supabase: ausente; dependencia confirmada.
+- SQL aplicado: no.
+- Edge Function adaptada/desplegada: no.
+- Pruebas: pendientes de entorno aislado.
+
+
+## Adaptación de la Edge Function para membresías — solo rama
+
+Se actualizó `supabase/functions/technical-business-management/index.ts` en `correcciones-funcionales` para que las acciones `update_member_assignment`, `block_member` y `unblock_member` llamen respectivamente a `update_business_membership_assignment`, `suspend_business_membership` y `reactivate_business_membership`.
+
+La función ahora interpreta los resultados idempotentes de las RPC y traduce los códigos SQL esperados (`P0002`, `42501`, `23514`, `40001`, `22023`) a respuestas HTTP. Se retiraron de esas tres rutas las escrituras separadas de membresía y auditoría: ambas quedan dentro de la transacción PostgreSQL definida por las RPC.
+
+Verificación realizada: lectura de retorno del archivo en GitHub; se confirmaron los tres nombres de RPC y que las ramas `set_business_status` y `moderate_business_content` permanecen separadas, sin cambios en este paso. No se ejecutó `deno check`, no se desplegó la Edge Function y no se probaron llamadas HTTP porque las RPC aún no están instaladas en Supabase.
+
+**Orden de integración obligatorio:** revisar y aplicar en un entorno de ensayo el esquema y el trigger de `business-admin-boundaries.sql`; revisar y aplicar allí `administrative-membership-rpcs-draft.sql`; solo después probar la Edge Function adaptada. No desplegarla en el proyecto activo mientras esas dependencias no estén instaladas y verificadas.
+
+
+## Operaciones de negocio y moderación — borrador y adaptación de rama
+
+Se añadieron al mismo archivo SQL dos RPC adicionales:
+
+- `set_technical_business_status`: bloquea la fila del negocio, valida el actor técnico, normaliza motivo y mensaje público, actualiza estado y datos de suspensión, y escribe auditoría en la misma transacción. Mantiene los estados existentes `active`, `suspended` y `closed`; no se ha cambiado la regla funcional sobre si `closed` puede reabrirse.
+- `moderate_business_content_transactionally`: bloquea la fila de contenido, valida la decisión `approved`/`rejected`, actualiza nota y datos de moderación, retira de publicación el contenido rechazado y registra el cambio en auditoría dentro de la misma transacción. Aprobar no publica automáticamente el contenido, igual que el comportamiento anterior.
+
+La Edge Function de la rama ya invoca ambas RPC en `set_business_status` y `moderate_business_content`. Se añadió validación de UUID para el identificador de negocio y de contenido. Las cinco RPC del borrador usan `SECURITY INVOKER`, `search_path` vacío, revocan ejecución a `PUBLIC`, `anon` y `authenticated`, y conceden ejecución a `service_role`.
+
+Verificación de lectura de retorno: los nombres de las cinco RPC nuevas coinciden con los llamados correspondientes de la Edge Function. Esta comprobación no equivale a compilación TypeScript ni a ejecución SQL. La función también contiene otras RPC preexistentes para nómina y solicitudes de bloqueo, que no forman parte de este borrador.
+
+Pendiente: pruebas de errores, auditoría y concurrencia en staging; revisión final del contrato de respuesta; integración y despliegue solo después de instalar y verificar las migraciones en un entorno aislado. El proyecto Supabase activo sigue sin cambios.
+
+
+## Invitaciones y asignación de integrantes — revisión y cambio en rama
+
+### Hallazgos verificados
+
+- La función `private.handle_new_auth_user()` ya se ejecuta después de insertar un usuario en `auth.users` y crea `public.profiles` usando `raw_user_meta_data.display_name`. La Edge Function no debe volver a insertar manualmente el perfil: eso duplicaba trabajo y abría una ventana de carrera innecesaria.
+- `profiles` contiene `platform_role`, `is_blocked` y `display_name`. La nueva RPC exige que el perfil del destinatario exista y no tenga bloqueo global antes de asignarle acceso.
+- `business_memberships` tiene unicidad por negocio/usuario y campos `role`, `status`, `blocked_reason`, `created_by`; `job_title` aún no está en la base activa y se añade en el borrador SQL que depende de la migración de límites de administrador.
+- El flujo anterior enviaba primero el correo y después hacía inserciones separadas en perfil, membresía y auditoría. Si fallaba la última escritura, podía quedar una cuenta Auth sin asignación o una membresía sin evento de auditoría.
+
+### Cambio preparado en la rama
+
+Se añadió `create_business_membership_assignment` a `database/security/administrative-membership-rpcs-draft.sql`. La RPC bloquea el negocio, valida al actor técnico, valida el perfil destinatario y su bloqueo global, evita duplicar una membresía y escribe la membresía más el evento de auditoría en una sola transacción. Usa `SECURITY INVOKER`, `search_path` vacío, revoca ejecución a roles cliente y concede `EXECUTE` solo a `service_role`.
+
+La acción `invite_member` en `supabase/functions/technical-business-management/index.ts` ahora:
+
+1. Valida el identificador del negocio, correo, rol, nombre y cargo.
+2. Busca la cuenta existente con paginación limitada. Si llega al límite sin completar la búsqueda, se detiene y no asume que el correo está libre.
+3. Para una cuenta nueva, usa `inviteUserByEmail`. Una cuenta existente confirmada puede asignarse sin correo nuevo. Una cuenta existente sin confirmar puede recibir la asignación, pero la respuesta indica `requires_email_confirmation: true`; no podrá iniciar sesión hasta confirmar su correo. No se usa `auth.resend(type: signup)` para intentar reenviar una invitación.
+4. Llama a la RPC para crear la asignación y su auditoría de forma atómica.
+5. Devuelve un error recuperable si Auth envió el correo pero la asignación no pudo terminar. La cuenta no debe volver a crearse; el administrador puede reintentar la misma asignación.
+
+Se retiraron de esa acción las inserciones directas en `profiles`, `business_memberships` y `audit_logs`. La función existente que crea perfiles automáticamente permanece como responsable de crear el perfil inicial.
+
+### Configuración de correo pendiente de comprobar
+
+Supabase documenta que el SMTP predeterminado de proyectos hospedados no está destinado a producción y limita los destinatarios a direcciones autorizadas del equipo de la organización. Si MiEje Market sigue usando ese SMTP, eso puede explicar por qué los correos de invitación no llegan a destinatarios externos. No se ha inspeccionado ni modificado la configuración SMTP del proyecto. Antes de probar invitaciones reales, revisar SMTP personalizado, remitente/dominio y límites de envío.
+
+También hay que comprobar que la URL de `aceptar-invitacion.html` esté incluida en las Redirect URLs permitidas de Auth. Si no está permitida, Supabase puede ignorar `redirectTo` y usar la Site URL configurada.
+
+### Límites y pruebas pendientes
+
+- La llamada de correo de Auth y la transacción PostgreSQL no pueden ser una sola transacción distribuida. Si Auth crea el usuario y luego falla la asignación, el flujo deja un usuario pendiente en Auth; el reintento detecta la cuenta y puede finalizar la asignación sin crear otra cuenta ni reenviar automáticamente el correo. La respuesta indica que la confirmación del correo sigue pendiente. Una tabla outbox de invitaciones con estado y reintentos sería una mejora posterior si se necesita recuperación automática sin intervención.
+- Aún no se ha compilado ni desplegado la Edge Function y las RPC no están instaladas en Supabase.
+- Probar en staging: usuario nuevo, usuario existente confirmado, usuario existente sin confirmar, perfil globalmente bloqueado, negocio suspendido, membresía duplicada, SMTP rechazado, fallo de auditoría y dos solicitudes simultáneas.
+- Confirmar la URL de redirección permitida y la configuración SMTP antes de cualquier envío externo.
+
+Estado: borrador SQL y Edge Function modificados solo en `correcciones-funcionales`; Supabase activo sin cambios.
+
+
+### Precisión adicional sobre invitaciones pendientes
+
+Se retiró del código el intento de llamar `auth.resend({ type: 'signup' })` para cuentas existentes sin confirmar. Supabase documenta `resend` para confirmaciones de registro, no como reenvío de una invitación pendiente. La asignación puede completarse, pero la respuesta marca `requires_email_confirmation: true` y el usuario no podrá iniciar sesión hasta verificar el correo.
+
+Supabase también ofrece `auth.admin.generateLink({ type: 'invite' })` para generar el enlace sin enviarlo; la documentación indica que estos enlaces deben enviarse mediante un proveedor de correo personalizado. MiEje Market todavía no tiene ese mecanismo integrado, por lo que no se generarán ni expondrán enlaces de invitación manualmente desde esta función.
+
+
+### Recuperación de una asignación interrumpida
+
+La acción devuelve ahora `requires_email_confirmation` según el estado Auth del usuario. Si el primer intento consiguió crear la cuenta y enviar la invitación, pero falló la RPC de asignación, el siguiente intento detecta esa cuenta existente y puede completar la membresía sin crear otra cuenta ni enviar un correo duplicado. Si la cuenta sigue sin confirmar, el acceso queda pendiente de la verificación de correo. Si el mensaje original no llegó, aún se necesita un proceso explícito de reenvío mediante el proveedor de correo; la Edge Function no finge que el correo fue reenviado.
+
+
+## Creación de negocios, movimientos financieros y nómina — cambios en rama
+
+### Creación de negocios
+
+Se añadió `create_technical_business_transactional` a `database/security/administrative-membership-rpcs-draft.sql` y la acción `create_business` de la Edge Function ahora la invoca. La RPC valida nombre, categoría y slug; vuelve a comprobar que el actor sea `platform_owner` y no esté bloqueado; crea únicamente el registro base del negocio y escribe `business.created` en `audit_logs` dentro de la misma transacción. Si falla la auditoría, también se revierte la creación. Se conserva la separación: los datos comerciales de la tienda los configura su administrador, no el técnico.
+
+La tabla `businesses` ya existe en el proyecto independiente. La consulta de solo lectura confirmó los estados permitidos `active`, `suspended` y `closed`, la unicidad del slug y permisos de `service_role` para insertar negocios y auditoría. No se modificó el esquema activo.
+
+### Movimientos financieros y nómina
+
+La tabla `platform_financial_records` y la tabla `payroll_records` todavía no existen en Supabase. El proyecto sí tiene `financial_transactions`, que corresponde a transacciones asociadas a pedidos de negocios; no se debe reutilizar como libro financiero interno de la plataforma.
+
+Se amplió `database/platform/platform-finance-payroll-draft.sql` con:
+
+- `create_platform_financial_record_transactional`: crea el movimiento interno y su auditoría en la misma transacción.
+- `create_platform_payroll_record_transactional`: crea una obligación de nómina pendiente y su auditoría en la misma transacción.
+- `resolve_platform_payroll_record`: se cambió de `SECURITY DEFINER` a `SECURITY INVOKER`, se añadió validación del perfil técnico y se mantiene la actualización de nómina, creación del gasto asociado y auditoría en una sola transacción.
+
+Las tres funciones comprueban el rol `platform_owner` y que el perfil no esté bloqueado. Se mantiene `search_path` vacío y `EXECUTE` solo para `service_role`. Se añadieron validaciones de importes positivos, límite compatible con `numeric(14,2)` y máximo de dos decimales, moneda de tres letras y tipos de movimiento permitidos.
+
+La Edge Function ya llama a estas RPC para `create_platform_financial_record` y `create_payroll_record`; dejó de insertar las filas y auditorías por separado. La acción `resolve_payroll_record` ya llamaba a su RPC transaccional, que ahora usa `SECURITY INVOKER` y vuelve a validar el actor.
+
+### Exposición y orden de integración
+
+Supabase cambió el comportamiento de exposición automática de tablas nuevas en el Data API: desde el 30 de octubre de 2026, las nuevas tablas `public` no se exponen automáticamente. Esto es apropiado para las tablas financieras y de nómina: deben permanecer fuera del acceso de clientes y concederse solo al servidor. La Edge Function usará las RPC públicas con ejecución restringida a `service_role`; las tablas no deben recibir grants para `anon` ni `authenticated`.
+
+Orden pendiente para un entorno de ensayo:
+
+1. Aplicar y verificar `platform-finance-payroll-draft.sql` junto con las dependencias de negocio y auditoría.
+2. Aplicar y verificar `administrative-membership-rpcs-draft.sql`.
+3. Ejecutar pruebas de creación de negocio, colisión de slug, movimientos financieros, creación de nómina, pago y cancelación, incluyendo fallo de auditoría.
+4. Revisar los permisos efectivos, RLS y Advisors antes de integrar o desplegar.
+
+No se ejecutó SQL en el proyecto activo, no se desplegó la Edge Function y no se hicieron transferencias ni pagos reales. Estos registros son un control contable interno; no representan movimiento de dinero.
+
+
+## Configuración pública global y asistente IA — cambios en rama
+
+Se revisaron las acciones `get_platform_public_settings`, `get_platform_ai_settings`, `update_platform_ai_settings` y `update_platform_public_settings` de la Edge Function técnica. Antes, las dos acciones de actualización escribían primero la configuración y después intentaban insertar `audit_logs` por separado. En el caso de IA, un fallo de auditoría se devolvía como advertencia aunque la configuración ya hubiera cambiado; en configuración pública, se devolvía un error después de que el cambio ya estaba guardado. Ambos flujos permitían resultados parciales.
+
+### RPC transaccionales añadidas
+
+- `update_platform_public_settings_transactional`, en `database/platform/platform-public-settings-draft.sql`.
+- `update_platform_ai_settings_transactional`, en `database/ai/ai-settings-draft.sql`.
+
+Ambas funciones:
+
+- Usan `SECURITY INVOKER` y `SET search_path = ''`.
+- Vuelven a comprobar que el actor exista, sea `platform_owner` y no esté bloqueado.
+- Validan los límites de los campos.
+- Guardan o actualizan la fila única de configuración y registran `audit_logs` en la misma transacción.
+- Revocan `EXECUTE` a `PUBLIC`, `anon` y `authenticated`, y lo conceden únicamente a `service_role`.
+
+La Edge Function ahora invoca estas RPC en lugar de hacer `upsert` e insertar auditoría en solicitudes separadas. Las acciones de lectura continúan consultando las tablas desde el servidor técnico; no se concede acceso directo a los navegadores.
+
+Guardar la configuración del asistente sigue siendo solo persistencia de nombre, activación e instrucciones. No conecta ni ejecuta un proveedor de IA.
+
+### Esquema activo
+
+Consulta de solo lectura al proyecto Supabase independiente, 16 nov 2026: no existen todavía `platform_public_settings`, `platform_ai_settings`, `business_ai_settings`, `platform_financial_records` ni `payroll_records`. Las migraciones correspondientes siguen siendo borradores y no deben considerarse instaladas.
+
+### Pruebas pendientes
+
+En un entorno de ensayo, probar:
+
+1. Actualización válida de configuración pública y lectura posterior.
+2. Rechazo de URLs que no sean HTTPS y de WhatsApp fuera del formato permitido.
+3. Actualización válida de IA y rechazo de nombre/instrucciones fuera de límites.
+4. Actor bloqueado o sin rol técnico rechazado por cada RPC.
+5. Fallo forzado de inserción en `audit_logs`: la actualización debe revertirse, sin guardar una configuración parcial.
+6. Llamadas directas como `anon` y `authenticated` sin permiso de ejecución.
+
+No se ejecutó ninguna migración en el proyecto activo, no se desplegó la Edge Function y no se conectó un proveedor de IA.
+
+
+## Solicitudes de bloqueo de acceso — revisión de permisos y concurrencia
+
+Se revisó `database/security/access-block-requests-draft.sql` junto con las acciones existentes `list_block_requests` y `resolve_block_request` de `technical-business-management`. Corrección respecto a la primera inspección: ambas acciones ya estaban implementadas en la Edge Function; no fue necesario añadir rutas nuevas. La acción de resolución ya invocaba `resolve_access_block_request` y el listado usa el cliente servidor.
+
+### Hallazgos y correcciones en rama
+
+- La RPC `resolve_access_block_request` estaba declarada `SECURITY DEFINER`. Se cambió a `SECURITY INVOKER`, manteniendo `search_path` vacío y `EXECUTE` solo para `service_role`.
+- La migración revocaba todos los permisos de `access_block_requests` y luego concedía solo `SELECT` a `service_role`. Eso impedía que una RPC `SECURITY INVOKER` actualizara la solicitud. Ahora concede `SELECT, UPDATE` a `service_role`; no se concede lectura ni actualización a los clientes.
+- Se añadió un índice único parcial para impedir más de una solicitud pendiente para el mismo integrante y negocio.
+- La RPC ahora valida explícitamente IDs y decisión no nulos y bloquea el perfil técnico con `FOR SHARE` mientras valida rol y bloqueo global.
+- Al aprobar, bloquea primero la fila del negocio y después la membresía. Este orden coincide con las demás RPC administrativas y serializa el conteo del último administrador con cambios concurrentes de rol o estado.
+- La suspensión aprobada afecta únicamente a la membresía del negocio solicitado; no bloquea la cuenta global ni elimina sus accesos a otros negocios.
+- Rechazar la solicitud no modifica la membresía. Tanto la resolución como la auditoría se guardan en la misma transacción.
+
+### Permisos comprobados en el proyecto independiente
+
+Consulta de solo lectura, 16 nov 2026:
+
+- `service_role` tiene `SELECT` sobre `profiles`, `business_memberships` y `audit_logs`.
+- `service_role` tiene `UPDATE` sobre `business_memberships` y `INSERT` sobre `audit_logs`.
+- `access_block_requests` todavía no existe en la base activa; por tanto, sus permisos se verificaron contra el contenido del borrador, no mediante una tabla desplegada.
+- La política RLS activa de `business_memberships` permite a un administrador ver las membresías de su propio negocio. Esto permite que la política de inserción de la solicitud compruebe el integrante objetivo sin exponer solicitudes a otros negocios.
+- Los helpers `private.has_business_role` y `private.business_is_active` ya existen como `SECURITY DEFINER` y se usan en políticas RLS existentes. La nueva RPC de resolución no depende de ellos.
+
+### Estado y pruebas pendientes
+
+El cambio es solo de rama. No se aplicó el SQL ni se desplegó la Edge Function. En staging deben probarse: creación por administrador del negocio correcto; rechazo de empleado y de administrador de otro negocio; prevención de duplicados pendientes; aprobación y rechazo; último administrador; doble resolución concurrente; perfil técnico bloqueado; rollback completo si falla la auditoría; y denegación de ejecución directa para `anon` y `authenticated`.
+
+
+## Auditoría de acceso a paneles y consultas — 16 nov 2026
+
+### Verificaciones de solo lectura en Supabase activo
+
+- `resolve-my-access` valida la sesión con Auth, rechaza perfiles inexistentes o bloqueados y devuelve únicamente membresías activas de negocios activos. El cliente comprueba además que el rol de la membresía coincida con el panel solicitado.
+- `technical-business-management` vuelve a validar el usuario en el servidor. Para `platform_owner` exige MFA AAL2 antes de ejecutar cualquier acción técnica. El registro de acceso a panel también comprueba el rol exacto y que el negocio esté activo.
+- Las membresías no admiten INSERT/UPDATE/DELETE desde `authenticated`; las escrituras están reservadas al servidor. La lectura directa está limitada por RLS a la propia membresía, administradores del mismo negocio y propietario técnico en el esquema activo.
+- Los pedidos y sus líneas se pueden consultar por integrantes activos del negocio. El personal necesita datos de cliente, dirección, estado y productos para preparar y entregar pedidos.
+- En el esquema activo, `authenticated` todavía tiene SELECT directo sobre importes y estados de pago de `orders` y sobre `unit_price`/`line_total` de `order_items`. La interfaz de empleado oculta esos valores, pero eso no impide consultarlos directamente por Data API. La migración `database/orders/order-financial-access-draft.sql` ya prepara la revocación de esas columnas y entrega los importes al administrador mediante RPC con validación de rol. Sigue pendiente de aplicar y probar en un entorno aislado.
+- En el esquema activo, la política `businesses_admin_update` conserva el bypass `is_platform_owner()`; el borrador `database/security/business-admin-boundaries.sql` lo elimina y limita las columnas comerciales que puede modificar el administrador. Sigue pendiente de aplicar y probar.
+- No existen aún en la base activa `access_block_requests`, `payroll_records` ni `platform_financial_records`; sus operaciones solo pueden validarse estáticamente hasta que haya un entorno de ensayo con las migraciones.
+
+### Corrección de consulta preparada en la rama
+
+La consulta de pedidos del panel administrativo seleccionaba `payment_method_name`, columna que no existe en la tabla `orders` activa. El resultado era un error de consulta que impedía cargar la bandeja de pedidos del administrador. Se retiró esa columna del SELECT en `panel-live.js`; el método de pago se obtiene de `get_business_admin_order_financials`, que devuelve `payment_method` para el administrador autorizado.
+
+### Alcance y pruebas pendientes
+
+- Cambio de consulta guardado solo en `correcciones-funcionales`.
+- No se ejecutó SQL, no se desplegó ninguna Edge Function y no se modificó `main` ni GitHub Pages.
+- La comprobación de permisos es una inspección de catálogos/RLS; no sustituye pruebas de acceso con cuentas reales de administrador y empleado.
+- En staging, probar que el empleado no pueda leer importes, estados de pago ni precios de línea, y que el administrador sí los reciba por las RPC; comprobar también que la consulta corregida carga pedidos correctamente.
+
+
+## Revisión de estados y operaciones financieras de pedidos — 16 nov 2026
+
+### Incompatibilidad de estados corregida en el borrador
+
+La interfaz ya utiliza el flujo `received → confirmed → preparing → ready → on_the_way → delivered`, pero el trigger de transición en `business-admin-boundaries.sql` todavía aceptaba `pending` y `out_for_delivery`. La base activa confirma que su CHECK y su valor predeterminado también usan el vocabulario anterior.
+
+Se corrigió el borrador para que, al aplicarse en un entorno de ensayo:
+- convierta pedidos históricos `pending` a `received`;
+- convierta `out_for_delivery` a `on_the_way`;
+- reemplace el CHECK con los siete estados usados por la interfaz;
+- establezca `received` como valor predeterminado;
+- valide las transiciones normales con los nuevos nombres.
+
+La operación retira temporalmente el CHECK dentro de la misma ejecución SQL, transforma los valores y vuelve a crear la restricción. Debe probarse primero con una copia de la base y revisar que no existan estados históricos fuera del CHECK vigente.
+
+### Controles financieros revisados
+
+- `mark_order_payment_received`: solo administrador activo del negocio; exige pago pendiente, bloquea el pedido, registra el movimiento financiero, actualiza el pago y audita en una transacción. No cobra automáticamente.
+- `complete_order_refund`: solo administrador activo; exige pedido cancelado, pago registrado y conciliado por el total, cancelación aprobada y ausencia de reembolso previo. Registra transacción, detalle, estado y auditoría en una sola operación. Es registro de un reembolso ya realizado externamente, no mueve dinero.
+- `request_order_cancellation`: permite al administrador o empleado registrar la solicitud, pero no decidirla.
+- `decide_order_cancellation`: solo administrador activo; aprueba o rechaza. La aprobación cancela el pedido y repone inventario de forma transaccional; no realiza reembolsos.
+- Gastos: `register_business_expense`, `pay_business_expense`, `void_business_expense` y `attach_business_expense_receipt` validan administrador activo, bloquean el gasto cuando corresponde y escriben auditoría. El empleado no tiene acciones de gasto en la interfaz.
+
+### Brechas que permanecen en Supabase activo
+
+- El trigger activo de pedidos aún permite al propietario técnico cambiar estados y acepta el vocabulario antiguo.
+- Las políticas activas de pedidos y líneas todavía dan al propietario técnico lectura global; la política de actualización también le permite cambiar estados.
+- La interfaz y los borradores de SQL están preparados para el flujo nuevo, pero el CHECK, trigger y políticas corregidos todavía no están instalados.
+- Las funciones de cancelación y reembolso son borradores y no están disponibles en producción hasta aplicar sus migraciones y probarlas.
+
+### Pruebas obligatorias en staging
+
+1. Cada transición válida del flujo nuevo funciona para administrador y empleado del mismo negocio.
+2. Saltos, retrocesos, cambio directo a `cancelled`, negocio suspendido, técnico y usuario de otro negocio son rechazados.
+3. La migración convierte correctamente los estados históricos y conserva los pedidos y sus auditorías.
+4. Empleado no puede confirmar pagos, registrar reembolsos ni leer datos financieros.
+5. Administrador de otro negocio no puede operar sobre el pedido.
+6. Cancelación aprobada restaura inventario una sola vez; rechazo no modifica inventario.
+7. Reembolso duplicado o sin pago conciliado se rechaza.
+8. Gasto, pago de gasto, anulación y comprobante quedan auditados y no admiten edición libre.
+
+No se ejecutó SQL ni se desplegaron funciones durante esta revisión.
+
+
+### Corrección adicional: escrituras directas de gastos
+
+La inspección de privilegios efectivos del esquema activo encontró que `authenticated` conserva INSERT y UPDATE de tabla y también privilegios por columna sobre prácticamente todos los campos de `business_expenses`. Las políticas RLS permiten esos cambios a administradores activos. Aunque la interfaz usa RPCs, un cliente podía intentar insertar o modificar directamente y omitir la auditoría transaccional de los procedimientos.
+
+Se corrigió `database/finance/business-expense-audit-draft.sql` para:
+- revocar INSERT, UPDATE y DELETE de `business_expenses` a PUBLIC, anon y authenticated;
+- revocar explícitamente los privilegios por columna para INSERT y UPDATE;
+- retirar las políticas de escritura directa `business_expenses_insert` y `business_expenses_update`;
+- conservar la lectura RLS del administrador y las escrituras mediante RPCs auditadas.
+
+Los procedimientos de gastos son SECURITY DEFINER, validan `auth.uid()`, negocio activo y rol `business_admin`, y registran auditoría dentro de la misma transacción. El cambio es solo un borrador en la rama; verificar en staging que las cuatro RPCs sigan funcionando y que los intentos de INSERT/UPDATE/DELETE directo fallen para authenticated.
+
+
+## Auditoría de Storage y documentos privados — 16 nov 2026
+
+### Estado comprobado en Supabase activo (solo lectura)
+
+Buckets:
+- `business-assets`: público, límite 5 MiB, PNG/JPEG/WEBP. Su lectura pública es coherente con imágenes de catálogo y logos; no debe almacenar CV, comprobantes ni documentos privados.
+- `job-applications-private`: privado, límite 5 MiB, PDF/DOC/DOCX.
+- `business-expense-receipts`: todavía no existe en la base activa.
+
+Políticas observadas:
+- Las cuatro políticas activas de `business-assets` tienen un error en la subconsulta: intentan obtener el UUID del negocio desde `storage.foldername(b.name)`, usando el nombre del negocio en lugar de la ruta del objeto. Esto puede impedir operaciones legítimas de administradores. `database/security/storage-policy-fix.sql` corrige la referencia a `storage.foldername(objects.name)` y valida la carpeta `<business_uuid>/<logo|products>/<file>`.
+- La política activa de lectura de `job-applications-private` solo valida el bucket, el UUID de la carpeta del negocio y la membresía de administrador. No exige que la segunda carpeta sea el UUID de una postulación ni que el nombre del archivo coincida con el `resume_path` de esa postulación. Esto deja accesibles al administrador de un negocio objetos huérfanos o archivos que no estén asociados a una postulación.
+- El borrador `database/security/storage-policy-fix.sql` reemplaza esa política por una validación más estricta: negocio activo, rol administrador, UUID de negocio y postulación, nombre de archivo UUID con extensión permitida y coincidencia exacta con `job_applications.resume_path`. Los empleados no reciben lectura del bucket privado.
+- La tabla `job_applications` permite SELECT y UPDATE a administradores de negocio, no a empleados. La función pública de envío y la de rate limit no son ejecutables por anon ni authenticated; solo service_role, y ambas son SECURITY DEFINER con `search_path` vacío.
+
+### Flujo de hojas de vida
+
+La Edge Function `create-job-application`:
+- comprueba que el negocio esté activo y que la vacante esté publicada y aprobada;
+- limita la carga a PDF/DOC/DOCX y 5 MiB según MIME y extensión declarados;
+- crea una sesión de carga con vencimiento de 30 minutos y una ruta aleatoria;
+- genera una URL/token firmado de carga sin upsert;
+- al enviar la postulación verifica sesión, ruta, vencimiento y existencia/tamaño del objeto;
+- la RPC consume la sesión una sola vez dentro de la transacción de inserción.
+
+Pendiente de endurecimiento: la comprobación de tamaño y MIME del cliente/metadata no demuestra que el contenido real sea un documento legítimo ni que esté libre de malware. Antes de producción con CV reales, incorporar validación del contenido y análisis antimalware en un flujo aislado, sin hacer públicos los archivos ni servirlos inline.
+
+### Comprobantes de gastos
+
+El borrador `database/finance/expense-receipts-storage-draft.sql` crea el bucket `business-expense-receipts` como privado, con límite 5 MiB y PDF/JPG/PNG/WEBP. Permite:
+- lectura únicamente al administrador del negocio activo al que pertenece el gasto;
+- carga únicamente a ese administrador y para gastos activos;
+- rutas `<business_uuid>/<expense_uuid>/<random_uuid>.<extension>`;
+- conservar comprobantes de gastos anulados para auditoría;
+- no permitir UPDATE ni DELETE de objetos.
+
+La RPC `attach_business_expense_receipt` verifica que el archivo exista, que la ruta corresponda al negocio y gasto, que el gasto siga activo y sin comprobante previo, y registra auditoría. La interfaz usa enlaces firmados de 5 minutos.
+
+### Pruebas requeridas en staging
+
+1. Administrador del negocio A puede subir y leer solo logos/productos del negocio A.
+2. Administrador A no puede listar, leer, reemplazar ni borrar archivos del negocio B.
+3. Empleado y propietario técnico no pueden gestionar objetos comerciales privados de otros negocios mediante Storage.
+4. El bucket público `business-assets` solo contiene imágenes destinadas a publicación.
+5. Administrador A puede generar enlace firmado para CV de una postulación de A; no puede hacerlo para CV de B, objetos huérfanos ni rutas inventadas.
+6. Empleado, cliente anónimo y administrador de otro negocio no pueden descargar CV.
+7. Los tokens de carga de CV expiran y no pueden reutilizarse para una segunda postulación.
+8. Comprobantes de gastos solo se cargan/leen por el administrador del negocio correcto; no se reemplazan ni eliminan y permanecen disponibles para auditoría tras anular el gasto.
+9. Verificar validación de contenido real y antimalware antes de habilitar cargas de CV en producción.
+
+No se ejecutaron cambios de Storage, no se subieron ni descargaron archivos y no se desplegó ninguna Edge Function.
+
+
+## Privacidad de clientes y postulantes — 16 nov 2026
+
+### Pedidos y datos personales
+La inspección read-only del proyecto activo confirmó que RLS limita los pedidos a miembros del negocio y las líneas de pedido a los miembros del negocio correspondiente, pero los GRANT de columna de `authenticated` todavía permiten consultar directamente campos de cliente (correo, teléfono, dirección, notas de entrega), importes, estado de pago y token de seguimiento. El rol técnico también aparece en las políticas live como bypass para pedidos y líneas.
+
+El borrador `database/orders/order-financial-access-draft.sql` revoca la lectura directa amplia y concede únicamente campos operativos al personal del negocio. El administrador recibe datos financieros mediante RPCs con validación de rol. El cliente autenticado recibe su historial mediante `get_customer_order_history()`, que filtra por `auth.uid()` y limita la respuesta a sus últimos 50 pedidos. La migración `database/customers/customer-account-migration.sql` añade `orders.customer_user_id` y favoritos privados; ambas siguen sin aplicarse en el proyecto activo.
+
+El borrador `database/security/business-admin-boundaries.sql` elimina el bypass del propietario técnico en las políticas de pedidos y líneas y permite consultar perfiles por Data API únicamente al propio usuario. El técnico consulta los datos administrativos mediante Edge Function de confianza.
+
+### Postulaciones
+La política live `job_applications_business_admin_read` limita la lectura al administrador del negocio, pero no comprueba que el negocio esté activo. La rama ya reemplaza esa política con una condición adicional `private.business_is_active(business_id)`. Los empleados no tienen una política de lectura para postulaciones. La política live de UPDATE también exige negocio activo, aunque actualmente no se observó un GRANT de UPDATE para authenticated en la tabla.
+
+### Seguimiento público de pedidos
+El endpoint público `track-public-order` acepta un UUID aleatorio como código privado de seguimiento y devuelve datos mínimos de estado, fecha, negocio y seguimiento de entrega, con `Cache-Control: no-store, private`. En la rama se retiraron el total y el nombre del método de pago de la respuesta pública: no son necesarios para consultar el avance del pedido. La página pública se ajustó para no mostrar ese importe en el seguimiento; el total y método ya se informan al confirmar la compra.
+
+### Matriz de pruebas obligatorias en staging
+1. Empleado A puede consultar solo los datos operativos de pedidos del negocio A y no puede consultar email, importes, pagos ni tokens mediante Data API.
+2. Empleado A no puede consultar pedidos ni líneas de B, aunque conozca sus UUID.
+3. Administrador A ve los datos y finanzas de A, pero no los de B.
+4. El técnico no obtiene pedidos ni perfiles de clientes mediante Data API; las tareas técnicas puntuales pasan por Edge Function con autorización.
+5. Cliente A obtiene solo su historial y favoritos; Cliente B no puede leer, modificar ni borrar los de A.
+6. Los pedidos de invitados no se vinculan a cuentas sin autenticación explícita; eliminar una cuenta conserva pedidos y limpia solo la relación de usuario.
+7. Administrador A no puede consultar postulaciones de B ni postulaciones de A si el negocio está suspendido.
+8. Empleados y clientes no pueden consultar postulaciones ni CV.
+9. Un código de seguimiento válido solo devuelve estado, fecha, negocio y nota de entrega; no devuelve nombre, teléfono, correo, dirección, total ni método de pago.
+10. Todas las respuestas que contienen datos privados usan `Cache-Control: no-store`.
+
+La base activa sigue con los permisos antiguos hasta aplicar el paquete de migraciones. No se ejecutaron SQL ni Edge deploys; los cambios de seguimiento se guardaron únicamente en la rama.
+
+
+### Evidencia del consentimiento y ciclo de vida de datos
+
+La tabla live `job_applications` almacena `privacy_consent boolean`, pero no se observaron columnas para registrar cuándo se otorgó la autorización ni qué versión del aviso/política se presentó. El endpoint exige que el valor sea `true`, pero ese dato por sí solo no conserva evidencia suficiente del momento y texto de la autorización.
+
+Pendiente para la siguiente corrección:
+- registrar fecha/hora del consentimiento en servidor;
+- registrar identificador o versión del aviso de privacidad mostrado al postulante;
+- conservar el texto o una referencia inmutable a esa versión;
+- evitar aceptar versiones arbitrarias enviadas por el navegador;
+- definir un plazo de conservación y proceso de eliminación/anonimización para postulaciones, sin borrar registros que deban conservarse por obligación legal o auditoría.
+
+La misma revisión de ciclo de vida debe definir cómo un cliente solicita corrección o eliminación de datos personales y cómo se conserva la trazabilidad comercial de pedidos sin mantener innecesariamente datos identificables.
+
+
+## Resumen de continuidad — autenticación y ciclo de vida de cuentas (16 nov 2026)
+
+La rama mantiene implementados los flujos de login de clientes y personal, confirmación de correo prevista, recuperación con evento `PASSWORD_RECOVERY`, activación de invitaciones y revalidación periódica del acceso a paneles. El trigger de Auth solo copia el nombre visible desde metadata editable y no asigna roles ni membresías.
+
+Quedan bloqueos antes de producción:
+- `cuenta.html` no presenta aviso ni aceptación de privacidad en el registro de clientes; no se encontró una página legal de privacidad en la raíz de esta rama.
+- No existe flujo de autoservicio para solicitar corrección o eliminación de datos personales.
+- La configuración Auth (confirmación, URL allowlist, plantillas, SMTP, política de contraseña, CAPTCHA y duración de sesión) no puede comprobarse desde la conexión actual; requiere revisión manual en Dashboard.
+- La protección de contraseñas filtradas aparece deshabilitada en Security Advisor. La documentación vigente de Supabase indica que esa función requiere Pro o superior, por lo que no debe presentarse como solucionable desde código ni activarse mediante una modificación no autorizada del plan.
+- El código valida 10 caracteres en frontend para registro, invitación y recuperación; falta confirmar que Auth aplique la misma longitud en servidor.
+- La migración de favoritos e historial no está aplicada. Su diseño contempla `ON DELETE CASCADE` para favoritos y `ON DELETE SET NULL` para la relación pedido-cuenta, preservando los pedidos si se elimina una cuenta.
+
+La auditoría del trigger `private.handle_new_auth_user()` confirma `SECURITY DEFINER`, `search_path` vacío, inserción de solo `id/display_name` y ausencia de EXECUTE para roles API. No se identificó escalamiento de privilegios desde `raw_user_meta_data.display_name`.
+
+No se realizaron cambios en Auth ni SQL, no se enviaron correos, no se eliminaron usuarios, no se desplegaron Edge Functions y no se publicó el sitio. Los hallazgos detallados están en `docs/customer-auth-session-audit.md`.
+
+
+## Continuación de auditoría: postulaciones y hojas de vida (16 nov 2026)
+
+La auditoría del proyecto activo confirmó un defecto funcional: el panel de negocio actualiza estado y notas de postulaciones, pero la tabla `job_applications` solo concede SELECT a `authenticated`; no tiene permiso UPDATE, aunque existe una política RLS UPDATE. La rama `correcciones-funcionales` ahora agrega permiso por columnas (estado/notas/actor/fecha), política RLS para administradores del negocio activo y un trigger que fija actor y hora desde `auth.uid()`.
+
+También se corrigió en la rama el rate limit de postulaciones: carga de CV y envío ahora usan contadores separados para que una candidatura con archivo no consuma dos veces el mismo límite.
+
+Pendientes críticos antes de producción:
+- Aviso de privacidad y consentimiento de candidatos con versión y fecha de servidor.
+- Análisis del contenido y antimalware de los CV antes de habilitar descarga.
+- Aplicar la política Storage que verifica ruta completa y postulación vinculada.
+- Definir retención, archivado y eliminación coordinada: la FK actual borra postulaciones en cascada al borrar una vacante y Storage no elimina automáticamente el archivo, lo que puede dejar CV huérfanos.
+- Limpiar periódicamente sesiones de carga vencidas y filas antiguas del limitador.
+- Añadir auditoría de cambios de estado/notas más allá de actor y fecha en la fila.
+
+Los detalles y consultas están en `docs/customer-auth-session-audit.md`. No se generaron postulaciones ni archivos, no se ejecutó SQL de escritura y no se desplegó ninguna función.

@@ -9,11 +9,12 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
   <script src="app.js" defer></script>
+  <script src="visual-motion.js" defer></script>
 </head>
 <body>
   <header class="header">
     <a class="logo" href="#" data-action="home">
-      <span class="logo-icon">M<span>+</span></span>
+      <span class="logo-icon" id="platformLogoMark">M<span>+</span></span>
       <span>MiEje <b>Market</b><small>Lo nuestro, más cerca</small></span>
     </a>
 
@@ -26,6 +27,7 @@
     <div class="header-right">
       <input id="globalSearch" class="search" type="search"
         placeholder="Buscar tiendas o productos">
+      <a class="cart-button" href="cuenta.html">Mi cuenta</a>
       <button id="openCart" class="cart-button" type="button">
         🛒 Carrito <span id="cartCount">0</span>
       </button>
@@ -36,11 +38,11 @@
 
   <main>
     <section id="homeView">
-      <section class="hero">
+      <section class="hero" id="platformHero">
         <div class="hero-content">
           <p class="eyebrow">PEREIRA · RISARALDA · EJE CAFETERO</p>
-          <h1>Lo mejor de tu región,<br><span>a un clic de distancia.</span></h1>
-          <p>Descubre restaurantes, tiendas y emprendimientos locales en un solo lugar.</p>
+          <h1 id="platformHeroTitle">Lo mejor de tu región,<br><span>a un clic de distancia.</span></h1>
+          <p id="platformHeroDescription">Descubre restaurantes, tiendas y emprendimientos locales en un solo lugar.</p>
           <div class="hero-actions">
             <button class="btn lime" data-action="categories">Explorar categorías ↗</button>
             <button class="btn outline" data-action="businesses">Ver tiendas</button>
@@ -67,34 +69,44 @@
         </div>
 
         <div class="category-grid">
-          <button class="category-card" data-category="Comidas">
-            <img src="https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1000&q=85" alt="Restaurante">
-            <span class="shade"></span>
-            <span class="category-text"><small>ANTOJOS Y SABORES</small><strong>Restaurantes</strong><span>Descubrir negocios ↗</span></span>
+          <button class="category-card" data-category="Hogar">
+            <img src="https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?auto=format&fit=crop&w=700&q=85" alt="Hogar y electrodomésticos" loading="lazy">
+            <span class="category-text"><strong>Hogar y electrodomésticos</strong><span>Ver productos ↗</span></span>
           </button>
 
-          <button class="category-card" data-category="Moda">
-            <img src="https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1000&q=85" alt="Moda y ropa">
-            <span class="shade"></span>
-            <span class="category-text"><small>ESTILO LOCAL</small><strong>Moda</strong><span>Descubrir negocios ↗</span></span>
+          <button class="category-card" data-category="Salud">
+            <img src="https://images.unsplash.com/photo-1608248543803-ba4f8c70ae0b?auto=format&fit=crop&w=700&q=85" alt="Salud y cuidado personal" loading="lazy">
+            <span class="category-text"><strong>Salud y cuidado personal</strong><span>Ver productos ↗</span></span>
+          </button>
+
+          <button class="category-card" data-category="Muebles">
+            <img src="https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=700&q=85" alt="Muebles" loading="lazy">
+            <span class="category-text"><strong>Muebles</strong><span>Ver productos ↗</span></span>
           </button>
 
           <button class="category-card" data-category="Tecnología">
-            <img src="https://images.unsplash.com/photo-1498049794561-7780e7231661?auto=format&fit=crop&w=1000&q=85" alt="Tecnología">
-            <span class="shade"></span>
-            <span class="category-text"><small>INNOVACIÓN</small><strong>Tecnología</strong><span>Descubrir negocios ↗</span></span>
+            <img src="https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=700&q=85" alt="Celulares y tecnología" loading="lazy">
+            <span class="category-text"><strong>Celulares y tecnología</strong><span>Ver productos ↗</span></span>
           </button>
 
-          <button class="category-card" data-category="Mercado">
-            <img src="https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=1000&q=85" alt="Frutas y verduras">
-            <span class="shade"></span>
-            <span class="category-text"><small>FRESCURA DIARIA</small><strong>Mercado</strong><span>Descubrir negocios ↗</span></span>
+          <button class="category-card" data-category="Belleza">
+            <img src="https://images.unsplash.com/photo-1596462502278-27bfdc403348?auto=format&fit=crop&w=700&q=85" alt="Belleza y maquillaje" loading="lazy">
+            <span class="category-text"><strong>Belleza y maquillaje</strong><span>Ver productos ↗</span></span>
           </button>
 
-          <button class="category-card" data-category="Hogar">
-            <img src="https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?auto=format&fit=crop&w=1000&q=85" alt="Artículos para el hogar">
-            <span class="shade"></span>
-            <span class="category-text"><small>ESPACIOS CON VIDA</small><strong>Hogar</strong><span>Descubrir negocios ↗</span></span>
+          <button class="category-card" data-category="Mascotas">
+            <img src="https://images.unsplash.com/photo-1450778869180-41d0601e046e?auto=format&fit=crop&w=700&q=85" alt="Mascotas" loading="lazy">
+            <span class="category-text"><strong>Mascotas</strong><span>Ver productos ↗</span></span>
+          </button>
+
+          <button class="category-card" data-category="Juguetes">
+            <img src="https://images.unsplash.com/photo-1558060370-d644479cb6f7?auto=format&fit=crop&w=700&q=85" alt="Juguetes" loading="lazy">
+            <span class="category-text"><strong>Juguetes</strong><span>Ver productos ↗</span></span>
+          </button>
+
+          <button class="category-card" data-category="Moda">
+            <img src="https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=700&q=85" alt="Moda" loading="lazy">
+            <span class="category-text"><strong>Moda</strong><span>Ver productos ↗</span></span>
           </button>
         </div>
       </section>
@@ -108,6 +120,31 @@
           <button class="text-button" data-action="businesses">Ver todas las tiendas ↗</button>
         </div>
         <div id="featuredGrid" class="business-grid"></div>
+      </section>
+
+      <section class="wrap section" id="featuredProductsSection">
+        <div class="section-heading">
+          <div><p class="eyebrow">DESCUBRE ALGO NUEVO</p><h2>Productos destacados</h2></div>
+          <button class="text-button" type="button" data-action="businesses">Explorar catálogo ↗</button>
+        </div>
+        <div id="featuredProductsGrid" class="product-grid"></div>
+        <p id="featuredProductsEmpty" class="muted hidden">Todavía no hay productos publicados para destacar.</p>
+      </section>
+
+      <section class="wrap section" id="publicPromotionsSection">
+        <div class="section-heading">
+          <div><p class="eyebrow">OPORTUNIDADES PARA TI</p><h2>Ofertas y promociones</h2></div>
+        </div>
+        <div id="publicPromotionsGrid" class="business-grid"></div>
+        <p id="publicPromotionsEmpty" class="muted hidden">Por ahora no hay promociones publicadas.</p>
+      </section>
+
+      <section class="wrap section" id="publicJobsSection">
+        <div class="section-heading">
+          <div><p class="eyebrow">CRECEMOS EN COMUNIDAD</p><h2>Oportunidades de empleo</h2></div>
+        </div>
+        <div id="publicJobsGrid" class="business-grid"></div>
+        <p id="publicJobsEmpty" class="muted hidden">Por ahora no hay convocatorias publicadas.</p>
       </section>
     </section>
 
@@ -140,7 +177,7 @@
   </main>
 
   <footer class="footer">
-    <div class="footer-logo">M+ <strong>MiEje Market</strong></div>
+    <div class="footer-logo"><span id="platformFooterLogo">M+ <strong>MiEje Market</strong></span></div>
     <p>Lo nuestro, más cerca. Una vitrina digital para los negocios del Eje Cafetero.</p>
     <button data-action="home">Volver al inicio ↑</button>
     <nav class="legal-links" aria-label="Información legal">
@@ -177,7 +214,7 @@
           </select>
         </label>
         <p id="paymentInstructions" class="muted" hidden></p>
-        <label class="consent-line"><input name="privacyConsent" type="checkbox" required>
+        <label class="consent-line"><input name="privacyConsent" type="checkbox" data-policy-version="privacy-2026-11-19-v1" required>
           <span>He leído la <button class="inline-policy" type="button" data-policy="privacidad">Política de privacidad</button> y autorizo el tratamiento de mis datos para gestionar este pedido.</span>
         </label>
         <button class="btn lime full" type="submit">Confirmar pedido</button>
@@ -195,6 +232,13 @@
     </div>
   </aside>
 
+  <section id="productDetailModal" class="product-detail-modal hidden" role="dialog" aria-modal="true" aria-labelledby="productDetailTitle" aria-hidden="true">
+    <div class="product-detail-backdrop" data-action="close-product-detail"></div>
+    <article class="product-detail-dialog">
+      <button type="button" class="product-detail-close" data-action="close-product-detail" aria-label="Cerrar ficha">×</button>
+      <div id="productDetailContent"></div>
+    </article>
+  </section>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

@@ -1,0 +1,33 @@
+# Mantener explícita la verificación JWT de cada Edge Function desplegada.
+# Las funciones públicas validan su propia solicitud o reciben tráfico de invitados;
+# las funciones privadas exigen un JWT válido y realizan autorización adicional.
+
+[functions.technical-business-management]
+verify_jwt = true
+
+[functions.resolve-my-access]
+verify_jwt = true
+
+[functions.accept-business-invitation]
+verify_jwt = true
+
+[functions.create-public-order]
+verify_jwt = false
+
+[functions.track-public-order]
+verify_jwt = false
+
+[functions.get-public-storefront]
+verify_jwt = false
+
+[functions.create-job-application]
+verify_jwt = false
+
+[functions.get-platform-public-settings]
+verify_jwt = false
+
+[functions.cleanup-job-application-data]
+# Esta función no se llama desde el navegador. Exige el secreto independiente
+# JOB_APPLICATION_CLEANUP_SECRET en x-cleanup-secret y solo debe invocarse
+# desde un programador privado. SUPABASE_SERVICE_ROLE_KEY es solo credencial interna.
+verify_jwt = false

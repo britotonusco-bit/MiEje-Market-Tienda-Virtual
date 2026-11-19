@@ -5,15 +5,52 @@
   let currentProfile;
   let businessId = null;
   let businessName = '';
+  let currentBusinessLogoUrl = null;
   let isBusinessOwner = false;
   let cachedBusinesses = [];
+  let businessListPageIndex = 0;
+  let moderationCursorStack = [null];
+  let moderationPageIndex = 0;
+  let blockRequestCursorStack = [null];
+  let blockRequestPageIndex = 0;
   let cachedProducts = [];
+  const PANEL_PAGE_SIZE = 50;
+  const memberSelectStates = new Map();
+  const blockTargetPageState = { businessId: null, cursors: [null], page: 0 };
+  let employeeOrderCursorStack = [null];
+  let businessOrderCursorStack = [null];
+  let businessOrderPageIndex = 0;
+  let jobApplicationCursorStack = [null];
+  let jobApplicationPageIndex = 0;
+  let cancellationCursorStack = [null];
+  let cancellationPageIndex = 0;
+  let expenseCursorStack = [null];
+  let expensePageIndex = 0;
+  let inventoryCursorStack = [null];
+  let inventoryPageIndex = 0;
+  let refundCursorStack = [null];
+  let refundPageIndex = 0;
+  const auditCursorStacks = new Map();
+  const auditPageIndexes = new Map();
+  const accessCursorStacks = new Map();
+  const accessPageIndexes = new Map();
+  let employeeOrderPageIndex = 0;
+  let productCursorStack = [null];
+  let productPageIndex = 0;
+  let businessContentCursorStack = [null];
+  let businessContentPageIndex = 0;
+  let platformFinanceCursorStack = [null];
+  let platformFinancePageIndex = 0;
+  let platformPayrollCursorStack = [null];
+  let platformPayrollPageIndex = 0;
+  let invitationCursorStack = [null];
+  let invitationPageIndex = 0;
   const statusLabels = {
-    pending: 'Recibido', confirmed: 'Confirmado', preparing: 'En preparación',
-    ready: 'Listo', out_for_delivery: 'En camino', delivered: 'Entregado', cancelled: 'Cancelado'
+    received: 'Recibido', confirmed: 'Confirmado', preparing: 'En preparación',
+    ready: 'Listo', on_the_way: 'En camino', delivered: 'Entregado', cancelled: 'Cancelado'
   };
-  const nextStatus = { pending: 'confirmed', confirmed: 'preparing', preparing: 'ready', ready: 'out_for_delivery', out_for_delivery: 'delivered' };
-  const statusClass = { pending: 'yellow', confirmed: 'blue', preparing: 'blue', ready: 'green', out_for_delivery: 'blue', delivered: 'green', cancelled: 'red' };
+  const nextStatus = { received: 'confirmed', confirmed: 'preparing', preparing: 'ready', ready: 'on_the_way', on_the_way: 'delivered' };
+  const statusClass = { received: 'yellow', confirmed: 'blue', preparing: 'blue', ready: 'green', on_the_way: 'blue', delivered: 'green', cancelled: 'red' };
 
   document.addEventListener('DOMContentLoaded', boot);
 
@@ -32,32 +69,119 @@
       currentProfile = access.profile;
       const profile = access.profile;
       document.querySelector('#userName').textContent = profile.display_name || currentUser.email || 'Usuario';
+      const emailNode = document.querySelector('#userEmail');
+      if (emailNode) emailNode.textContent = currentUser.email || '';
+      const panelNode = document.querySelector('#profilePanel');
+      if (panelNode) panelNode.textContent = panel === 'technical' ? 'Panel técnico superior' : (panel === 'business_admin' ? 'Panel de administrador' : 'Panel de empleados');
+      const roleNode = document.querySelector('#profileRole');
+      if (roleNode) roleNode.textContent = panel === 'technical' ? 'Propietario de la plataforma' : (panel === 'business_admin' ? 'Administrador del negocio' : 'Empleado del negocio');
+      const statusNode = document.querySelector('#profileStatus');
+      if (statusNode) statusNode.textContent = profile.account_status === 'active' ? 'Cuenta activa' : 'Cuenta suspendida';
+      const titleNode = document.querySelector('#profileBusinessTitle');
+      if (titleNode) titleNode.textContent = panel === 'technical' ? 'Control general de MiEje Market' : '';
+      const avatarNode = document.querySelector('#profileAvatar');
+      if (avatarNode && profile.avatar_url) {
+        avatarNode.textContent = '';
+        avatarNode.style.backgroundImage = 'url("' + String(profile.avatar_url).replace(/["\\\\]/g, '') + '")';
+        avatarNode.style.backgroundSize = 'cover';
+        avatarNode.style.backgroundPosition = 'center';
+      }
       document.querySelector('#logoutBtn').addEventListener('click', signOut);
+      const panelNavItems = [...document.querySelectorAll('aside nav .nav-item')];
+      const syncPanelNavigation = () => {
+        const currentHash = window.location.hash || panelNavItems[0]?.getAttribute('href') || '';
+        panelNavItems.forEach(item => {
+          const active = item.getAttribute('href') === currentHash;
+          item.classList.toggle('active', active);
+          if (active) item.setAttribute('aria-current', 'location');
+          else item.removeAttribute('aria-current');
+        });
+      };
+      panelNavItems.forEach(item => item.addEventListener('click', () => {
+        panelNavItems.forEach(navItem => {
+          navItem.classList.remove('active');
+          navItem.removeAttribute('aria-current');
+        });
+        item.classList.add('active');
+        item.setAttribute('aria-current', 'location');
+      }));
+      window.addEventListener('hashchange', syncPanelNavigation);
+      syncPanelNavigation();
       document.querySelector('#refreshTechnicalBtn')?.addEventListener('click', refreshTechnical);
       document.querySelector('#createBusinessForm')?.addEventListener('submit', createBusiness);
       document.querySelector('#inviteMemberForm')?.addEventListener('submit', inviteBusinessMember);
-      document.querySelector('#businessSearch')?.addEventListener('input', renderBusinesses);
+      document.querySelector('#pendingInvitationsBusinessSelect')?.addEventListener('change', () => loadBusinessInvitations(true));
+      document.querySelector('#refreshInvitationsBtn')?.addEventListener('click', () => loadBusinessInvitations(true));
+      document.querySelector('#businessSearch')?.addEventListener('input', () => {
+        businessDirectoryRequestId++;
+        if (businessDirectorySearchTimer) window.clearTimeout(businessDirectorySearchTimer);
+        businessDirectorySearchTimer = window.setTimeout(() => { void loadTechnicalBusinesses(true); }, 250);
+      });
       document.querySelector('#businessSelect')?.addEventListener('change', event => loadSelectedBusiness(event.currentTarget.value));
       document.querySelector('#suspensionForm')?.addEventListener('submit', saveSuspension);
       document.querySelector('#memberStatusForm')?.addEventListener('submit', saveMemberStatus);
-      document.querySelector('#memberBusinessSelect')?.addEventListener('change', event => loadTechnicalMembers(event.currentTarget.value));
+      document.querySelector('#assignmentBusinessSelect')?.addEventListener('change', event => {
+        const target = document.querySelector('#assignmentMemberSelect');
+        const form = document.querySelector('#memberAssignmentForm');
+        if (target) target.value = '';
+        if (form) {
+          form.elements.role.value = 'employee';
+          form.elements.job_title.value = '';
+        }
+        const message = document.querySelector('#memberAssignmentMessage');
+        if (message) { message.textContent = ''; message.className = 'message'; }
+        loadTechnicalMembers(event.currentTarget.value, '#assignmentMemberSelect');
+      });
+      document.querySelector('#assignmentMemberSelect')?.addEventListener('change', fillMemberAssignment);
+      document.querySelector('#memberAssignmentForm')?.addEventListener('submit', saveMemberAssignment);
+      document.querySelector('#memberBusinessSelect')?.addEventListener('change', event => {
+        const target = document.querySelector('#memberTargetSelect');
+        if (target) target.value = '';
+        const note = document.querySelector('#memberTargetStatusNote');
+        if (note) note.textContent = '';
+        loadTechnicalMembers(event.currentTarget.value, '#memberTargetSelect');
+      });
+      document.querySelector('#memberTargetSelect')?.addEventListener('change', event => {
+        const selected = event.currentTarget.selectedOptions[0];
+        const action = document.querySelector('#memberStatusForm [name="is_blocked"]');
+        const note = document.querySelector('#memberTargetStatusNote');
+        if (!selected?.value) { if (note) note.textContent = ''; return; }
+        const globallyBlocked = selected.dataset.globalBlocked === 'true';
+        const suspended = selected.dataset.status !== 'active';
+        if (action) action.value = suspended ? 'false' : 'true';
+        if (note) note.textContent = globallyBlocked
+          ? 'Esta cuenta tiene un bloqueo global. Este formulario solo administra la membresía del negocio y no puede retirar el bloqueo. El panel todavía no dispone de un flujo de desbloqueo global; no intentes resolverlo reactivando la membresía.'
+          : suspended
+            ? 'La membresía está suspendida en este negocio. Puedes reactivarla si el negocio está activo.'
+            : 'La membresía está activa en este negocio.';
+      });
       document.querySelector('#platformAiForm')?.addEventListener('submit', savePlatformAi);
+      document.querySelector('#platformFinanceForm')?.addEventListener('submit', createPlatformFinancialRecord);
+      document.querySelector('#payrollForm')?.addEventListener('submit', createPayrollRecord);
       document.querySelector('#storeSettingsForm')?.addEventListener('submit', saveStoreSettings);
       document.querySelector('#productForm')?.addEventListener('submit', saveProduct);
+      document.querySelector('#profitReportForm')?.addEventListener('submit', loadProfitReport);
+      document.querySelector('#businessExpenseForm')?.addEventListener('submit', saveBusinessExpense);
+      document.querySelector('#refreshExpenses')?.addEventListener('click', loadBusinessExpenses);
+      document.querySelector('#businessExpensesContainer')?.addEventListener('click', handleExpenseAction);
+      document.querySelector('#businessExpensesContainer')?.addEventListener('change', handleExpenseControlChange);
       document.querySelector('#businessContentForm')?.addEventListener('submit', saveBusinessContent);
       document.querySelector('#businessAiForm')?.addEventListener('submit', saveBusinessAi);
       document.querySelector('#blockRequestForm')?.addEventListener('submit', submitBlockRequest);
-      document.querySelector('#refreshOrders')?.addEventListener('click', () => panel === 'business_admin' ? loadBusinessOrders() : loadEmployeeOrders());
+      document.querySelector('#refreshOrders')?.addEventListener('click', () => panel === 'business_admin' ? loadBusinessOrders() : loadEmployeeOrders(true));
+      document.querySelector('#refreshCancellations')?.addEventListener('click', loadCancellationRequests);
+      document.querySelector('#refreshRefunds')?.addEventListener('click', loadRefundableOrders);
 
       if (panel === 'technical') {
         if (!access.is_platform_owner || profile.platform_role !== 'platform_owner') throw new Error('Esta sección es exclusiva del propietario técnico autorizado.');
         const { data: assurance, error: assuranceError } = await db.auth.mfa.getAuthenticatorAssuranceLevel();
         if (assuranceError || assurance?.currentLevel !== 'aal2') {
-          await db.auth.signOut();
+          await db.auth.signOut({ scope: 'local' });
           window.location.replace('login.html');
           return;
         }
         await logPanel(null, 'technical', 'panel_open');
+         await showSupportLink();
         notice.textContent = 'Acceso validado. Consultando datos disponibles del proyecto independiente.';
         notice.className = 'notice';
         await loadTechnical();
@@ -71,13 +195,17 @@
         businessId = match.business_id;
         businessName = match.business.name;
         isBusinessOwner = match.role === 'business_admin';
+        if (roleNode) roleNode.textContent = match.role_label || (match.role === 'business_admin' ? 'Administrador del negocio' : 'Empleado del negocio');
+        if (titleNode) titleNode.textContent = match.job_title || '';
+
         document.querySelector('#businessName').textContent = businessName;
         await logPanel(businessId, panel, 'panel_open');
         notice.textContent = `Acceso validado para ${businessName}. Los permisos se aplican en la base de datos.`;
         notice.className = 'notice';
-        if (panel === 'business_admin') { await loadBusinessAdmin(); await initBusinessSettings(); }
+        if (panel === 'business_admin') { await loadBusinessAdmin(); await initBusinessSettings(); await initBusinessAi(); await loadBlockTargetUsers(); }
         else { await loadEmployeeOrders(); await showSupportLink(); }
       }
+      startAccessRevalidation();
     } catch (error) {
       if (notice) { notice.textContent = error.message || 'No se pudo cargar el panel.'; notice.className = 'notice'; }
       document.querySelectorAll('.panel-section, #statsGrid').forEach(el => { if (el) el.classList.add('hidden'); });
@@ -94,9 +222,79 @@
     try { await db.auth.signOut(); } finally { window.location.replace('login.html'); }
   }
 
+  // Revalida el acceso en servidor mientras el panel permanece abierto.
+  // Una membresía suspendida o un perfil bloqueado no conservará la interfaz
+  // operativa indefinidamente con una sesión que ya estaba abierta.
+  let accessCheckInProgress = false;
+  async function revalidatePanelAccess() {
+    if (!db || accessCheckInProgress || document.visibilityState === 'prerender') return;
+    accessCheckInProgress = true;
+    try {
+      const { data: auth, error: authError } = await db.auth.getUser();
+      if (authError || !auth.user) throw new Error('La sesión ya no es válida.');
+      const { data: access, error: accessError } = await db.functions.invoke('resolve-my-access', { body: {} });
+      if (accessError || !access?.ok || !access.profile) {
+        throw new Error(access?.error || 'Tu acceso fue suspendido o ya no está autorizado.');
+      }
+      if (panel === 'technical') {
+        if (!access.is_platform_owner || access.profile.platform_role !== 'platform_owner') {
+          throw new Error('Tu cuenta ya no tiene autorización para el panel técnico.');
+        }
+        const { data: assurance, error: assuranceError } = await db.auth.mfa.getAuthenticatorAssuranceLevel();
+        if (assuranceError || assurance?.currentLevel !== 'aal2') {
+          throw new Error('La verificación en dos pasos venció. Inicia sesión nuevamente.');
+        }
+      } else {
+        const stillAllowed = (access.memberships || []).some(item =>
+          item.business_id === businessId &&
+          item.role === panel
+        );
+        if (!stillAllowed) throw new Error('Tu acceso a este negocio fue suspendido o retirado.');
+      }
+    } catch (error) {
+      console.warn('MiEje Market: acceso revocado o no verificable.', error);
+      const notice = document.querySelector('#notice');
+      if (notice) {
+        notice.textContent = error.message || 'Tu acceso dejó de estar autorizado. Inicia sesión nuevamente.';
+        notice.className = 'notice error';
+      }
+      // Solo se cierra esta sesión: el usuario podría conservar acceso a otros negocios.
+      // La autorización de cada operación sigue verificándose en servidor/RLS.
+      try { await db.auth.signOut({ scope: 'local' }); } catch (signOutError) {
+        console.error('No fue posible cerrar la sesión local:', signOutError);
+      }
+      window.location.replace('login.html');
+    } finally {
+      accessCheckInProgress = false;
+    }
+  }
+
+  function startAccessRevalidation() {
+    // Responder al cierre de sesión y a la renovación de tokens de Auth.
+    // Las consultas se difieren fuera del callback para no bloquear Auth.
+    db.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || !session) {
+        window.location.replace('login.html');
+        return;
+      }
+      if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+        window.setTimeout(() => { void revalidatePanelAccess(); }, 0);
+      }
+    });
+
+    window.setInterval(() => { void revalidatePanelAccess(); }, 30000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') void revalidatePanelAccess();
+    });
+  }
+
   async function loadBusinessAdmin() {
     const [ordersResult, productsResult] = await Promise.all([
-      db.from('orders').select('id,total,payment_status,status,created_at').eq('business_id', businessId),
+      db.rpc('get_business_admin_order_financials', {
+        p_business_id: businessId,
+        p_refundable_only: false,
+        p_limit: 10000
+      }),
       db.from('products').select('id,inventory,is_active').eq('business_id', businessId)
     ]);
     if (ordersResult.error) throw ordersResult.error;
@@ -104,14 +302,283 @@
     const orders = ordersResult.data || [], products = productsResult.data || [];
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
     const todayOrders = orders.filter(o => new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) === today && o.status !== 'cancelled');
-    const received = orders.filter(o => o.payment_status === 'paid').reduce((sum,o) => sum + Number(o.total || 0), 0);
+    // El indicador de dinero usa la misma fecha efectiva que el informe:
+    // completed_at del movimiento financiero, no created_at del pedido.
+    const todayFinanceResult = await db.rpc('get_business_admin_profit_report', {
+      p_business_id: businessId,
+      p_start_date: today,
+      p_end_date: today
+    });
+    if (todayFinanceResult.error || !todayFinanceResult.data) {
+      throw todayFinanceResult.error || new Error('No se pudo conciliar el total cobrado hoy.');
+    }
+    const todayPaidSales = Number(todayFinanceResult.data.sales || 0);
+    const currentlyPaid = orders.filter(o => o.payment_status === 'paid')
+      .reduce((sum, o) => sum + Number(o.total || 0), 0);
     renderStats([
-      ['Ventas de hoy', money(todayOrders.reduce((sum,o) => sum + Number(o.total || 0), 0)), 'Pedidos creados hoy, sin cancelados'],
-      ['Dinero recibido', money(received), 'Pedidos marcados como pagados'],
+      ['Pedidos de hoy', number(todayOrders.length), 'Pedidos creados hoy, sin cancelados'],
+      ['Cobros confirmados hoy', money(todayPaidSales), 'Suma de movimientos de pago completados hoy, según la fecha efectiva en hora Colombia'],
+      ['Pedidos pagados consultados (máx. 10.000)', money(currentlyPaid), 'Suma de los pedidos pagados devueltos por la consulta limitada a los 10.000 pedidos más recientes; no es un total histórico ni sustituye el informe financiero'],
       ['Pedidos abiertos', number(orders.filter(o => !['delivered','cancelled'].includes(o.status)).length), 'Pendientes de completar'],
       ['Productos con poco stock', number(products.filter(p => p.is_active && Number(p.inventory || 0) <= 5).length), 'Cinco unidades o menos']
     ]);
-    await Promise.all([loadBusinessOrders(), loadProducts(), loadAccessEvents(businessId, '#accessContainer'), loadAuditEvents(businessId, '#auditContainer')]);
+    await Promise.all([loadBusinessOrders(), loadCancellationRequests(), loadRefundableOrders(), loadProducts(), loadAccessEvents(businessId, '#accessContainer'), loadAuditEvents(businessId, '#auditContainer')]);
+    const inventoryRefreshButton = document.querySelector('#refreshInventoryMovements');
+    if (inventoryRefreshButton) inventoryRefreshButton.onclick = loadInventoryMovements;
+    await loadInventoryMovements();
+    initializeProfitReport();
+    await loadBusinessExpenses();
+  }
+
+
+  function initializeProfitReport() {
+    const form = document.querySelector('#profitReportForm');
+    if (!form) return;
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+    const expenseForm = document.querySelector('#businessExpenseForm');
+    if (expenseForm) expenseForm.elements.expense_date.value = today;
+    form.elements.start_date.value = today.slice(0,8) + '01';
+    form.elements.end_date.value = today;
+    document.querySelectorAll('[data-profit-period]').forEach(button => {
+      button.addEventListener('click', () => {
+        const period = button.dataset.profitPeriod;
+        const year = Number(today.slice(0,4));
+        if (period === 'day') {
+          form.elements.start_date.value = today;
+          form.elements.end_date.value = today;
+        } else if (period === 'month') {
+          form.elements.start_date.value = today.slice(0,8) + '01';
+          form.elements.end_date.value = today;
+        } else if (period === 'year') {
+          form.elements.start_date.value = String(year).padStart(4,'0') + '-01-01';
+          form.elements.end_date.value = String(year).padStart(4,'0') + '-12-31';
+        }
+        loadProfitReport();
+      });
+    });
+    loadProfitReport();
+  }
+
+  async function loadProfitReport(event) {
+    if (event) event.preventDefault();
+    const form = document.querySelector('#profitReportForm');
+    const target = document.querySelector('#profitReportContainer');
+    if (!form || !target) return;
+    const startDate=form.elements.start_date.value, endDate=form.elements.end_date.value;
+    if (!startDate || !endDate || endDate < startDate) {
+      target.innerHTML='<div class="empty">Revisa las fechas: la fecha final no puede ser anterior a la inicial.</div>';
+      return;
+    }
+    target.innerHTML='<div class="empty">Calculando resultados del periodo…</div>';
+    const {data,error}=await db.rpc('get_business_admin_profit_report',{
+      p_business_id:businessId,p_start_date:startDate,p_end_date:endDate
+    });
+    if(error || !data) {
+      target.innerHTML='<div class="empty">El reporte financiero todavía no está disponible. Comprueba que la migración esté instalada en ensayo. '+esc(error?.message || '')+'</div>';
+      return;
+    }
+    const rows=[
+      ['Cobros confirmados (productos + domicilio)',money(data.sales)],
+      ['Domicilios cobrados (incluidos en cobros)',money(data.delivery_fees_collected)],
+      ['Reembolsos confirmados',money(data.refunds)],
+      ['Cobros netos',money(data.net_sales)],
+      ['Costo de productos vendidos',money(data.gross_cost_of_sales)],
+      ['Reversión de costo por cancelaciones',money(data.inventory_cost_reversals)],
+      ['Costo neto de ventas',money(data.cost_of_sales)],
+      ['Ganancia bruta estimada',data.gross_profit_estimate === null ? 'No disponible' : money(data.gross_profit_estimate)],
+      ['Gastos operativos pagados',money(data.paid_expenses)],
+      ['Resultado neto estimado',data.net_profit_estimate === null ? 'No disponible' : money(data.net_profit_estimate)],
+      ['Pedidos con pago confirmado',number(data.paid_orders)],
+      ['Líneas sin costo histórico',number(data.missing_cost_lines)]
+    ];
+    target.innerHTML='<div class="stats">'+rows.map(([label,value])=>
+      '<article class="stat"><span>'+esc(label)+'</span><strong>'+esc(value)+'</strong></article>'
+    ).join('')+'</div>'+(data.complete_cost_data
+      ? '<p class="message success">Todos los movimientos de costo del periodo tienen costo histórico registrado.</p>'
+      : '<p class="message error">Hay productos vendidos sin costo histórico. La ganancia bruta y el resultado neto se muestran como “No disponible” hasta completar esos costos; no se interpretan como cero.</p>'
+    )+'<p class="muted">Periodo: '+esc(data.start_date)+' a '+esc(data.end_date)+'. '+esc(data.basis)+'</p>';
+  }
+
+  async function loadBusinessExpenses(reset = true) {
+    const target = document.querySelector('#businessExpensesContainer');
+    if (!target || !businessId || panel !== 'business_admin') return;
+    if (reset) { expenseCursorStack = [null]; expensePageIndex = 0; }
+    target.innerHTML = '<div class="empty">Cargando gastos…</div>';
+    let query = db.from('business_expenses')
+      .select('id,expense_date,category,description,amount,payment_status,payment_method,transaction_reference,supplier,receipt_path,notes,paid_at,status,void_reason,voided_at,created_at')
+      .eq('business_id', businessId)
+      .order('expense_date', { ascending: false }).order('id', { ascending: false })
+      .limit(PANEL_PAGE_SIZE + 1);
+    const cursor = expenseCursorStack[expensePageIndex];
+    if (cursor) query = query.or('expense_date.lt.' + cursor.expense_date + ',and(expense_date.eq.' + cursor.expense_date + ',id.lt.' + cursor.id + ')');
+    const { data, error } = await query;
+    if (error) {
+      target.innerHTML = '<div class="empty">No se pudieron cargar los gastos. Comprueba que las políticas de lectura del administrador estén aplicadas. '+esc(error.message)+'</div>';
+      return;
+    }
+    const fetchedRows = data || [];
+    const rows = fetchedRows.slice(0, PANEL_PAGE_SIZE);
+    renderBusinessExpenses(rows, {
+      page: expensePageIndex + 1,
+      canPrevious: expensePageIndex > 0,
+      hasMore: fetchedRows.length > PANEL_PAGE_SIZE,
+      previous: () => { expensePageIndex--; void loadBusinessExpenses(false); },
+      next: () => {
+        const last = rows[rows.length - 1];
+        if (!last) return;
+        expenseCursorStack[expensePageIndex + 1] = { expense_date: last.expense_date, id: last.id };
+        expensePageIndex++;
+        void loadBusinessExpenses(false);
+      }
+    });
+  }
+
+  function renderBusinessExpenses(items, pageInfo = null) {
+    const target = document.querySelector('#businessExpensesContainer');
+    if (!target) return;
+    if (!items.length) {
+      target.innerHTML = '<div class="empty">Todavía no hay gastos registrados en este negocio.</div>';
+      if (pageInfo) appendCursorPager(target, pageInfo);
+      return;
+    }
+    const rows = items.map(item => {
+      const status = item.status === 'voided' ? 'Anulado' : (item.payment_status === 'paid' ? 'Pagado' : 'Pendiente');
+      const payment = item.payment_method ? ({cash:'Efectivo',transfer:'Transferencia',card:'Tarjeta',other:'Otro'}[item.payment_method] || item.payment_method) : '—';
+      let actions = '';
+      if (item.status === 'active' && item.payment_status === 'pending') {
+        actions = '<div class="form-grid"><label>Método<select class="field" data-expense-method="'+esc(item.id)+'"><option value="cash">Efectivo</option><option value="transfer">Transferencia</option><option value="card">Tarjeta</option><option value="other">Otro</option></select></label><label>Referencia (obligatoria para transferencia/tarjeta)<input class="field" data-expense-reference="'+esc(item.id)+'" maxlength="160"></label><button class="button secondary" type="button" data-expense-action="pay" data-expense-id="'+esc(item.id)+'">Confirmar pago</button><button class="button secondary" type="button" data-expense-action="void" data-expense-id="'+esc(item.id)+'">Anular gasto</button></div>';
+      }
+      const receipt = item.receipt_path
+        ? '<button class="button secondary" type="button" data-expense-action="receipt" data-expense-id="'+esc(item.id)+'">Ver comprobante</button>'
+        : (item.status === 'active' ? '<label>Adjuntar comprobante<input class="field" type="file" data-expense-file="'+esc(item.id)+'" accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"></label>' : '—');
+      const paidDate = item.paid_at
+        ? new Date(item.paid_at).toLocaleString('es-CO',{timeZone:'America/Bogota',dateStyle:'short',timeStyle:'short'})
+        : 'Pendiente';
+      return '<tr><td>'+esc(item.expense_date)+'</td><td>'+esc(paidDate)+'</td><td><strong>'+esc(item.description)+'</strong><br><small>'+esc(item.category)+(item.supplier ? ' · '+esc(item.supplier) : '')+'</small></td><td>'+esc(money(item.amount))+'</td><td>'+esc(status)+'</td><td>'+esc(payment)+(item.transaction_reference ? '<br><small>Ref.: '+esc(item.transaction_reference)+'</small>' : '')+'</td><td>'+receipt+'</td><td>'+actions+(item.status === 'voided' ? '<small>Motivo: '+esc(item.void_reason || '—')+'</small>' : '')+'</td></tr>';
+    });
+    target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha del gasto</th><th>Fecha de pago</th><th>Detalle</th><th>Valor</th><th>Estado</th><th>Pago</th><th>Comprobante</th><th>Acciones</th></tr></thead><tbody>'+rows.join('')+'</tbody></table></div><p class="muted">Se muestran 50 registros por página. El reporte financiero agrupa los gastos por fecha de pago, no por fecha del gasto. Los gastos anulados se conservan en el historial y no se incluyen como gastos pagados.</p>';
+    if (pageInfo) appendCursorPager(target, pageInfo);
+  }
+
+  function handleExpenseControlChange(event) {
+    const fileInput = event.target.closest('[data-expense-file]');
+    if (fileInput && fileInput.files?.[0]) uploadExpenseReceipt(fileInput.dataset.expenseFile, fileInput.files[0]);
+  }
+
+  async function handleExpenseAction(event) {
+    const button = event.target.closest('[data-expense-action]');
+    if (!button) return;
+    const id = button.dataset.expenseId;
+    const action = button.dataset.expenseAction;
+    button.disabled = true;
+    try {
+      if (action === 'pay') {
+        const method = document.querySelector('[data-expense-method="'+CSS.escape(id)+'"]')?.value;
+        const reference = document.querySelector('[data-expense-reference="'+CSS.escape(id)+'"]')?.value.trim() || null;
+        if (['transfer','card'].includes(method) && !reference) throw new Error('Debes escribir la referencia para transferencia o tarjeta.');
+        const { error } = await db.rpc('pay_business_expense', {
+          p_expense_id:id, p_payment_method:method, p_transaction_reference:reference
+        });
+        if (error) throw error;
+        await loadBusinessExpenses();
+      } else if (action === 'void') {
+        const reason = window.prompt('Escribe el motivo de anulación (mínimo 3 caracteres):');
+        if (reason === null) return;
+        if (reason.trim().length < 3) throw new Error('El motivo debe tener al menos 3 caracteres.');
+        const { error } = await db.rpc('void_business_expense', { p_expense_id:id, p_void_reason:reason.trim() });
+        if (error) throw error;
+        await loadBusinessExpenses();
+      } else if (action === 'receipt') {
+        const { data, error } = await db.storage.from('business-expense-receipts').createSignedUrl(
+          button.dataset.receiptPath || await getExpenseReceiptPath(id), 300
+        );
+        if (error || !data?.signedUrl) throw error || new Error('No se pudo crear el enlace temporal.');
+        window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+      }
+    } catch (error) {
+      window.alert('No se pudo completar la acción: '+(error.message || 'Error desconocido'));
+      button.disabled = false;
+    }
+  }
+
+  async function getExpenseReceiptPath(id) {
+    const { data, error } = await db.from('business_expenses').select('receipt_path')
+      .eq('id',id).eq('business_id',businessId).maybeSingle();
+    if (error) throw error;
+    if (!data?.receipt_path) throw new Error('Este gasto no tiene comprobante asociado.');
+    return data.receipt_path;
+  }
+
+  async function uploadExpenseReceipt(expenseId, file) {
+    const allowed = new Set(['application/pdf','image/jpeg','image/png','image/webp']);
+    if (!allowed.has(file.type) || file.size > 5*1024*1024) {
+      window.alert('El comprobante debe ser PDF, JPG, PNG o WEBP y no superar 5 MB.');
+      return;
+    }
+    const extension = file.type === 'application/pdf' ? 'pdf' : file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1];
+    const path = businessId+'/'+expenseId+'/'+crypto.randomUUID()+'.'+extension;
+    const { error: uploadError } = await db.storage.from('business-expense-receipts').upload(path,file,{
+      cacheControl:'0',upsert:false,contentType:file.type
+    });
+    if (uploadError) {
+      window.alert('No se pudo subir el comprobante: '+uploadError.message);
+      return;
+    }
+    const { error: attachError } = await db.rpc('attach_business_expense_receipt',{
+      p_expense_id:expenseId,p_receipt_path:path
+    });
+    if (attachError) {
+      window.alert('El archivo quedó cargado pero no se pudo asociar al gasto. No lo vuelvas a subir con otro nombre; requiere revisión técnica. '+attachError.message);
+      return;
+    }
+    await loadBusinessExpenses();
+  }
+
+  async function saveBusinessExpense(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#businessExpenseMessage');
+    const submit = form.querySelector('[type="submit"]');
+    const file = form.elements.receipt.files?.[0] || null;
+    const amount = Number(form.elements.amount.value);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      message.textContent = 'El valor del gasto debe ser mayor que cero.';
+      return;
+    }
+    if (file && (!new Set(['application/pdf','image/jpeg','image/png','image/webp']).has(file.type) || file.size > 5*1024*1024)) {
+      message.textContent = 'El comprobante debe ser PDF, JPG, PNG o WEBP y no superar 5 MB.';
+      return;
+    }
+    submit.disabled = true;
+    message.textContent = 'Registrando gasto…';
+    try {
+      const { data: expenseId, error } = await db.rpc('register_business_expense',{
+        p_business_id:businessId,
+        p_category:form.elements.category.value,
+        p_description:form.elements.description.value.trim(),
+        p_amount:amount,
+        p_expense_date:form.elements.expense_date.value,
+        p_payment_status:'pending',
+        p_payment_method:null,
+        p_supplier:form.elements.supplier.value.trim() || null,
+        p_transaction_reference:form.elements.transaction_reference.value.trim() || null,
+        p_receipt_path:null,
+        p_notes:form.elements.notes.value.trim() || null
+      });
+      if (error) throw error;
+      if (file) {
+        await uploadExpenseReceipt(expenseId,file);
+      }
+      form.reset();
+      form.elements.expense_date.value = new Date().toLocaleDateString('en-CA',{timeZone:'America/Bogota'});
+      message.textContent = 'Gasto registrado como pendiente. Confirma el pago solo después de realizarlo.';
+      await loadBusinessExpenses();
+      await loadProfitReport();
+    } catch (error) {
+      message.textContent = 'No se pudo registrar el gasto: '+(error.message || 'Error desconocido');
+    } finally {
+      submit.disabled = false;
+    }
   }
 
   async function uploadBusinessImage(file, folder) {
@@ -136,10 +603,36 @@
     return { path: data.path, publicUrl: publicData.publicUrl };
   }
 
+  function businessAssetPathFromPublicUrl(value, expectedFolder) {
+    if (!value || !businessId || !['logo', 'products'].includes(expectedFolder)) return null;
+    try {
+      const url = new URL(value);
+      const supabaseOrigin = new URL(window.MIEJE_SUPABASE_URL).origin;
+      if (url.origin !== supabaseOrigin) return null;
+      const marker = '/storage/v1/object/public/business-assets/';
+      const markerIndex = url.pathname.indexOf(marker);
+      if (markerIndex < 0) return null;
+      const encodedPath = url.pathname.slice(markerIndex + marker.length);
+      const segments = encodedPath.split('/').map(segment => decodeURIComponent(segment));
+      const isUuid = value => {
+        const parts = String(value).split('-');
+        return parts.length === 5 && [8, 4, 4, 4, 12].every((length, index) =>
+          parts[index].length === length && /^[0-9a-f]+$/i.test(parts[index])
+        );
+      };
+      if (segments.length !== 3 || segments[0] !== businessId || segments[1] !== expectedFolder || !isUuid(segments[0])) return null;
+      const filename = segments[2].split('.');
+      if (filename.length !== 2 || !isUuid(filename[0]) || !['png', 'jpg', 'webp'].includes(filename[1].toLowerCase())) return null;
+      return segments.join('/');
+    } catch (_) {
+      return null;
+    }
+  }
+
   async function removeUploadedBusinessImage(path) {
     if (!path) return;
     const { error } = await db.storage.from('business-assets').remove([path]);
-    if (error) console.warn('No se pudo retirar una imagen que quedó sin asociar:', error.message);
+    if (error) console.warn('No se pudo retirar una imagen reemplazada o que quedó sin asociar:', error.message);
   }
 
   async function saveProduct(event) {
@@ -148,8 +641,11 @@
     const name = form.elements.name.value.trim();
     const price = Number(form.elements.price.value);
     const inventory = Number(form.elements.inventory.value);
-    if (!name || !Number.isFinite(price) || price < 0 || !Number.isInteger(inventory) || inventory < 0) {
-      message.textContent = 'Revisa el nombre, el precio y las existencias. El precio debe ser igual o mayor que cero y las existencias un número entero.';
+    const costRaw = form.elements.cost_price.value.trim();
+    const costPrice = costRaw === '' ? null : Number(costRaw);
+    if (!name || !Number.isFinite(price) || price < 0 || !Number.isInteger(inventory) || inventory < 0
+      || (costPrice !== null && (!Number.isFinite(costPrice) || costPrice < 0))) {
+      message.textContent = 'Revisa nombre, precio, costo y existencias. Los valores monetarios no pueden ser negativos y las existencias deben ser un número entero.';
       message.className = 'message error';
       return;
     }
@@ -161,39 +657,127 @@
       return;
     }
     const id = form.elements.id.value;
+    const existingProduct = id ? cachedProducts.find(item => item.id === id) : null;
+    if (id && !existingProduct) {
+      message.textContent = 'No se encontró el producto en la lista actual. Recarga los productos antes de editarlo.';
+      message.className = 'message error';
+      return;
+    }
+    let inventoryReason = null;
+    if (id && inventory !== Number(existingProduct.inventory)) {
+      inventoryReason = window.prompt('Explica el motivo del ajuste de existencias (por ejemplo: ingreso de mercancía, corrección de conteo o merma):');
+      if (inventoryReason === null) return;
+      inventoryReason = inventoryReason.trim();
+      if (inventoryReason.length < 3 || inventoryReason.length > 500) {
+        message.textContent = 'El motivo del ajuste debe tener entre 3 y 500 caracteres.';
+        message.className = 'message error';
+        return;
+      }
+    }
     const button = form.querySelector('button[type="submit"]');
     let uploadedImage = null;
+    let productSaved = false;
     button.disabled = true;
     message.textContent = imageFile ? 'Subiendo imagen y guardando producto…' : 'Guardando producto…';
     message.className = 'message';
     try {
       if (imageFile) uploadedImage = await uploadBusinessImage(imageFile, 'products');
       const payload = {
-        business_id: businessId,
         name,
         category: form.elements.category.value.trim() || null,
         description: form.elements.description.value.trim() || null,
         price,
-        inventory,
         image_url: uploadedImage?.publicUrl || externalImageUrl || null,
         is_active: form.elements.is_active.checked,
         updated_at: new Date().toISOString()
       };
       const result = id
-        ? await db.from('products').update(payload).eq('id', id).eq('business_id', businessId)
-        : await db.from('products').insert(payload);
-      if (result.error) {
+        ? await db.from('products').update(payload).eq('id', id).eq('business_id', businessId).select('id').maybeSingle()
+        : await db.from('products').insert({ ...payload, inventory, business_id: businessId }).select('id').single();
+      if (result.error || !result.data) {
         await removeUploadedBusinessImage(uploadedImage?.path);
-        throw new Error(result.error.message);
+        throw new Error(result.error?.message || 'No se guardó ningún producto. Comprueba que tienes permisos sobre este negocio.');
+      }
+      productSaved = true;
+      if (id && existingProduct.image_url !== payload.image_url) {
+        await removeUploadedBusinessImage(businessAssetPathFromPublicUrl(existingProduct.image_url, 'products'));
+      }
+      if (id && inventoryReason !== null) {
+        const inventoryResult = await db.rpc('adjust_business_inventory', {
+          p_business_id: businessId,
+          p_product_id: id,
+          p_expected_inventory: Number(existingProduct.inventory),
+          p_new_inventory: inventory,
+          p_reason: inventoryReason
+        });
+        if (inventoryResult.error) {
+          message.textContent = 'Los datos del producto se guardaron, pero no se modificaron las existencias. Motivo: ' + inventoryResult.error.message;
+          message.className = 'message error';
+          await loadProducts();
+          return;
+        }
+      }
+      if (costPrice !== null) {
+        const costTimestamp = new Date().toISOString();
+        const costLookup = await db.from('product_costs')
+          .select('product_id')
+          .eq('product_id', result.data.id)
+          .eq('business_id', businessId)
+          .maybeSingle();
+        if (costLookup.error) throw costLookup.error;
+
+        let costResult;
+        if (costLookup.data) {
+          // La migración de límites de negocio solo permite actualizar costo y fecha.
+          // No enviar product_id/business_id en un UPSERT, porque son campos inmutables.
+          costResult = await db.from('product_costs')
+            .update({ cost_price: costPrice, updated_at: costTimestamp })
+            .eq('product_id', result.data.id)
+            .eq('business_id', businessId)
+            .select('product_id')
+            .maybeSingle();
+        } else {
+          costResult = await db.from('product_costs')
+            .insert({
+              product_id: result.data.id,
+              business_id: businessId,
+              cost_price: costPrice,
+              updated_at: costTimestamp
+            })
+            .select('product_id')
+            .maybeSingle();
+
+          // Si otra sesión insertó el costo al mismo tiempo, actualizar solo
+          // las columnas autorizadas en vez de repetir un UPSERT con campos protegidos.
+          if (costResult.error?.code === '23505') {
+            costResult = await db.from('product_costs')
+              .update({ cost_price: costPrice, updated_at: costTimestamp })
+              .eq('product_id', result.data.id)
+              .eq('business_id', businessId)
+              .select('product_id')
+              .maybeSingle();
+          }
+        }
+
+        if (costResult.error || !costResult.data) {
+          throw costResult.error || new Error('No se encontró el costo del producto después de guardarlo.');
+        }
       }
       form.reset();
       form.elements.id.value = '';
-      message.textContent = id ? 'Producto actualizado.' : 'Producto creado.';
+      message.textContent = costPrice === null
+        ? (id && existingProduct.cost_price !== null
+          ? 'Producto actualizado. Se conservó el costo anterior.'
+          : (id ? 'Producto actualizado. El costo sigue pendiente de registrar.' : 'Producto creado. Registra su costo para calcular el margen.'))
+        : (id ? 'Producto y costo actualizados.' : 'Producto y costo guardados.');
       message.className = 'message success';
       await loadProducts();
     } catch (error) {
-      message.textContent = 'No se pudo guardar el producto: ' + (error.message || 'Error desconocido');
+      message.textContent = productSaved
+        ? 'El producto se guardó, pero hubo un problema al completar el proceso: ' + (error.message || 'Error desconocido')
+        : 'No se pudo guardar el producto: ' + (error.message || 'Error desconocido');
       message.className = 'message error';
+      if (productSaved) await loadProducts();
     } finally {
       button.disabled = false;
     }
@@ -208,6 +792,7 @@
     form.elements.category.value = product.category || '';
     form.elements.description.value = product.description || '';
     form.elements.price.value = product.price ?? 0;
+    form.elements.cost_price.value = product.cost_price ?? '';
     form.elements.inventory.value = product.inventory ?? 0;
     form.elements.image_url.value = product.image_url || '';
     if (form.elements.image_file) form.elements.image_file.value = '';
@@ -224,86 +809,408 @@
     const action = product.is_active ? 'desactivar' : 'activar';
     if (!window.confirm(`¿Deseas ${action} el producto "${product.name}"? No se eliminará del historial de pedidos.`)) return;
     button.disabled = true;
-    const { error } = await db.from('products').update({ is_active: !product.is_active, updated_at: new Date().toISOString() }).eq('id', id).eq('business_id', businessId);
-    if (error) {
-      alert('No se pudo cambiar el estado del producto: ' + error.message);
+    const { data: updated, error } = await db.from('products').update({ is_active: !product.is_active, updated_at: new Date().toISOString() }).eq('id', id).eq('business_id', businessId).select('id').maybeSingle();
+    if (error || !updated) {
+      alert('No se pudo cambiar el estado del producto: ' + (error?.message || 'No se encontró el producto o no tienes permiso.'));
       button.disabled = false;
       return;
     }
     await loadProducts();
   }
 
-  async function loadBusinessOrders() {
+  async function loadBusinessOrders(reset = true) {
     const target = document.querySelector('#ordersContainer');
+    if (reset) { businessOrderCursorStack = [null]; businessOrderPageIndex = 0; }
     target.innerHTML = '<div class="empty">Cargando pedidos…</div>';
-    const { data, error } = await db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,payment_status,status,total,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
-    if (error) return showError(target, error);
-    renderOrders(target, (data || []).map(o => ({ ...o, items: o.order_items || [] })), true);
+    const cursor = businessOrderCursorStack[businessOrderPageIndex];
+    const { data: financeRows, error: financeError } = await db.rpc('get_business_admin_order_financials_page', {
+      p_business_id: businessId,
+      p_refundable_only: false,
+      p_limit: PANEL_PAGE_SIZE + 1,
+      p_before_created_at: cursor?.created_at || null,
+      p_before_order_id: cursor?.order_id || null
+    });
+    if (financeError) return showError(target, financeError);
+    const rows = financeRows || [];
+    const pageRows = rows.slice(0, PANEL_PAGE_SIZE);
+    const orderIds = pageRows.map(row => row.order_id);
+    const ordersResult = orderIds.length
+      ? await db.from('orders')
+          .select('id,customer_name,customer_phone,delivery_address,delivery_notes,delivery_tracking,order_items(product_name,quantity)')
+          .eq('business_id', businessId)
+          .in('id', orderIds)
+      : { data: [], error: null };
+    if (ordersResult.error) return showError(target, ordersResult.error);
+    if ((ordersResult.data || []).length !== orderIds.length) {
+      return showError(target, new Error('No se pudieron recuperar los datos operativos de todos los pedidos de esta página.'));
+    }
+    const orderById = new Map((ordersResult.data || []).map(order => [order.id, order]));
+    const merged = pageRows.map(finance => {
+      const order = orderById.get(finance.order_id);
+      return {
+        ...(order || {}),
+        ...finance,
+        id: finance.order_id,
+        items: order?.order_items || []
+      };
+    });
+    renderOrders(target, merged, true);
+    appendCursorPager(target, {
+      page: businessOrderPageIndex + 1,
+      canPrevious: businessOrderPageIndex > 0,
+      hasMore: rows.length > PANEL_PAGE_SIZE,
+      previous: () => { businessOrderPageIndex--; void loadBusinessOrders(false); },
+      next: () => {
+        const last = pageRows[pageRows.length - 1];
+        if (!last) return;
+        businessOrderCursorStack[businessOrderPageIndex + 1] = {
+          created_at: last.created_at,
+          order_id: last.order_id
+        };
+        businessOrderPageIndex++;
+        void loadBusinessOrders(false);
+      }
+    });
   }
 
-  async function loadEmployeeOrders() {
+  async function loadEmployeeOrders(reset = true) {
     const target = document.querySelector('#ordersContainer');
+    if (reset) { employeeOrderCursorStack = [null]; employeeOrderPageIndex = 0; }
     target.innerHTML = '<div class="empty">Cargando pedidos…</div>';
-    const { data, error } = await db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,status,created_at,order_items(product_name,quantity)').eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
+    let query = db.from('orders')
+      .select('id,order_number,customer_name,customer_phone,delivery_address,delivery_notes,delivery_tracking,status,created_at,order_items(product_name,quantity)')
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+      .limit(PANEL_PAGE_SIZE + 1);
+    const cursor = employeeOrderCursorStack[employeeOrderPageIndex];
+    if (cursor) query = query.or('created_at.lt.' + cursor.created_at + ',and(created_at.eq.' + cursor.created_at + ',id.lt.' + cursor.id + ')');
+    const { data, error } = await query;
     if (error) return showError(target, error);
-    renderOrders(target, (data || []).map(o => ({ ...o, items: o.order_items || [] })), false);
+    const rows = data || [];
+    const pageRows = rows.slice(0, PANEL_PAGE_SIZE);
+    renderOrders(target, pageRows.map(o => ({ ...o, items: o.order_items || [] })), false);
+    appendCursorPager(target, {
+      page: employeeOrderPageIndex + 1, canPrevious: employeeOrderPageIndex > 0,
+      hasMore: rows.length > PANEL_PAGE_SIZE,
+      previous: () => { employeeOrderPageIndex--; void loadEmployeeOrders(false); },
+      next: () => {
+        const last = pageRows[pageRows.length - 1];
+        if (!last) return;
+        employeeOrderCursorStack[employeeOrderPageIndex + 1] = { created_at: last.created_at, id: last.id };
+        employeeOrderPageIndex++;
+        void loadEmployeeOrders(false);
+      }
+    });
   }
 
-  async function loadProducts() {
+  async function loadProducts(reset = true) {
     const target = document.querySelector('#productsContainer');
-    const { data, error } = await db.from('products').select('id,name,category,description,price,inventory,image_url,is_active').eq('business_id', businessId).order('name').limit(250);
-    if (error) return showError(target, error);
-    cachedProducts = data || [];
-    if (!cachedProducts.length) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene productos registrados. Puedes crear el primero en el formulario.</div>'; return; }
-    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Categoría</th><th>Precio</th><th>Existencias</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${cachedProducts.map(p => `<tr><td><strong>${esc(p.name)}</strong>${p.image_url && /^https?:\/\//i.test(p.image_url) ? `<br><a href="${esc(p.image_url)}" target="_blank" rel="noopener"><img src="${esc(p.image_url)}" alt="Imagen de ${esc(p.name)}" loading="lazy" style="width:54px;height:54px;object-fit:cover;border-radius:10px;vertical-align:middle"> Ver imagen</a>` : ''}<br><small>${esc(p.description || '')}</small></td><td>${esc(p.category || '—')}</td><td>${money(p.price)}</td><td>${number(p.inventory)}</td><td><span class="pill ${p.is_active ? 'green':'red'}">${p.is_active ? 'Activo':'Inactivo'}</span></td><td><button class="small-button" data-edit-product="${esc(p.id)}">Editar</button> <button class="small-button" data-toggle-product="${esc(p.id)}">${p.is_active ? 'Desactivar':'Activar'}</button></td></tr>`).join('')}</tbody></table></div>`;
+    if (reset) { productCursorStack = [null]; productPageIndex = 0; }
+    target.innerHTML = '<div class="empty">Cargando productos…</div>';
+    let productQuery = db.from('products')
+      .select('id,name,category,description,price,inventory,image_url,is_active,created_at')
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+      .limit(PANEL_PAGE_SIZE + 1);
+    const cursor = productCursorStack[productPageIndex];
+    if (cursor) productQuery = productQuery.or('created_at.lt.' + cursor.created_at + ',and(created_at.eq.' + cursor.created_at + ',id.lt.' + cursor.id + ')');
+    const productsResult = await productQuery;
+    if (productsResult.error) return showError(target, productsResult.error);
+    const pageRows = (productsResult.data || []).slice(0, PANEL_PAGE_SIZE);
+    const ids = pageRows.map(product => product.id);
+    const costsResult = ids.length
+      ? await db.from('product_costs').select('product_id,cost_price').eq('business_id', businessId).in('product_id', ids)
+      : { data: [], error: null };
+    if (costsResult.error) return showError(target, costsResult.error);
+    const costsByProduct = new Map((costsResult.data || []).map(row => [row.product_id, Number(row.cost_price)]));
+    cachedProducts = pageRows.map(product => ({
+      ...product,
+      cost_price: costsByProduct.has(product.id) ? costsByProduct.get(product.id) : null
+    }));
+    if (!cachedProducts.length && productPageIndex === 0) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene productos registrados. Puedes crear el primero en el formulario.</div>'; return; }
+    target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Categoría</th><th>Precio</th><th>Costo unitario</th><th>Margen bruto unitario</th><th>Existencias</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>' +
+      cachedProducts.map(p => {
+        const hasCost = p.cost_price !== null && Number.isFinite(p.cost_price);
+        const margin = hasCost ? Number(p.price) - p.cost_price : null;
+        return '<tr><td><strong>' + esc(p.name) + '</strong>' +
+          (p.image_url && /^https?:\/\//i.test(p.image_url) ? '<br><a href="' + esc(p.image_url) + '" target="_blank" rel="noopener"><img src="' + esc(p.image_url) + '" alt="Imagen de ' + esc(p.name) + '" loading="lazy" style="width:54px;height:54px;object-fit:cover;border-radius:10px;vertical-align:middle"> Ver imagen</a>' : '') +
+          '<br><small>' + esc(p.description || '') + '</small></td><td>' + esc(p.category || '—') + '</td><td>' + money(p.price) +
+          '</td><td>' + (hasCost ? money(p.cost_price) : '<span class="pill red">Sin registrar</span>') +
+          '</td><td>' + (hasCost ? money(margin) : 'Pendiente de costo') +
+          '</td><td>' + number(p.inventory) + '</td><td><span class="pill ' + (p.is_active ? 'green':'red') + '">' +
+          (p.is_active ? 'Activo':'Inactivo') + '</span></td><td><button class="small-button" data-edit-product="' + esc(p.id) +
+          '">Editar</button> <button class="small-button" data-toggle-product="' + esc(p.id) + '">' +
+          (p.is_active ? 'Desactivar':'Activar') + '</button></td></tr>';
+      }).join('') + '</tbody></table></div>';
     target.querySelectorAll('[data-edit-product]').forEach(button => button.addEventListener('click', () => editProduct(button.dataset.editProduct)));
     target.querySelectorAll('[data-toggle-product]').forEach(button => button.addEventListener('click', () => toggleProductStatus(button.dataset.toggleProduct, button)));
+    appendCursorPager(target, {
+      page: productPageIndex + 1, canPrevious: productPageIndex > 0,
+      hasMore: (productsResult.data || []).length > PANEL_PAGE_SIZE,
+      previous: () => { productPageIndex--; void loadProducts(false); },
+      next: () => {
+        const last = pageRows[pageRows.length - 1];
+        if (!last) return;
+        productCursorStack[productPageIndex + 1] = { created_at: last.created_at, id: last.id };
+        productPageIndex++;
+        void loadProducts(false);
+      }
+    });
+  }
+
+  async function loadInventoryMovements(reset = true) {
+    const target = document.querySelector('#inventoryMovementsContainer');
+    if (!target) return;
+    if (reset) { inventoryCursorStack = [null]; inventoryPageIndex = 0; }
+    target.innerHTML = '<div class="empty">Cargando historial de inventario…</div>';
+    let query = db.from('inventory_movements')
+      .select('id,product_id,movement_type,quantity_before,quantity_after,quantity_delta,reason,created_at')
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+      .limit(PANEL_PAGE_SIZE + 1);
+    const cursor = inventoryCursorStack[inventoryPageIndex];
+    if (cursor) query = query.or('created_at.lt.' + cursor.created_at + ',and(created_at.eq.' + cursor.created_at + ',id.lt.' + cursor.id + ')');
+    const { data, error } = await query;
+    if (error) return showError(target, error);
+    const fetchedRows = data || [];
+    const rows = fetchedRows.slice(0, PANEL_PAGE_SIZE);
+    const productIds = [...new Set(rows.map(row => row.product_id).filter(Boolean))];
+    const productResult = productIds.length
+      ? await db.from('products').select('id,name').eq('business_id', businessId).in('id', productIds)
+      : { data: [], error: null };
+    if (productResult.error) return showError(target, productResult.error);
+    const productNames = new Map((productResult.data || []).map(product => [product.id, product.name]));
+    const labels = {
+      initial: 'Inventario inicial',
+      adjustment: 'Ajuste manual',
+      sale: 'Venta',
+      cancellation_return: 'Devolución por cancelación'
+    };
+    if (!rows.length && inventoryPageIndex === 0) {
+      target.innerHTML = '<div class="empty">Todavía no hay movimientos registrados. Los movimientos aparecerán cuando se cree un producto o cambien sus existencias.</div>';
+      return;
+    }
+    if (!rows.length) target.innerHTML = '<div class="empty">No hay más movimientos en esta página.</div>';
+    if (rows.length) target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th>Antes</th><th>Después</th><th>Variación</th><th>Motivo</th></tr></thead><tbody>' +
+      rows.map(row => {
+        const delta = Number(row.quantity_delta);
+        const deltaText = (delta > 0 ? '+' : '') + number(delta);
+        const dateText = new Date(row.created_at).toLocaleString('es-CO', {
+          dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Bogota'
+        });
+        return '<tr><td>' + esc(dateText) + '</td><td>' +
+          esc(productNames.get(row.product_id) || 'Producto') + '</td><td>' +
+          esc(labels[row.movement_type] || row.movement_type) + '</td><td>' +
+          number(row.quantity_before) + '</td><td>' + number(row.quantity_after) +
+          '</td><td>' + esc(deltaText) + '</td><td>' + esc(row.reason) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    appendCursorPager(target, {
+      page: inventoryPageIndex + 1,
+      canPrevious: inventoryPageIndex > 0,
+      hasMore: fetchedRows.length > PANEL_PAGE_SIZE,
+      previous: () => { inventoryPageIndex--; void loadInventoryMovements(false); },
+      next: () => {
+        const last = rows[rows.length - 1];
+        if (!last) return;
+        inventoryCursorStack[inventoryPageIndex + 1] = { created_at: last.created_at, id: last.id };
+        inventoryPageIndex++;
+        void loadInventoryMovements(false);
+      }
+    });
+  }
+
+  let businessDirectoryCursorStack = [null];
+  let businessDirectoryPageIndex = 0;
+  let businessDirectoryHasMore = false;
+  let businessDirectoryCounts = { total: 0, active: 0, suspended: 0 };
+  let technicalAuditCount = 0;
+  let businessDirectorySearchTimer = null;
+  let businessDirectoryRequestId = 0;
+
+  async function loadTechnicalBusinesses(reset = true) {
+    if (reset) {
+      businessDirectoryCursorStack = [null];
+      businessDirectoryPageIndex = 0;
+    }
+    const requestId = ++businessDirectoryRequestId;
+    const cursor = businessDirectoryCursorStack[businessDirectoryPageIndex];
+    const search = document.querySelector('#businessSearch')?.value.trim() || '';
+    const result = await callTechnicalFunction({
+      action: 'list_businesses', limit: PANEL_PAGE_SIZE + 1,
+      search: search || undefined,
+      before_created_at: cursor?.created_at || undefined,
+      before_id: cursor?.id || undefined
+    });
+    if (requestId !== businessDirectoryRequestId) return;
+    cachedBusinesses = result.businesses || [];
+    businessDirectoryHasMore = Boolean(result.has_more);
+    businessDirectoryCounts = {
+      total: Number(result.business_count || 0),
+      active: Number(result.active_count || 0),
+      suspended: Number(result.suspended_count || 0)
+    };
+    renderStats([
+      ['Negocios registrados', number(businessDirectoryCounts.total), 'Total de la plataforma'],
+      ['Negocios activos', number(businessDirectoryCounts.active), 'Con acceso habilitado'],
+      ['Negocios suspendidos', number(businessDirectoryCounts.suspended), 'Requieren revisión o reactivación'],
+      ['Eventos de auditoría', number(technicalAuditCount), 'Registros de actividad']
+    ]);
+    renderBusinesses();
   }
 
   async function loadTechnical() {
-    const result = await callTechnicalFunction({ action: 'list_businesses' });
-    cachedBusinesses = result.businesses || [];
-    const [productsResult, ordersResult, auditResult] = await Promise.all([
-      db.from('products').select('id', { count: 'exact', head: true }),
-      db.from('orders').select('id,status,total', { count: 'exact' }),
-      db.from('audit_logs').select('id', { count: 'exact', head: true })
-    ]);
-    if (productsResult.error) throw productsResult.error;
-    if (ordersResult.error) throw ordersResult.error;
-    if (auditResult.error) throw auditResult.error;
-    const activeOrders = ordersResult.data || [];
-    renderStats([
-      ['Negocios', number(cachedBusinesses.length), `${number(cachedBusinesses.filter(b => b.status === 'active').length)} activos`],
-      ['Productos', number(productsResult.count || 0), 'En todos los negocios'],
-      ['Pedidos', number(ordersResult.count || activeOrders.length), `${number(activeOrders.filter(o => !['delivered','cancelled'].includes(o.status)).length)} abiertos`],
-      ['Ventas registradas', money(activeOrders.reduce((sum,o) => sum + Number(o.total || 0), 0)), 'Total de pedidos consultables'],
-      ['Eventos de auditoría', number(auditResult.count || 0), 'Registros en audit_logs']
-    ]);
-    const options = `<option value="">Todos los negocios</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (inactivo)'}</option>`).join('');
-    const select = document.querySelector('#businessSelect'); if (select) select.innerHTML = options;
-    const memberSelect = document.querySelector('#memberBusinessSelect'); if (memberSelect) memberSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
-    const suspensionSelect = document.querySelector('#suspensionBusinessSelect'); if (suspensionSelect) suspensionSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (suspendido)'}</option>`).join('');
-    const inviteSelect = document.querySelector('#inviteBusinessSelect'); if (inviteSelect) inviteSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.filter(b => b.status === 'active').map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
-    renderBusinesses();
+    const auditResult = await callTechnicalFunction({ action: 'list_audit_logs', limit: 1 });
+    technicalAuditCount = Number(auditResult.audit_count || 0);
+    await loadTechnicalBusinesses(true);
+    initBusinessPicker('#businessSelect', false, true);
+    initBusinessPicker('#memberBusinessSelect');
+    initBusinessPicker('#assignmentBusinessSelect');
+    initBusinessPicker('#suspensionBusinessSelect');
+    initBusinessPicker('#inviteBusinessSelect', true);
+    initBusinessPicker('#pendingInvitationsBusinessSelect', false);
     await loadSelectedBusiness('');
+    await loadAccessEvents(null, '#accessContainer');
     await loadAuditEvents(null, '#auditContainer');
-    const finance = document.querySelector('#financeContainer'); if (finance) finance.innerHTML = '<div class="empty">El módulo financiero global y nómina aún no está conectado al esquema independiente.</div>';
-    const blocks = document.querySelector('#blockRequestsContainer'); if (blocks) blocks.innerHTML = '<div class="empty">Las solicitudes de bloqueo no están disponibles en este proyecto todavía.</div>';
+    await loadFinance();
+    await loadBlockRequests();
     await loadContentModeration();
-    const platformAi = document.getElementById('ia-general');
-    if (platformAi) platformAi.innerHTML = '<div class="section-heading"><div><h2>IA general</h2></div></div><div class="empty">La configuración de IA general aún no está conectada al esquema independiente.</div>';
+    await initPlatformAi();
+  }
+
+  const businessPickerStates = new Map();
+
+  function initBusinessPicker(selector, activeOnly = false, allowAll = false) {
+    const select = document.querySelector(selector);
+    if (!select) return;
+    const existingState = businessPickerStates.get(selector);
+    if (existingState) {
+      existingState.cursors = [null];
+      existingState.page = 0;
+      void loadBusinessPickerPage(existingState);
+      return;
+    }
+    const search = document.createElement('input');
+    search.type = 'search';
+    search.className = 'field';
+    search.placeholder = 'Buscar negocio por nombre o identificador…';
+    search.setAttribute('aria-label', 'Buscar negocio');
+    search.style.marginBottom = '6px';
+    const pager = document.createElement('div');
+    pager.className = 'inline-note';
+    pager.style.display = 'flex';
+    pager.style.alignItems = 'center';
+    pager.style.gap = '8px';
+    pager.style.marginTop = '6px';
+    select.parentNode.insertBefore(search, select);
+    select.insertAdjacentElement('afterend', pager);
+    const state = { selector, activeOnly, allowAll, search: '', cursors: [null], page: 0, hasMore: false, timer: null, requestId: 0 };
+    businessPickerStates.set(selector, state);
+    search.addEventListener('input', () => {
+      state.search = search.value.trim();
+      state.requestId++;
+      state.cursors = [null];
+      state.page = 0;
+      if (state.timer) window.clearTimeout(state.timer);
+      state.timer = window.setTimeout(() => { void loadBusinessPickerPage(state); }, 250);
+    });
+    void loadBusinessPickerPage(state);
+  }
+
+  async function loadBusinessPickerPage(state) {
+    const select = document.querySelector(state.selector);
+    const pager = select?.nextElementSibling;
+    if (!select || !pager) return;
+    const requestId = ++state.requestId;
+    select.disabled = true;
+    select.innerHTML = '<option value="">Cargando negocios…</option>';
+    pager.textContent = 'Consultando…';
+    try {
+      const cursor = state.cursors[state.page];
+      const result = await callTechnicalFunction({
+        action: 'list_businesses',
+        limit: PANEL_PAGE_SIZE + 1,
+        search: state.search || undefined,
+        active_only: state.activeOnly,
+        before_created_at: cursor?.created_at || undefined,
+        before_id: cursor?.id || undefined
+      });
+      if (requestId !== state.requestId) return;
+      const rows = result.businesses || [];
+      state.hasMore = Boolean(result.has_more);
+      state.last = rows[rows.length - 1] || null;
+      select.innerHTML = (state.allowAll ? '<option value="">Todos los negocios</option>' : '<option value="">Selecciona un negocio</option>') + rows.map(b =>
+        `<option value="${esc(b.id)}">${esc(b.name)} · ${esc(b.slug)}${b.status === 'active' ? '' : ' (suspendido)'}</option>`
+      ).join('');
+      if (!rows.length) select.innerHTML = '<option value="">No se encontraron negocios</option>';
+      const previous = document.createElement('button');
+      previous.type = 'button';
+      previous.className = 'small-button';
+      previous.textContent = 'Anterior';
+      previous.disabled = state.page === 0;
+      previous.addEventListener('click', () => {
+        if (state.page > 0) { state.page--; void loadBusinessPickerPage(state); }
+      });
+      const label = document.createElement('span');
+      label.textContent = `Página ${state.page + 1}${state.hasMore ? ' · hay más resultados' : ' · última página'}`;
+      const next = document.createElement('button');
+      next.type = 'button';
+      next.className = 'small-button';
+      next.textContent = 'Siguiente';
+      next.disabled = !state.hasMore || !state.last;
+      next.addEventListener('click', () => {
+        if (!state.hasMore || !state.last) return;
+        state.cursors[state.page + 1] = { created_at: state.last.created_at, id: state.last.id };
+        state.page++;
+        void loadBusinessPickerPage(state);
+      });
+      pager.replaceChildren(previous, label, next);
+    } catch (error) {
+      if (requestId !== state.requestId) return;
+      select.innerHTML = '<option value="">No se pudieron cargar los negocios</option>';
+      pager.textContent = error.message || 'Error al consultar negocios.';
+    } finally {
+      if (requestId === state.requestId) select.disabled = false;
+    }
   }
 
   function renderBusinesses() {
     const target = document.querySelector('#businessesContainer');
+    if (!target) return;
     const search = (document.querySelector('#businessSearch')?.value || '').trim().toLocaleLowerCase('es');
-    const filtered = cachedBusinesses.filter(b => [b.name, b.slug, b.business_type, b.category].some(v => String(v || '').toLocaleLowerCase('es').includes(search)));
+    const filtered = cachedBusinesses;
     const count = document.querySelector('#businessCount');
-    if (count) count.textContent = `${filtered.length} de ${cachedBusinesses.length} negocios`;
-    if (!cachedBusinesses.length) { target.innerHTML = '<div class="empty">Todavía no hay negocios. Usa el formulario de arriba para crear el primero.</div>'; return; }
-    if (!filtered.length) { target.innerHTML = '<div class="empty">No hay negocios que coincidan con la búsqueda.</div>'; return; }
+    if (count) count.textContent = `${businessDirectoryCounts.total} negocios registrados · Página ${businessDirectoryPageIndex + 1}${search ? ` · búsqueda: ${search}` : ''}`;
+    if (!filtered.length) {
+      target.innerHTML = '<div class="empty">' + (search ? 'No se encontraron negocios con esa búsqueda.' : 'Todavía no hay negocios registrados.') + '</div>';
+      appendCursorPager(target, {
+        page: businessDirectoryPageIndex + 1,
+        canPrevious: businessDirectoryPageIndex > 0,
+        hasMore: businessDirectoryHasMore,
+        previous: () => { if (businessDirectoryPageIndex > 0) { businessDirectoryPageIndex--; void loadTechnicalBusinesses(false); } },
+        next: () => advanceBusinessDirectory()
+      });
+      return;
+    }
     target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Negocio</th><th>Tipo</th><th>Identificador</th><th>Estado / motivo</th><th>Creado</th><th>Acción</th></tr></thead><tbody>${filtered.map(b => { const active = b.status === 'active'; return `<tr><td><strong>${esc(b.name)}</strong></td><td>${esc(b.business_type || b.category || '—')}</td><td>${esc(b.slug)}</td><td><span class="pill ${active ? 'green':'red'}">${active ? 'Activo':'Suspendido'}</span>${!active ? `<br><small>${esc(b.suspension_reason || 'Motivo pendiente de registrar')}</small>` : ''}</td><td>${dateTime(b.created_at)}</td><td><button class="small-button" data-business-status="${esc(b.id)}" data-active="${active ? 'false':'true'}">${active ? 'Suspender':'Reactivar'}</button></td></tr>`; }).join('')}</tbody></table></div>`;
-    target.querySelectorAll('[data-business-status]').forEach(button => button.addEventListener('click', () => changeBusinessStatus(button.dataset.businessStatus, button.dataset.active === 'true', button)));
+    appendCursorPager(target, {
+      page: businessDirectoryPageIndex + 1,
+      canPrevious: businessDirectoryPageIndex > 0,
+      hasMore: businessDirectoryHasMore,
+      previous: () => { if (businessDirectoryPageIndex > 0) { businessDirectoryPageIndex--; void loadTechnicalBusinesses(false); } },
+      next: () => advanceBusinessDirectory()
+    });
+    target.querySelectorAll('[data-business-status]').forEach(button => button.addEventListener('click', async () => {
+      await changeBusinessStatus(button.dataset.businessStatus, button.dataset.active === 'true', button);
+      await loadTechnicalBusinesses(false);
+    }));
+  }
+
+  function advanceBusinessDirectory() {
+    const last = cachedBusinesses[cachedBusinesses.length - 1];
+    if (!last || !businessDirectoryHasMore) return;
+    businessDirectoryCursorStack[businessDirectoryPageIndex + 1] = { created_at: last.created_at, id: last.id };
+    businessDirectoryPageIndex++;
+    void loadTechnicalBusinesses(false);
   }
 
   async function refreshTechnical() {
@@ -356,20 +1263,22 @@
     message.className = 'message';
     message.textContent = 'Creando negocio y guardando auditoría…';
     try {
-      const result = await callTechnicalFunction(payload);
-      message.className = 'message success';
-      message.textContent = `Negocio creado: ${result.business.name}. Identificador público: ${result.business.slug}. Ahora puedes invitar a su administrador y empleados.`;
+      const result = await callTechnicalFunction({
+        action: 'create_business',
+        name: String(payload.name || '').trim(),
+        category: String(payload.category || '').trim()
+      });
+      message.className = result.audit_warning ? 'message error' : 'message success';
+      message.textContent = result.audit_warning
+        ? `Negocio creado: ${result.business.name} (${result.business.slug}), pero falta registrar la auditoría. ${result.audit_warning}`
+        : `Negocio creado: ${result.business.name}. Identificador público: ${result.business.slug}. Ahora puedes invitar a su administrador y empleados.`;
       form.reset();
-      form.elements.city.value = 'Pereira, Risaralda';
       await loadTechnical();
-      const memberBusinessSelect = document.querySelector('#memberBusinessSelect');
-    if (memberBusinessSelect) memberBusinessSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
-    const suspensionSelect = document.querySelector('#suspensionBusinessSelect');
-    if (suspensionSelect) suspensionSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.is_active ? '' : ' (suspendido)'}</option>`).join('');
-    const inviteSelect = document.querySelector('#inviteBusinessSelect');
+      const inviteSelect = document.querySelector('#inviteBusinessSelect');
       if (inviteSelect) inviteSelect.value = result.business.id;
       const filterSelect = document.querySelector('#businessSelect');
       if (filterSelect) filterSelect.value = result.business.id;
+      await loadSelectedBusiness(result.business.id);
     } catch (error) {
       message.className = 'message error';
       message.textContent = error.message || 'No se pudo crear el negocio.';
@@ -383,22 +1292,136 @@
     const message = document.querySelector('#inviteMemberMessage');
     const payload = Object.fromEntries(new FormData(form).entries());
     payload.action = 'invite_member';
-    payload.is_business_owner = form.elements.is_business_owner?.checked === true;
-    payload.redirect_to = new URL('aceptar-invitacion.html', window.location.href).href;
     button.disabled = true;
     message.className = 'message';
     message.textContent = 'Creando invitación y registrando la asignación…';
     try {
       const result = await callTechnicalFunction(payload);
-      message.className = 'message success';
-      message.textContent = `Invitación preparada para ${result.email} como ${result.role === 'business_admin' ? 'administrador' : 'empleado'} de ${result.business}. La persona debe abrir el correo y configurar su contraseña.`;
+      message.className = result.audit_warning ? 'message error' : 'message success';
+      const assignedRole = result.membership?.role === 'business_admin' ? 'administrador' : 'empleado';
+      message.textContent = result.message || (result.invitation_sent
+        ? `Invitación enviada para el nuevo usuario como ${assignedRole}.`
+        : `Usuario existente asignado como ${assignedRole} al negocio.`);
+      if (result.audit_warning) message.textContent += ` Advertencia: ${result.audit_warning}`;
       const keepBusiness = form.elements.business_id.value;
       form.reset();
       form.elements.business_id.value = keepBusiness;
+      if (result.invitation_pending) {
+        const invitationBusinessSelect = document.querySelector('#pendingInvitationsBusinessSelect');
+        if (invitationBusinessSelect) invitationBusinessSelect.value = keepBusiness;
+        await loadBusinessInvitations(true, keepBusiness);
+      }
     } catch (error) {
       message.className = 'message error';
       message.textContent = error.message || 'No se pudo enviar la invitación.';
     } finally { button.disabled = false; }
+  }
+
+  async function loadBusinessInvitations(reset = true, businessOverride = null) {
+    const select = document.querySelector('#pendingInvitationsBusinessSelect');
+    const container = document.querySelector('#businessInvitationsContainer');
+    const count = document.querySelector('#invitationsCount');
+    const businessId = businessOverride || select?.value || '';
+    if (!container) return;
+    if (!businessId) {
+      container.className = 'empty';
+      container.textContent = 'Selecciona un negocio para consultar sus invitaciones pendientes.';
+      if (count) count.textContent = '';
+      return;
+    }
+    if (reset) {
+      invitationCursorStack = [null];
+      invitationPageIndex = 0;
+    }
+    const cursor = invitationCursorStack[invitationPageIndex];
+    container.className = 'empty';
+    container.textContent = 'Consultando invitaciones pendientes…';
+    try {
+      const result = await callTechnicalFunction({
+        action: 'list_business_invitations',
+        business_id: businessId,
+        status: 'pending',
+        limit: PANEL_PAGE_SIZE,
+        before_created_at: cursor?.created_at || undefined,
+        before_id: cursor?.id || undefined
+      });
+      const invitations = result.invitations || [];
+      if (count) count.textContent = invitations.length ? `Mostrando ${invitations.length} invitaciones · página ${invitationPageIndex + 1}` : 'Sin invitaciones pendientes';
+      if (!invitations.length) {
+        container.className = 'empty';
+        container.textContent = 'Este negocio no tiene invitaciones pendientes.';
+        return;
+      }
+      container.className = 'stack-list';
+      container.innerHTML = invitations.map(invitation => {
+        const roleLabel = invitation.role === 'business_admin' ? 'Administrador del negocio' : 'Empleado';
+        const expiry = invitation.expires_at ? new Date(invitation.expires_at).toLocaleString('es-CO') : 'Sin fecha disponible';
+        return `<article class="list-card">
+          <div class="list-card-main">
+            <strong>${esc(invitation.email_normalized)}</strong>
+            <span class="muted">${esc(roleLabel)} · ${esc(invitation.job_title || 'Sin cargo')}</span>
+            <span class="inline-note">Vence: ${esc(expiry)}</span>
+          </div>
+          <button class="small-button danger" type="button" data-revoke-invitation="${esc(invitation.id)}">Revocar invitación</button>
+        </article>`;
+      }).join('');
+      container.querySelectorAll('[data-revoke-invitation]').forEach(button => {
+        button.addEventListener('click', async () => {
+          const invitationId = button.dataset.revokeInvitation;
+          const reason = window.prompt('Motivo para revocar esta invitación (mínimo 5 caracteres; no incluyas correos, teléfonos ni datos personales):', '');
+          if (!reason || reason.trim().length < 5) {
+            alert('Escribe un motivo de al menos cinco caracteres. No se realizó ningún cambio.');
+            return;
+          }
+          if (!window.confirm('¿Revocar esta invitación? La cuenta Auth y sus otras membresías se conservarán.')) return;
+          button.disabled = true;
+          try {
+            await callTechnicalFunction({
+              action: 'revoke_invitation',
+              invitation_id: invitationId,
+              reason: reason.trim()
+            });
+            await loadBusinessInvitations(true, businessId);
+          } catch (error) {
+            button.disabled = false;
+            alert(error.message || 'No se pudo revocar la invitación.');
+          }
+        });
+      });
+
+      const pager = document.createElement('div');
+      pager.className = 'toolbar';
+      pager.style.marginTop = '12px';
+      const previous = document.createElement('button');
+      previous.type = 'button';
+      previous.className = 'small-button';
+      previous.textContent = 'Anterior';
+      previous.disabled = invitationPageIndex === 0;
+      previous.addEventListener('click', () => {
+        if (invitationPageIndex > 0) {
+          invitationPageIndex--;
+          void loadBusinessInvitations(false, businessId);
+        }
+      });
+      const next = document.createElement('button');
+      next.type = 'button';
+      next.className = 'small-button';
+      next.textContent = 'Siguiente';
+      next.disabled = !result.has_more || !invitations.length;
+      next.addEventListener('click', () => {
+        if (!result.has_more || !invitations.length) return;
+        const last = invitations[invitations.length - 1];
+        invitationCursorStack[invitationPageIndex + 1] = { created_at: last.created_at, id: last.id };
+        invitationPageIndex++;
+        void loadBusinessInvitations(false, businessId);
+      });
+      pager.append(previous, next);
+      container.append(pager);
+    } catch (error) {
+      container.className = 'empty';
+      container.textContent = error.message || 'No se pudieron consultar las invitaciones.';
+      if (count) count.textContent = '';
+    }
   }
 
   async function changeBusinessStatus(id, isActive, button) {
@@ -423,26 +1446,130 @@
 
   async function loadSelectedBusiness(id) {
     const ordersTarget = document.querySelector('#businessOrdersContainer');
-    if (!id) {
-      if (ordersTarget) ordersTarget.innerHTML = '<div class="empty">Selecciona un negocio para consultar sus pedidos.</div>';
-      return;
-    }
+    if (!ordersTarget) return;
     const business = cachedBusinesses.find(b => b.id === id);
-    if (!business) return;
-    const { data, error } = await db.from('orders').select('id,order_number,customer_name,customer_phone,delivery_address,payment_status,status,total,created_at,order_items(product_name,quantity)').eq('business_id', id).order('created_at', { ascending: false }).limit(100);
-    if (error) showError(ordersTarget, error);
-    else renderOrders(ordersTarget, (data || []).map(o => ({ ...o, items: o.order_items || [] })), true);
+    ordersTarget.innerHTML = business
+      ? '<div class="empty">El panel técnico administra el negocio y sus accesos. Los pedidos, clientes, productos y movimientos comerciales solo se consultan desde el panel de ese negocio.</div>'
+      : '<div class="empty">Selecciona un negocio para administrar sus usuarios y accesos. La información comercial permanece en su panel administrativo.</div>';
   }
 
-  async function loadTechnicalMembers(id) {
-    const target = document.querySelector('#memberTargetSelect'); if (!target) return;
+  async function loadTechnicalMembers(id, targetSelector = '#memberTargetSelect', reset = true) {
+    const target = document.querySelector(targetSelector);
+    if (!target) return;
+    const state = memberSelectStates.get(targetSelector) || { businessId: null, cursors: [null], page: 0, requestId: 0 };
+    const requestId = ++state.requestId;
+    if (reset || state.businessId !== id) {
+      state.businessId = id;
+      state.cursors = [null];
+      state.page = 0;
+    }
+    memberSelectStates.set(targetSelector, state);
+    target.disabled = true;
+    const parentForm = target.closest('form');
+    const submitButton = parentForm?.querySelector('button[type="submit"]');
+    if (submitButton) submitButton.disabled = true;
     target.innerHTML = '<option value="">Cargando cuentas…</option>';
-    if (!id) { target.innerHTML = '<option value="">Selecciona primero un negocio</option>'; return; }
+    if (!id) {
+      target.innerHTML = '<option value="">Selecciona primero un negocio</option>';
+      renderMemberSelectPager(target, state, () => {});
+      target.disabled = false;
+      if (submitButton) submitButton.disabled = false;
+      return;
+    }
     try {
-      const result = await callTechnicalFunction({ action: 'list_business_members', business_id: id });
-      const rows = result.members || [];
-      target.innerHTML = '<option value="">Selecciona una cuenta</option>' + rows.map(m => `<option value="${esc(m.id)}">${esc(m.profiles?.display_name || shortId(m.user_id))} · ${m.role === 'business_admin' ? 'Administrador' : 'Empleado'}${m.status !== 'active' ? ' · Suspendido' : ''}</option>`).join('');
-    } catch (error) { target.innerHTML = '<option value="">No se pudieron cargar las cuentas</option>'; }
+      const cursor = state.cursors[state.page];
+      const result = await callTechnicalFunction({
+        action: 'list_business_members', business_id: id, limit: PANEL_PAGE_SIZE + 1,
+        before_created_at: cursor?.created_at || undefined,
+        before_id: cursor?.id || undefined
+      });
+      if (requestId !== state.requestId) return;
+      const fetched = result.members || [];
+      const rows = fetched.slice(0, PANEL_PAGE_SIZE);
+      target.innerHTML = '<option value="">Selecciona una cuenta</option>' + rows.map(m => {
+        const globallyBlocked = m.profiles?.is_blocked === true;
+        const localStatus = m.status === 'active' ? 'Activa' : 'Suspendida';
+        const globalStatus = globallyBlocked ? ' · Bloqueada globalmente' : '';
+        return `<option value="${esc(m.id)}" data-business-id="${esc(m.business_id)}" data-role="${esc(m.role)}" data-job-title="${esc(m.job_title || '')}" data-status="${esc(m.status)}" data-global-blocked="${globallyBlocked ? 'true' : 'false'}">${esc(m.profiles?.display_name || shortId(m.user_id))} · ${m.role === 'business_admin' ? 'Administrador' : 'Empleado'} · ${esc(m.job_title || 'Cargo no registrado')} · ${localStatus}${globalStatus}</option>`;
+      }).join('');
+      state.hasMore = Boolean(result.has_more);
+      state.last = rows[rows.length - 1] || null;
+      renderMemberSelectPager(target, state, direction => {
+        if (direction === 'next' && state.hasMore && state.last) {
+          state.cursors[state.page + 1] = { created_at: state.last.created_at, id: state.last.id };
+          state.page++;
+        } else if (direction === 'previous' && state.page > 0) state.page--;
+        void loadTechnicalMembers(id, targetSelector, false);
+      });
+      if (!rows.length) target.innerHTML = '<option value="">No hay cuentas en esta página</option>';
+    } catch (error) {
+      if (requestId !== state.requestId) return;
+      target.innerHTML = `<option value="">Error al cargar las cuentas: ${esc(error.message || 'Error de consulta')}</option>`;
+      renderMemberSelectPager(target, state, () => {});
+    } finally {
+      if (requestId === state.requestId) {
+        target.disabled = false;
+        if (submitButton) submitButton.disabled = false;
+      }
+    }
+  }
+
+  function renderMemberSelectPager(target, state, onPage) {
+    const parent = target.parentElement;
+    if (!parent) return;
+    let pager = parent.querySelector('[data-member-select-pager]');
+    if (!pager) {
+      pager = document.createElement('div');
+      pager.dataset.memberSelectPager = 'true';
+      pager.className = 'toolbar';
+      pager.style.marginTop = '8px';
+      target.insertAdjacentElement('afterend', pager);
+    }
+    pager.innerHTML = `<button type="button" class="small-button" data-member-prev ${state.page <= 0 ? 'disabled' : ''}>Anterior</button><span class="inline-note">Página ${state.page + 1} · máximo ${PANEL_PAGE_SIZE} cuentas</span><button type="button" class="small-button" data-member-next ${!state.hasMore ? 'disabled' : ''}>Siguiente</button>`;
+    pager.querySelector('[data-member-prev]')?.addEventListener('click', () => onPage('previous'));
+    pager.querySelector('[data-member-next]')?.addEventListener('click', () => onPage('next'));
+  }
+
+  function fillMemberAssignment() {
+    const form = document.querySelector('#memberAssignmentForm');
+    const selected = form?.elements.membership_id?.selectedOptions?.[0];
+    if (!form) return;
+    if (!selected?.value) {
+      form.elements.role.value = 'employee';
+      form.elements.job_title.value = '';
+      return;
+    }
+    form.elements.role.value = selected.dataset.role || 'employee';
+    form.elements.job_title.value = selected.dataset.jobTitle || '';
+  }
+
+  async function saveMemberAssignment(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#memberAssignmentMessage');
+    const payload = {
+      action: 'update_member_assignment',
+      membership_id: form.elements.membership_id.value,
+      role: form.elements.role.value,
+      job_title: form.elements.job_title.value.trim()
+    };
+    const selected = form.elements.membership_id.selectedOptions[0];
+    if (!payload.membership_id || selected?.dataset.businessId !== form.elements.business_id.value || payload.job_title.length < 2) {
+      message.textContent = 'Selecciona una cuenta del negocio elegido y escribe un cargo válido.';
+      message.className = 'message error';
+      return;
+    }
+    try {
+      const result = await callTechnicalFunction(payload);
+      message.textContent = result.message || 'Asignación actualizada.';
+      if (result.audit_warning) message.textContent += ` Advertencia: ${result.audit_warning}`;
+      message.className = result.audit_warning ? 'message error' : 'message success';
+      await loadTechnicalMembers(form.elements.business_id.value, '#assignmentMemberSelect');
+      fillMemberAssignment();
+    } catch (error) {
+      message.textContent = error.message || 'No se pudo actualizar la asignación.';
+      message.className = 'message error';
+    }
   }
 
   async function saveMemberStatus(event) {
@@ -450,6 +1577,12 @@
     const form = event.currentTarget, message = document.querySelector('#memberStatusMessage');
     const suspended = form.elements.is_blocked.value === 'true';
     const reason = form.elements.reason.value.trim();
+    const selected = form.elements.membership_id.selectedOptions[0];
+    if (!selected?.value || selected.dataset.businessId !== form.elements.business_id.value) {
+      message.textContent = 'Selecciona una cuenta perteneciente al negocio elegido.';
+      message.className = 'message error';
+      return;
+    }
     if (reason.length < 5) {
       message.textContent = 'Escribe un motivo de al menos 5 caracteres para dejar constancia en auditoría.';
       message.className = 'message error';
@@ -459,11 +1592,14 @@
     try {
       const result = await callTechnicalFunction({
         action: suspended ? 'block_member' : 'unblock_member',
-        membership_id: form.elements.user_id.value,
+        membership_id: form.elements.membership_id.value,
         reason
       });
       message.textContent = result.message || (suspended ? 'Acceso suspendido.' : 'Acceso reactivado.');
-      message.className = 'message success';
+      if (result.audit_warning) message.textContent += ` Advertencia: ${result.audit_warning}`;
+      message.className = result.audit_warning ? 'message error' : 'message success';
+      const note = document.querySelector('#memberTargetStatusNote');
+      if (note) note.textContent = '';
       await loadTechnicalMembers(form.elements.business_id.value);
     } catch (error) {
       message.textContent = error.message || 'No se pudo cambiar el acceso.';
@@ -479,44 +1615,94 @@
     data.action = 'set_business_status';
     data.status = active ? 'active' : 'suspended';
     delete data.is_active;
-    if (!active && String(data.reason || '').trim().length < 5) { message.textContent = 'El motivo debe tener al menos 5 caracteres.'; return; }
+    if (String(data.reason || '').trim().length < 5) { message.textContent = 'Escribe un motivo de al menos 5 caracteres para registrar el cambio de estado.'; message.className = 'message error'; return; }
     message.textContent = 'Guardando estado y auditoría…';
     try { const result = await callTechnicalFunction(data); message.textContent = result.message || 'Estado actualizado.'; message.className = 'message success'; await loadTechnical(); }
     catch (error) { message.textContent = error.message; message.className = 'message error'; }
   }
 
   async function initPlatformAi() {
-    const form = document.querySelector('#platformAiForm'); if (!form) return;
-    const [aiResult, supportResult] = await Promise.all([
-      db.from('platform_ai_settings').select('enabled,assistant_name,system_instructions,settings').eq('id', true).maybeSingle(),
-      db.from('platform_public_settings').select('support_whatsapp').eq('id', true).maybeSingle()
-    ]);
-    if (aiResult.error) { document.querySelector('#platformAiMessage').textContent = 'No se pudo leer la configuración: ' + aiResult.error.message; return; }
-    const data = aiResult.data;
-    form.elements.support_whatsapp.value = supportResult.data?.support_whatsapp || data?.settings?.support_whatsapp || '';
-    form.elements.assistant_name.value = data?.assistant_name || 'Asistente general de MiEje Market';
-    form.elements.system_instructions.value = data?.system_instructions || '';
-    form.elements.enabled.checked = Boolean(data?.enabled);
+    const form = document.querySelector('#platformAiForm');
+    if (!form) return;
+    const message = document.querySelector('#platformAiMessage');
+    let aiSettings = {};
+    let publicSettings = {};
+    try {
+      const [aiResult, publicResult] = await Promise.all([
+        callTechnicalFunction({ action: 'get_platform_ai_settings' }),
+        callTechnicalFunction({ action: 'get_platform_public_settings' })
+      ]);
+      aiSettings = aiResult?.settings || {};
+      publicSettings = publicResult?.settings || {};
+    } catch (error) {
+      if (message) {
+        message.textContent = 'No se pudo cargar toda la configuración general. Comprueba que las migraciones y la función técnica estén actualizadas: ' + (error.message || 'Error de consulta.');
+        message.className = 'message error';
+      }
+    }
+    form.elements.site_name.value = publicSettings.site_name || 'MiEje Market';
+    form.elements.site_description.value = publicSettings.site_description || '';
+    form.elements.logo_url.value = publicSettings.logo_url || '';
+    form.elements.hero_image_url.value = publicSettings.hero_image_url || '';
+    form.elements.support_whatsapp.value = publicSettings.support_whatsapp || '';
+    form.elements.assistant_name.value = aiSettings.assistant_name || 'Asistente general de MiEje Market';
+    form.elements.system_instructions.value = aiSettings.system_instructions || '';
+    form.elements.enabled.checked = Boolean(aiSettings.enabled);
   }
 
   async function savePlatformAi(event) {
-    event.preventDefault(); const form = event.currentTarget, message = document.querySelector('#platformAiMessage');
-    const { data: old } = await db.from('platform_ai_settings').select('settings').eq('id', true).maybeSingle();
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#platformAiMessage');
     const support = form.elements.support_whatsapp.value.replace(/[^0-9]/g, '').slice(0, 18);
-    const payload = { id: true, enabled: form.elements.enabled.checked, assistant_name: form.elements.assistant_name.value.trim(), system_instructions: form.elements.system_instructions.value.trim(), settings: { ...(old?.settings || {}), support_whatsapp: support }, updated_by: currentUser.id, updated_at: new Date().toISOString() };
-    const { error } = await db.from('platform_ai_settings').upsert(payload, { onConflict: 'id' });
-    if (error) { message.textContent = `No se pudo guardar: ${error.message}`; message.className = 'message error'; return; }
-    const { error: supportError } = await db.from('platform_public_settings').upsert({ id: true, support_whatsapp: support, updated_by: currentUser.id, updated_at: new Date().toISOString() }, { onConflict: 'id' });
-    message.textContent = supportError ? `IA guardada, pero falló el número de soporte: ${supportError.message}` : 'Configuración general y WhatsApp de soporte guardados.'; message.className = supportError ? 'message error' : 'message success';
+    let aiSaved = false;
+    try {
+      const aiResult = await callTechnicalFunction({
+        action: 'update_platform_ai_settings',
+        enabled: form.elements.enabled.checked,
+        assistant_name: form.elements.assistant_name.value.trim(),
+        system_instructions: form.elements.system_instructions.value.trim()
+      });
+      aiSaved = true;
+      const publicResult = await callTechnicalFunction({
+        action: 'update_platform_public_settings',
+        site_name: form.elements.site_name.value.trim(),
+        site_description: form.elements.site_description.value.trim(),
+        logo_url: form.elements.logo_url.value.trim(),
+        hero_image_url: form.elements.hero_image_url.value.trim(),
+        support_whatsapp: support
+      });
+      message.textContent = [
+        publicResult.message || 'Configuración general guardada.',
+        aiResult.audit_warning,
+        publicResult.audit_warning
+      ].filter(Boolean).join(' ');
+      message.className = aiResult.audit_warning || publicResult.audit_warning ? 'message error' : 'message success';
+    } catch (error) {
+      message.textContent = aiSaved
+        ? 'La configuración del asistente se guardó, pero no se completó la configuración pública: ' + (error.message || 'Error desconocido.')
+        : (error.message || 'No se pudo guardar la configuración general.');
+      message.className = 'message error';
+    }
   }
 
   async function showSupportLink() {
     const link = document.querySelector('#technicalSupportLink');
     if (!link) return;
+    const message = document.querySelector('#technicalSupportMessage');
     link.href = '#';
     link.classList.add('hidden');
-    const message = document.querySelector('#technicalSupportMessage');
-    if (message) message.textContent = 'El número de soporte de la plataforma aún no está configurado en el proyecto independiente.';
+    try {
+      const { data, error } = await db.functions.invoke('get-platform-public-settings', { body: {} });
+      if (error || !data?.ok) throw new Error(data?.error || error?.message || 'No se pudo consultar el contacto técnico.');
+      const number = String(data.settings?.support_whatsapp || '').replace(/[^0-9]/g, '');
+      if (!number) throw new Error('El WhatsApp del técnico todavía no está configurado.');
+      link.href = 'https://wa.me/' + number;
+      link.classList.remove('hidden');
+      if (message) message.textContent = 'Soporte técnico oficial de MiEje Market.';
+    } catch (error) {
+      if (message) message.textContent = error.message || 'No se pudo cargar el contacto técnico.';
+    }
   }
 
   async function initBusinessSettings() {
@@ -531,6 +1717,7 @@
       if (message) { message.textContent = 'No se pudieron cargar los datos del negocio: ' + businessResult.error.message; message.className = 'message error'; }
     } else if (form) {
       const b = businessResult.data;
+      currentBusinessLogoUrl = b.logo_url || null;
       const schedule = b.opening_hours && typeof b.opening_hours === 'object' ? b.opening_hours : {};
       for (const day of ['monday','tuesday','wednesday','thursday','friday','saturday','sunday']) {
         const entry = schedule[day] || {};
@@ -548,15 +1735,7 @@
       const message = document.querySelector('#storeSettingsMessage');
       if (message) { message.textContent = 'No se pudieron cargar los métodos de pago: ' + methodsResult.error.message; message.className = 'message error'; }
     }
-    const pending = [
-      ['ia-negocio', 'IA exclusiva del negocio', 'La configuración de IA por negocio aún no está implementada en la base independiente.'],
-      ['solicitudes-bloqueo', 'Solicitudes de bloqueo', 'Las solicitudes de bloqueo desde el panel del negocio todavía no están implementadas en el servidor.']
-    ];
     await Promise.all([loadBusinessContent(), loadJobApplications()]);
-    for (const [id, heading, message] of pending) {
-      const section = document.getElementById(id);
-      if (section) section.innerHTML = `<div class="section-heading"><div><h2>${heading}</h2></div></div><div class="empty">${message}</div>`;
-    }
   }
 
   async function saveStoreSettings(event) {
@@ -567,6 +1746,15 @@
     const name = value('name');
     const city = value('city');
     const category = value('category');
+    const paymentEntries = value('payment_methods').split('\n').map(line => {
+      const parts = line.split('|');
+      return { displayName: (parts.shift() || '').trim(), publicInstructions: parts.join('|').trim() };
+    }).filter(item => item.displayName.length >= 2 && item.displayName.length <= 100);
+    if (!paymentEntries.length) {
+      message.textContent = 'Configura al menos un método de pago para que los clientes puedan completar sus pedidos.';
+      message.className = 'message error';
+      return;
+    }
     if (!name || !city || !category) {
       message.textContent = 'El nombre, la categoría y la ciudad son obligatorios.';
       message.className = 'message error';
@@ -596,7 +1784,6 @@
     message.textContent = logoFile ? 'Subiendo logo y guardando configuración…' : 'Guardando datos del negocio…';
     message.className = 'message';
     try {
-      if (logoFile) uploadedLogo = await uploadBusinessImage(logoFile, 'logo');
       const openingHours = {};
       const weekdays = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
       for (const day of weekdays) {
@@ -610,6 +1797,9 @@
         }
         openingHours[day] = enabled ? { open: open, close: close, closed: false } : { closed: true };
       }
+      // Subir el archivo solo después de validar todos los horarios para no
+      // dejar objetos huérfanos cuando el formulario tenga datos inválidos.
+      if (logoFile) uploadedLogo = await uploadBusinessImage(logoFile, 'logo');
       const businessPayload = {
         name,
         category,
@@ -623,16 +1813,17 @@
         delivery_fee: deliveryFee,
         minimum_order_amount: minimumOrder,
       };
-      const { error: businessError } = await db.from('businesses').update(businessPayload).eq('id', businessId);
-      if (businessError) {
+      const { data: updatedBusiness, error: businessError } = await db.from('businesses')
+        .update(businessPayload).eq('id', businessId).select('id').maybeSingle();
+      if (businessError || !updatedBusiness) {
         await removeUploadedBusinessImage(uploadedLogo?.path);
-        throw new Error('No se pudieron guardar los datos del negocio: ' + businessError.message);
+        throw new Error('No se pudieron guardar los datos del negocio: ' + (businessError?.message || 'No se encontró el negocio o no tienes permiso para modificarlo.'));
       }
+      if (currentBusinessLogoUrl !== businessPayload.logo_url) {
+        await removeUploadedBusinessImage(businessAssetPathFromPublicUrl(currentBusinessLogoUrl, 'logo'));
+      }
+      currentBusinessLogoUrl = businessPayload.logo_url || null;
       try {
-        const entries = value('payment_methods').split('\n').map(line => {
-          const parts = line.split('|');
-          return { displayName: (parts.shift() || '').trim(), publicInstructions: parts.join('|').trim() };
-        }).filter(item => item.displayName.length >= 2 && item.displayName.length <= 100);
         const methodCodeFor = label => {
           const normalized = label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
           if (normalized.includes('efectivo') || normalized.includes('contra entrega')) return 'cash';
@@ -640,38 +1831,18 @@
           if (normalized.includes('tarjeta') || normalized.includes('card')) return 'card';
           return 'other';
         };
-        const methods = entries.map((item, sortOrder) => ({ ...item, methodCode: methodCodeFor(item.displayName), sortOrder }));
-        const { data: existing, error: readError } = await db.from('business_payment_methods')
-          .select('id,method_code,display_name,is_enabled,sort_order')
-          .eq('business_id', businessId);
-        if (readError) throw readError;
-        const byCode = new Map();
-        (existing || []).forEach(row => {
-          if (!byCode.has(row.method_code)) byCode.set(row.method_code, []);
-          byCode.get(row.method_code).push(row);
+        const methods = paymentEntries.map((item, sortOrder) => ({
+          method_code: methodCodeFor(item.displayName),
+          display_name: item.displayName,
+          public_instructions: item.publicInstructions || null,
+          sort_order: sortOrder
+        }));
+        const { data: savedMethods, error: methodsError } = await db.rpc('save_business_payment_methods', {
+          p_business_id: businessId,
+          p_methods: methods
         });
-        const retained = new Set();
-        for (const method of methods) {
-          const old = byCode.get(method.methodCode)?.shift();
-          if (old) {
-            const { error } = await db.from('business_payment_methods').update({
-              display_name: method.displayName, public_instructions: method.publicInstructions || null, is_enabled: true, sort_order: method.sortOrder, updated_at: new Date().toISOString()
-            }).eq('id', old.id).eq('business_id', businessId);
-            if (error) throw error;
-            retained.add(old.id);
-          } else {
-            const { error } = await db.from('business_payment_methods').insert({
-              business_id: businessId, method_code: method.methodCode, display_name: method.displayName,
-              public_instructions: method.publicInstructions || null, is_enabled: true, sort_order: method.sortOrder
-            });
-            if (error) throw error;
-          }
-        }
-        for (const old of (existing || [])) {
-          if (!retained.has(old.id) && old.is_enabled) {
-            const { error } = await db.from('business_payment_methods').update({ is_enabled: false, updated_at: new Date().toISOString() }).eq('id', old.id).eq('business_id', businessId);
-            if (error) throw error;
-          }
+        if (methodsError || !savedMethods?.ok) {
+          throw new Error(methodsError?.message || 'No se pudo guardar la configuración de métodos de pago.');
         }
         message.textContent = 'Datos del negocio, métodos de pago y logo guardados correctamente.';
         message.className = 'message success';
@@ -733,129 +1904,738 @@
     }
   }
 
-  async function loadBusinessContent() {
+  async function loadBusinessContent(reset = true) {
     const target = document.querySelector('#businessContentList');
     if (!target) return;
-    const { data, error } = await db.from('business_content_pages')
+    if (reset) { businessContentCursorStack = [null]; businessContentPageIndex = 0; }
+    const cursor = businessContentCursorStack[businessContentPageIndex];
+    let query = db.from('business_content_pages')
       .select('id,content_type,title,body,is_published,moderation_status,moderation_note,created_at')
-      .eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+      .limit(PANEL_PAGE_SIZE + 1);
+    if (cursor) query = query.or('created_at.lt.' + cursor.created_at + ',and(created_at.eq.' + cursor.created_at + ',id.lt.' + cursor.id + ')');
+    const { data, error } = await query;
     if (error) { showError(target, error); return; }
-    const rows = data || [];
-    if (!rows.length) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene publicaciones.</div>'; return; }
+    const fetchedRows = data || [];
+    const rows = fetchedRows.slice(0, PANEL_PAGE_SIZE);
+    if (!rows.length && businessContentPageIndex === 0) { target.innerHTML = '<div class="empty">Este negocio todavía no tiene publicaciones.</div>'; return; }
+    if (!rows.length) target.innerHTML = '<div class="empty">No hay más publicaciones en esta página.</div>';
     const labels = { promotion: 'Promoción', job_form: 'Empleo', announcement: 'Anuncio', contact: 'Información' };
     target.innerHTML = tableHtml(
-      ['Tipo', 'Título', 'Estado de revisión', 'Visible', 'Fecha'],
+      ['Tipo', 'Título', 'Estado de revisión', 'Visible', 'Fecha', 'Acción'],
       rows.map(row => [
         esc(labels[row.content_type] || row.content_type),
         '<strong>' + esc(row.title) + '</strong><br><small>' + esc(row.body) + '</small>' + (row.moderation_note ? '<br><small>Nota técnica: ' + esc(row.moderation_note) + '</small>' : ''),
         esc(row.moderation_status),
         row.is_published ? 'Sí' : 'No',
-        dateTime(row.created_at)
+        dateTime(row.created_at),
+        row.is_published
+          ? '<button type="button" class="small-button" data-archive-content="' + esc(row.id) + '">Despublicar</button>'
+          : '<span class="muted">No publicada</span>'
       ])
     );
+    appendCursorPager(target, {
+      page: businessContentPageIndex + 1,
+      canPrevious: businessContentPageIndex > 0,
+      hasMore: fetchedRows.length > PANEL_PAGE_SIZE,
+      previous: () => { businessContentPageIndex--; void loadBusinessContent(false); },
+      next: () => {
+        const last = rows[rows.length - 1];
+        if (!last) return;
+        businessContentCursorStack[businessContentPageIndex + 1] = { created_at: last.created_at, id: last.id };
+        businessContentPageIndex++;
+        void loadBusinessContent(false);
+      }
+    });
+    target.querySelectorAll('[data-archive-content]').forEach(button => button.addEventListener('click', async () => {
+      const id = button.dataset.archiveContent;
+      if (!window.confirm('¿Despublicar esta publicación? Se ocultará al público, pero se conservarán la vacante y todas sus postulaciones.')) return;
+      button.disabled = true;
+      try {
+        const { error: archiveError } = await db.from('business_content_pages')
+          .update({ is_published: false, updated_by: currentUser.id })
+          .eq('id', id)
+          .eq('business_id', businessId);
+        if (archiveError) throw archiveError;
+        alert('Publicación despublicada. Se conservaron las postulaciones y sus archivos.');
+        await loadBusinessContent();
+      } catch (error) {
+        alert('No se pudo despublicar la publicación: ' + (error.message || 'Error desconocido'));
+        button.disabled = false;
+      }
+    }));
   }
 
-  async function loadJobApplications() {
+  async function loadJobApplications(reset = true) {
     const target = document.querySelector('#jobApplicationsContainer');
     if (!target) return;
-    const { data, error } = await db.from('job_applications')
+    if (reset) { jobApplicationCursorStack = [null]; jobApplicationPageIndex = 0; }
+    let query = db.from('job_applications')
       .select('id,content_page_id,applicant_name,applicant_contact,applicant_message,form_responses,status,admin_notes,created_at,resume_path')
-      .eq('business_id', businessId).order('created_at', { ascending: false }).limit(100);
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+      .limit(PANEL_PAGE_SIZE + 1);
+    const cursor = jobApplicationCursorStack[jobApplicationPageIndex];
+    if (cursor) query = query.or('created_at.lt.' + cursor.created_at + ',and(created_at.eq.' + cursor.created_at + ',id.lt.' + cursor.id + ')');
+    const { data, error } = await query;
     if (error) { showError(target, error); return; }
-    const rows = data || [];
-    if (!rows.length) { target.innerHTML = '<div class="empty">Todavía no se han recibido postulaciones.</div>'; return; }
-    target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Postulante</th><th>Contacto</th><th>Mensaje y respuestas</th><th>Hoja de vida</th><th>Estado</th><th>Notas internas</th><th>Guardar</th></tr></thead><tbody>' +
-      (await Promise.all(rows.map(async row => {
-        let resumeLink = '<span class="muted">No adjuntó</span>';
-        if (row.resume_path) {
-          const { data: signedFile, error: signedError } = await db.storage.from('job-applications-private').createSignedUrl(row.resume_path, 300, { download: true });
-          resumeLink = signedError || !signedFile?.signedUrl
-            ? '<span class="muted">Archivo no disponible</span>'
-            : '<a href="' + esc(signedFile.signedUrl) + '" target="_blank" rel="noopener">Descargar hoja de vida</a>';
-        }
+    const fetchedRows = data || [];
+    const rows = fetchedRows.slice(0, PANEL_PAGE_SIZE);
+    if (!rows.length && jobApplicationPageIndex === 0) { target.innerHTML = '<div class="empty">Todavía no se han recibido postulaciones.</div>'; return; }
+    if (!rows.length) target.innerHTML = '<div class="empty">No hay más postulaciones en esta página.</div>';
+    if (rows.length) target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Postulante</th><th>Contacto</th><th>Mensaje y respuestas</th><th>Hoja de vida</th><th>Estado</th><th>Notas internas</th><th>Guardar</th></tr></thead><tbody>' +
+      rows.map(row => {
+        const resumeLink = row.resume_path
+          ? '<button type="button" class="small-button" data-download-resume="' + esc(row.id) + '" data-resume-path="' + esc(row.resume_path) + '">Descargar hoja de vida</button>'
+          : '<span class="muted">No adjuntó</span>';
         const responseText = Object.entries(row.form_responses || {}).map(([key, value]) => esc(key + ': ' + value)).join('<br>');
         return '<tr><td>' + dateTime(row.created_at) + '</td><td>' + esc(row.applicant_name) + '</td><td>' + esc(row.applicant_contact) + '</td><td>' + esc(row.applicant_message || '—') + (responseText ? '<br>' + responseText : '') + '</td><td>' + resumeLink + '</td><td><select class="field" data-application-status="' + esc(row.id) + '"><option value="pending"' + (row.status === 'pending' ? ' selected' : '') + '>Pendiente</option><option value="reviewing"' + (row.status === 'reviewing' ? ' selected' : '') + '>En revisión</option><option value="contacted"' + (row.status === 'contacted' ? ' selected' : '') + '>Contactado</option><option value="accepted"' + (row.status === 'accepted' ? ' selected' : '') + '>Aceptado</option><option value="rejected"' + (row.status === 'rejected' ? ' selected' : '') + '>No seleccionado</option></select></td><td><textarea class="field" rows="2" maxlength="3000" data-application-notes="' + esc(row.id) + '">' + esc(row.admin_notes || '') + '</textarea></td><td><button type="button" class="small-button" data-save-application="' + esc(row.id) + '">Guardar</button></td></tr>';
-      }))).join('') + '</tbody></table></div>';
+      }).join('') + '</tbody></table></div>';
+    target.querySelectorAll('[data-download-resume]').forEach(button => button.addEventListener('click', async () => {
+      const path = button.dataset.resumePath;
+      button.disabled = true;
+      const downloadWindow = window.open('about:blank', '_blank');
+      if (!downloadWindow) {
+        alert('El navegador bloqueó la nueva ventana. Permite las ventanas emergentes para descargar la hoja de vida.');
+        button.disabled = false;
+        return;
+      }
+      downloadWindow.opener = null;
+      try {
+        const { data, error: signedError } = await db.storage.from('job-applications-private')
+          .createSignedUrl(path, 300, { download: true });
+        if (signedError || !data?.signedUrl) throw signedError || new Error('No se pudo crear el enlace temporal.');
+        downloadWindow.location.replace(data.signedUrl);
+      } catch (error) {
+        downloadWindow.close();
+        alert('No se pudo abrir la hoja de vida: ' + (error.message || 'Error desconocido'));
+      } finally {
+        button.disabled = false;
+      }
+    }));
     target.querySelectorAll('[data-save-application]').forEach(button => button.addEventListener('click', async () => {
       const id = button.dataset.saveApplication;
       const status = target.querySelector('[data-application-status="' + id + '"]')?.value;
       const notes = target.querySelector('[data-application-notes="' + id + '"]')?.value || '';
+      const allowedStatuses = new Set(['pending', 'reviewing', 'contacted', 'accepted', 'rejected']);
+      if (!allowedStatuses.has(status) || notes.length > 3000) {
+        alert('El estado o las notas de la postulación no son válidos.');
+        return;
+      }
       button.disabled = true;
+      // Solo se actualizan campos operativos autorizados por RLS/GRANT.
+      // La identidad y la fecha de revisión no deben venir del navegador.
       const { error: updateError } = await db.from('job_applications').update({
-        status, admin_notes: notes, reviewed_by: currentUser.id, reviewed_at: new Date().toISOString()
+        status, admin_notes: notes
       }).eq('id', id).eq('business_id', businessId);
       if (updateError) alert('No se pudo actualizar la postulación: ' + updateError.message);
       else alert('Postulación actualizada.');
       button.disabled = false;
     }));
+    appendCursorPager(target, {
+      page: jobApplicationPageIndex + 1,
+      canPrevious: jobApplicationPageIndex > 0,
+      hasMore: fetchedRows.length > PANEL_PAGE_SIZE,
+      previous: () => { jobApplicationPageIndex--; void loadJobApplications(false); },
+      next: () => {
+        const last = rows[rows.length - 1];
+        if (!last) return;
+        jobApplicationCursorStack[jobApplicationPageIndex + 1] = { created_at: last.created_at, id: last.id };
+        jobApplicationPageIndex++;
+        void loadJobApplications(false);
+      }
+    });
+  }
+
+  async function initBusinessAi() {
+    const form = document.querySelector('#businessAiForm');
+    if (!form) return;
+    const message = document.querySelector('#businessAiMessage');
+    const { data, error } = await db.from('business_ai_settings')
+      .select('enabled,assistant_name,instructions')
+      .eq('business_id', businessId)
+      .maybeSingle();
+    if (error) {
+      if (message) {
+        message.textContent = 'No se pudo cargar la configuración de IA de este negocio: ' + error.message;
+        message.className = 'message error';
+      }
+      return;
+    }
+    form.elements.enabled.checked = Boolean(data?.enabled);
+    form.elements.assistant_name.value = data?.assistant_name || 'Asistente del negocio';
+    form.elements.instructions.value = data?.instructions || '';
   }
 
   async function saveBusinessAi(event) {
-    event.preventDefault(); const form=event.currentTarget, message=document.querySelector('#businessAiMessage');
-    const payload={business_id:businessId,enabled:form.elements.enabled.checked,assistant_name:form.elements.assistant_name.value.trim(),instructions:form.elements.instructions.value.trim(),updated_by:currentUser.id,updated_at:new Date().toISOString()};
-    const {error}=await db.from('business_ai_settings').upsert(payload,{onConflict:'business_id'}); message.textContent=error?`No se pudo guardar: ${error.message}`:'Configuración de IA de este negocio guardada por separado de la IA general.'; message.className=error?'message error':'message success';
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#businessAiMessage');
+    const payload = {
+      business_id: businessId,
+      enabled: form.elements.enabled.checked,
+      assistant_name: form.elements.assistant_name.value.trim(),
+      instructions: form.elements.instructions.value.trim(),
+      updated_by: currentUser.id,
+      updated_at: new Date().toISOString()
+    };
+
+    const lookup = await db.from('business_ai_settings')
+      .select('business_id')
+      .eq('business_id', businessId)
+      .maybeSingle();
+    if (lookup.error) {
+      message.textContent = 'No se pudo comprobar la configuración de IA: ' + lookup.error.message;
+      message.className = 'message error';
+      return;
+    }
+
+    let result;
+    if (lookup.data) {
+      // business_id es inmutable: el UPDATE envía solo columnas autorizadas.
+      result = await db.from('business_ai_settings')
+        .update({
+          enabled: payload.enabled,
+          assistant_name: payload.assistant_name,
+          instructions: payload.instructions,
+          updated_by: payload.updated_by,
+          updated_at: payload.updated_at
+        })
+        .eq('business_id', businessId)
+        .select('business_id')
+        .maybeSingle();
+    } else {
+      result = await db.from('business_ai_settings')
+        .insert(payload)
+        .select('business_id')
+        .maybeSingle();
+      if (result.error?.code === '23505') {
+        // Si otra sesión creó la fila al mismo tiempo, actualizar sin tocar la PK.
+        result = await db.from('business_ai_settings')
+          .update({
+            enabled: payload.enabled,
+            assistant_name: payload.assistant_name,
+            instructions: payload.instructions,
+            updated_by: payload.updated_by,
+            updated_at: payload.updated_at
+          })
+          .eq('business_id', businessId)
+          .select('business_id')
+          .maybeSingle();
+      }
+    }
+
+    const error = result.error || (!result.data ? new Error('No se encontró la configuración después de guardarla.') : null);
+    message.textContent = error
+      ? 'No se pudo guardar: ' + error.message
+      : 'Configuración de IA de este negocio guardada por separado de la IA general.';
+    message.className = error ? 'message error' : 'message success';
+  }
+
+  async function loadBlockTargetUsers(reset = true) {
+    const target = document.querySelector('#blockTargetUser');
+    if (!target) return;
+    if (panel !== 'business_admin' || !isBusinessOwner) {
+      target.closest('form')?.classList.add('hidden');
+      const note = document.querySelector('#blockRequestOwnerNote');
+      if (note) note.classList.remove('hidden');
+      return;
+    }
+    if (reset || blockTargetPageState.businessId !== businessId) {
+      blockTargetPageState.businessId = businessId;
+      blockTargetPageState.cursors = [null];
+      blockTargetPageState.page = 0;
+    }
+    target.innerHTML = '<option value="">Cargando usuarios del negocio…</option>';
+    const cursor = blockTargetPageState.cursors[blockTargetPageState.page];
+    let query = db.from('business_memberships')
+      .select('id,user_id,role,created_at,profiles(display_name)')
+      .eq('business_id', businessId)
+      .eq('status', 'active')
+      .neq('user_id', currentUser.id)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(PANEL_PAGE_SIZE + 1);
+    if (cursor) query = query.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
+    const { data, error } = await query;
+    if (error) {
+      target.innerHTML = '<option value="">No se pudieron cargar los usuarios</option>';
+      const message = document.querySelector('#blockRequestMessage');
+      if (message) { message.textContent = 'No fue posible consultar las cuentas activas del negocio.'; message.className = 'message error'; }
+      console.warn('Block request target users:', error);
+      return;
+    }
+    const fetched = data || [];
+    const users = fetched.slice(0, PANEL_PAGE_SIZE);
+    target.innerHTML = '<option value="">Selecciona una cuenta</option>' + users.map(member => {
+      const profile = Array.isArray(member.profiles) ? member.profiles[0] : member.profiles;
+      const name = profile?.display_name || shortId(member.user_id);
+      const role = member.role === 'business_admin' ? 'Administrador' : 'Empleado';
+      return `<option value="${esc(member.user_id)}">${esc(name)} · ${role}</option>`;
+    }).join('');
+    blockTargetPageState.hasMore = fetched.length > PANEL_PAGE_SIZE;
+    blockTargetPageState.last = users[users.length - 1] || null;
+    renderMemberSelectPager(target, blockTargetPageState, direction => {
+      if (direction === 'next' && blockTargetPageState.hasMore && blockTargetPageState.last) {
+        blockTargetPageState.cursors[blockTargetPageState.page + 1] = {
+          created_at: blockTargetPageState.last.created_at,
+          id: blockTargetPageState.last.id
+        };
+        blockTargetPageState.page++;
+      } else if (direction === 'previous' && blockTargetPageState.page > 0) blockTargetPageState.page--;
+      void loadBlockTargetUsers(false);
+    });
+    if (!users.length) target.innerHTML = '<option value="">No hay otras cuentas activas en este negocio</option>';
   }
 
   async function submitBlockRequest(event) {
-    event.preventDefault(); const form=event.currentTarget, message=document.querySelector('#blockRequestMessage');
-    const payload={business_id:businessId,requested_by:currentUser.id,target_user_id:form.elements.target_user_id.value,reason:form.elements.reason.value.trim()};
-    const {error}=await db.from('access_block_requests').insert(payload); message.textContent=error?`No se pudo enviar la solicitud: ${error.message}`:'Solicitud enviada al servicio técnico. El acceso no se bloquea hasta que el técnico la revise.'; message.className=error?'message error':'message success'; if(!error) form.reset();
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#blockRequestMessage');
+    const button = form.querySelector('button[type="submit"]');
+    const targetUserId = form.elements.target_user_id.value;
+    const reason = form.elements.reason.value.trim();
+    if (panel !== 'business_admin' || !isBusinessOwner) {
+      message.textContent = 'Solo el administrador del negocio puede solicitar este bloqueo.';
+      message.className = 'message error';
+      return;
+    }
+    if (!targetUserId || targetUserId === currentUser.id || reason.length < 5) {
+      message.textContent = 'Selecciona otra cuenta activa y escribe un motivo de al menos cinco caracteres.';
+      message.className = 'message error';
+      return;
+    }
+    button.disabled = true;
+    try {
+      const { error } = await db.from('access_block_requests').insert({
+        business_id: businessId,
+        requested_by: currentUser.id,
+        target_user_id: targetUserId,
+        reason
+      });
+      if (error) throw error;
+      message.textContent = 'Solicitud enviada al servicio técnico. El acceso no se bloquea hasta que el propietario técnico la revise.';
+      message.className = 'message success';
+      form.reset();
+      await loadBlockTargetUsers();
+    } catch (error) {
+      message.textContent = error?.code === '23505'
+        ? 'Ya existe una solicitud pendiente para esta cuenta en este negocio. Espera la revisión técnica.'
+        : (error.message || 'No se pudo enviar la solicitud.');
+      message.className = 'message error';
+    } finally {
+      button.disabled = false;
+    }
   }
 
-  async function loadFinance() {
+  function populateFinanceBusinessOptions() {
+    document.querySelectorAll('#platformFinanceForm select[name="business_id"], #payrollForm select[name="business_id"]').forEach(select => {
+      const selected = select.value;
+      select.innerHTML = '<option value="">Plataforma</option>' + cachedBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+      select.value = selected;
+    });
+  }
+
+  async function loadFinance(reset = true) {
     const target = document.querySelector('#financeContainer');
-    const [financeResult, payrollResult] = await Promise.all([
-      db.from('platform_financial_records').select('business_id,record_type,description,amount,currency,occurred_at').order('occurred_at', { ascending: false }).limit(30),
-      db.from('payroll_records').select('business_id,payee_name,description,amount,currency,status,paid_at,created_at').order('created_at', { ascending: false }).limit(30)
-    ]);
-    if (financeResult.error) return showError(target, financeResult.error);
-    if (payrollResult.error) return showError(target, payrollResult.error);
-    const businessMap = new Map(cachedBusinesses.map(b => [b.id, b.name]));
-    const finance = financeResult.data || [];
-    const payroll = payrollResult.data || [];
-    target.innerHTML = `<div class="split"><div><div class="section-heading"><h3>Movimientos financieros</h3></div>${finance.length ? tableHtml(['Fecha','Negocio','Tipo','Descripción','Importe'], finance.map(r => [dateTime(r.occurred_at), r.business_id ? businessMap.get(r.business_id) || 'Negocio' : 'Plataforma', r.record_type, r.description, money(r.amount)])) : '<div class="empty">Sin movimientos financieros registrados.</div>'}</div><div><div class="section-heading"><h3>Nómina y honorarios</h3></div>${payroll.length ? tableHtml(['Fecha','Beneficiario','Descripción','Importe','Estado'], payroll.map(r => [dateTime(r.paid_at || r.created_at), r.payee_name, r.description, money(r.amount), r.status])) : '<div class="empty">Sin registros de nómina.</div>'}</div></div>`;
+    if (!target) return;
+    if (reset) {
+      platformFinanceCursorStack = [null]; platformFinancePageIndex = 0;
+      platformPayrollCursorStack = [null]; platformPayrollPageIndex = 0;
+    }
+    const financeCursor = platformFinanceCursorStack[platformFinancePageIndex];
+    const payrollCursor = platformPayrollCursorStack[platformPayrollPageIndex];
+    target.innerHTML = '<div class="empty">Cargando finanzas y nómina…</div>';
+    try {
+      const result = await callTechnicalFunction({
+        action: 'list_platform_finance', limit: PANEL_PAGE_SIZE + 1,
+        before_finance_created_at: financeCursor?.created_at || undefined,
+        before_finance_id: financeCursor?.id || undefined,
+        before_payroll_created_at: payrollCursor?.created_at || undefined,
+        before_payroll_id: payrollCursor?.id || undefined
+      });
+      const financeFetched = result.financial_records || [];
+      const payrollFetched = result.payroll_records || [];
+      const finance = financeFetched.slice(0, PANEL_PAGE_SIZE);
+      const payroll = payrollFetched.slice(0, PANEL_PAGE_SIZE);
+      const businessMap = new Map(cachedBusinesses.map(b => [b.id, b.name]));
+      populateFinanceBusinessOptions();
+      const financeHtml = finance.length
+        ? tableHtml(['Fecha','Negocio','Tipo','Descripción','Importe','Referencia'], finance.map(r => [
+            dateTime(r.occurred_at),
+            r.business_id ? businessMap.get(r.business_id) || 'Negocio' : 'Plataforma',
+            ({ income: 'Ingreso', expense: 'Gasto', refund: 'Reembolso', adjustment: 'Ajuste' })[r.record_type] || r.record_type,
+            esc(r.description),
+            money(r.amount),
+            esc(r.reference || '—')
+          ]))
+        : '<div class="empty">Todavía no hay movimientos financieros registrados.</div>';
+      const payrollHtml = payroll.length
+        ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Beneficiario</th><th>Concepto</th><th>Importe</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${payroll.map(r => `<tr>
+            <td>${dateTime(r.paid_at || r.due_date || r.created_at)}</td>
+            <td>${esc(r.payee_name)}</td>
+            <td>${esc(r.description)}</td>
+            <td>${money(r.amount)}</td>
+            <td>${({ pending: 'Pendiente', paid: 'Registrado como pagado', cancelled: 'Cancelado' })[r.status] || esc(r.status)}</td>
+            <td>${r.status === 'pending'
+              ? `<button class="small-button" data-payroll-action="paid" data-payroll-id="${esc(r.id)}">Registrar pago</button> <button class="small-button" data-payroll-action="cancelled" data-payroll-id="${esc(r.id)}">Cancelar</button>`
+              : '—'}</td>
+          </tr>`).join('')}</tbody></table></div>`
+        : '<div class="empty">Todavía no hay obligaciones de nómina registradas.</div>';
+      target.innerHTML = `<div class="section-heading"><h3>Movimientos financieros</h3></div>${financeHtml}<div id="platformFinancePager"></div><div class="section-heading"><h3>Nómina y honorarios</h3></div>${payrollHtml}<div id="platformPayrollPager"></div>`;
+      appendCursorPager(target.querySelector('#platformFinancePager'), {
+        page: platformFinancePageIndex + 1, canPrevious: platformFinancePageIndex > 0,
+        hasMore: financeFetched.length > PANEL_PAGE_SIZE,
+        previous: () => { platformFinancePageIndex--; void loadFinance(false); },
+        next: () => {
+          const last = finance[finance.length - 1];
+          if (!last) return;
+          platformFinanceCursorStack[platformFinancePageIndex + 1] = { created_at: last.occurred_at, id: last.id };
+          platformFinancePageIndex++;
+          void loadFinance(false);
+        }
+      });
+      appendCursorPager(target.querySelector('#platformPayrollPager'), {
+        page: platformPayrollPageIndex + 1, canPrevious: platformPayrollPageIndex > 0,
+        hasMore: payrollFetched.length > PANEL_PAGE_SIZE,
+        previous: () => { platformPayrollPageIndex--; void loadFinance(false); },
+        next: () => {
+          const last = payroll[payroll.length - 1];
+          if (!last) return;
+          platformPayrollCursorStack[platformPayrollPageIndex + 1] = { created_at: last.created_at, id: last.id };
+          platformPayrollPageIndex++;
+          void loadFinance(false);
+        }
+      });
+      target.querySelectorAll('[data-payroll-action]').forEach(button => button.addEventListener('click', async () => {
+        const decision = button.dataset.payrollAction;
+        if (decision === 'cancelled' && !window.confirm('¿Cancelar esta obligación de nómina?')) return;
+        const reference = decision === 'paid' ? (window.prompt('Referencia del comprobante (opcional):', '') || '') : '';
+        button.disabled = true;
+        try {
+          const response = await callTechnicalFunction({
+            action: 'resolve_payroll_record',
+            record_id: button.dataset.payrollId,
+            decision,
+            payment_reference: reference
+          });
+          alert(response.message || 'Registro actualizado.');
+          await loadFinance();
+          await loadAuditEvents(null, '#auditContainer');
+        } catch (error) {
+          alert(error.message || 'No se pudo actualizar el registro.');
+          button.disabled = false;
+        }
+      }));
+    } catch (error) {
+      showError(target, error);
+    }
   }
 
-  async function loadContentModeration() {
-    const target=document.querySelector('#contentModerationContainer'); if(!target) return;
-    const {data,error}=await db.from('business_content_pages').select('id,business_id,content_type,title,body,is_published,moderation_status,created_at,businesses(name)').order('created_at',{ascending:false}).limit(100);
-    if(error){showError(target,error);return;} const rows=data||[]; if(!rows.length){target.innerHTML='<div class="empty">No hay publicaciones enviadas por los negocios.</div>';return;}
-    target.innerHTML=`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Negocio</th><th>Tipo</th><th>Título y contenido</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${dateTime(r.created_at)}</td><td>${esc(r.businesses?.name||shortId(r.business_id))}</td><td>${esc(r.content_type)}</td><td><strong>${esc(r.title)}</strong><br>${esc(r.body)}</td><td>${esc(r.moderation_status||'pending')}</td><td>${r.moderation_status!=='approved'?`<button class="small-button" data-moderate-content="${esc(r.id)}" data-decision="approved">Aprobar</button>`:''} ${r.moderation_status!=='rejected'?`<button class="small-button" data-moderate-content="${esc(r.id)}" data-decision="rejected">Rechazar</button>`:'—'}</td></tr>`).join('')}</tbody></table></div>`;
-    target.querySelectorAll('[data-moderate-content]').forEach(btn=>btn.addEventListener('click',async()=>{const note=window.prompt('Nota de revisión (opcional):','')||'';btn.disabled=true;try{const result=await callTechnicalFunction({action:'moderate_business_content',content_id:btn.dataset.moderateContent,decision:btn.dataset.decision,moderation_note:note});alert(result.message);await loadContentModeration();await loadAuditEvents(null,'#auditContainer');}catch(e){alert(e.message);btn.disabled=false;}}));
+  async function createPlatformFinancialRecord(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#platformFinanceMessage');
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      const response = await callTechnicalFunction({
+        action: 'create_platform_financial_record',
+        record_type: form.elements.record_type.value,
+        business_id: form.elements.business_id.value || null,
+        description: form.elements.description.value.trim(),
+        amount: form.elements.amount.value,
+        occurred_at: form.elements.occurred_at.value ? new Date(form.elements.occurred_at.value).toISOString() : null,
+        reference: form.elements.reference.value.trim() || null,
+        currency: 'COP'
+      });
+      message.textContent = response.audit_warning || 'Movimiento financiero guardado.';
+      message.className = response.audit_warning ? 'message error' : 'message success';
+      form.reset();
+      await loadFinance();
+      await loadAuditEvents(null, '#auditContainer');
+    } catch (error) {
+      message.textContent = error.message || 'No se pudo guardar el movimiento.';
+      message.className = 'message error';
+    } finally {
+      button.disabled = false;
+    }
   }
 
-  async function loadBlockRequests() {
-    const target=document.querySelector('#blockRequestsContainer'); if(!target) return;
-    const {data,error}=await db.from('access_block_requests').select('id,business_id,requested_by,target_user_id,reason,status,created_at,businesses(name)').order('created_at',{ascending:false}).limit(100);
-    if(error){showError(target,error);return;} const rows=data||[]; if(!rows.length){target.innerHTML='<div class="empty">No hay solicitudes de bloqueo pendientes.</div>';return;}
-    const names=await getUserNames(rows.flatMap(r=>[r.requested_by,r.target_user_id]));
-    target.innerHTML=`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Negocio</th><th>Solicitante</th><th>Cuenta solicitada</th><th>Motivo</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${dateTime(r.created_at)}</td><td>${esc(r.businesses?.name||shortId(r.business_id))}</td><td>${esc(names.get(r.requested_by)||shortId(r.requested_by))}</td><td>${esc(names.get(r.target_user_id)||shortId(r.target_user_id))}</td><td>${esc(r.reason)}</td><td>${esc(r.status)}</td><td>${r.status==='pending'?`<button class="small-button" data-request-resolve="${esc(r.id)}" data-decision="approved">Bloquear cuenta</button> <button class="small-button" data-request-resolve="${esc(r.id)}" data-decision="rejected">Rechazar</button>`:'—'}</td></tr>`).join('')}</tbody></table></div>`;
-    target.querySelectorAll('[data-request-resolve]').forEach(btn=>btn.addEventListener('click',async()=>{ const note=window.prompt('Nota del servicio técnico (opcional):','')||''; btn.disabled=true; try{const result=await callTechnicalFunction({action:'resolve_block_request',request_id:btn.dataset.requestResolve,decision:btn.dataset.decision,technician_note:note}); alert(result.message); await loadBlockRequests(); await loadTechnical();}catch(e){alert(e.message);btn.disabled=false;} }));
+  async function createPayrollRecord(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = document.querySelector('#payrollMessage');
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      const response = await callTechnicalFunction({
+        action: 'create_payroll_record',
+        payee_name: form.elements.payee_name.value.trim(),
+        business_id: form.elements.business_id.value || null,
+        description: form.elements.description.value.trim(),
+        amount: form.elements.amount.value,
+        due_date: form.elements.due_date.value || null,
+        currency: 'COP'
+      });
+      message.textContent = response.audit_warning || 'Obligación de nómina guardada.';
+      message.className = response.audit_warning ? 'message error' : 'message success';
+      form.reset();
+      await loadFinance();
+      await loadAuditEvents(null, '#auditContainer');
+    } catch (error) {
+      message.textContent = error.message || 'No se pudo guardar la obligación.';
+      message.className = 'message error';
+    } finally {
+      button.disabled = false;
+    }
   }
 
-  async function loadAccessEvents(id, selector) {
+  async function loadContentModeration(reset = true) {
+    const target = document.querySelector('#contentModerationContainer');
+    if (!target) return;
+    if (reset) { moderationCursorStack = [null]; moderationPageIndex = 0; }
+    const cursor = moderationCursorStack[moderationPageIndex];
+    target.innerHTML = '<div class="empty">Cargando publicaciones para revisión…</div>';
+    try {
+      const result = await callTechnicalFunction({
+        action: 'list_content_moderation', limit: PANEL_PAGE_SIZE + 1,
+        before_created_at: cursor?.created_at || undefined,
+        before_id: cursor?.id || undefined
+      });
+      const fetched = result.contents || [];
+      const rows = fetched.slice(0, PANEL_PAGE_SIZE);
+      if (!rows.length && moderationPageIndex === 0) {
+        target.innerHTML = '<div class="empty">No hay publicaciones enviadas por los negocios.</div>';
+        return;
+      }
+      if (!rows.length) target.innerHTML = '<div class="empty">No hay más publicaciones en esta página.</div>';
+      target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Negocio</th><th>Tipo</th><th>Título y contenido</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${rows.map(r => `<tr><td>${dateTime(r.created_at)}</td><td>${esc(r.businesses?.name || shortId(r.business_id))}</td><td>${esc(r.content_type)}</td><td><strong>${esc(r.title)}</strong><br>${esc(r.body)}</td><td>${esc(r.moderation_status || 'pending')}</td><td>${r.moderation_status !== 'approved' ? `<button class="small-button" data-moderate-content="${esc(r.id)}" data-decision="approved">Aprobar</button>` : ''} ${r.moderation_status !== 'rejected' ? `<button class="small-button" data-moderate-content="${esc(r.id)}" data-decision="rejected">Rechazar</button>` : '—'}</td></tr>`).join('')}</tbody></table></div>`;
+      appendCursorPager(target, {
+        page: moderationPageIndex + 1, canPrevious: moderationPageIndex > 0,
+        hasMore: fetched.length > PANEL_PAGE_SIZE,
+        previous: () => { moderationPageIndex--; void loadContentModeration(false); },
+        next: () => {
+          const last = rows[rows.length - 1];
+          if (!last) return;
+          moderationCursorStack[moderationPageIndex + 1] = { created_at: last.created_at, id: last.id };
+          moderationPageIndex++;
+          void loadContentModeration(false);
+        }
+      });
+      target.querySelectorAll('[data-moderate-content]').forEach(btn => btn.addEventListener('click', async () => {
+        const note = window.prompt('Nota de revisión (opcional):', '') || '';
+        btn.disabled = true;
+        try {
+          const actionResult = await callTechnicalFunction({
+            action: 'moderate_business_content',
+            content_id: btn.dataset.moderateContent,
+            decision: btn.dataset.decision,
+            moderation_note: note
+          });
+          alert(actionResult.message);
+          await loadContentModeration();
+          await loadAuditEvents(null, '#auditContainer');
+        } catch (error) {
+          alert(error.message);
+          btn.disabled = false;
+        }
+      }));
+    } catch (error) {
+      showError(target, error);
+    }
+  }
+
+  async function loadBlockRequests(reset = true) {
+    const target = document.querySelector('#blockRequestsContainer');
+    if (!target) return;
+    if (reset) { blockRequestCursorStack = [null]; blockRequestPageIndex = 0; }
+    const cursor = blockRequestCursorStack[blockRequestPageIndex];
+    target.innerHTML = '<div class="empty">Cargando solicitudes de bloqueo…</div>';
+    try {
+      const result = await callTechnicalFunction({
+        action: 'list_block_requests', limit: PANEL_PAGE_SIZE + 1,
+        before_created_at: cursor?.created_at || undefined,
+        before_id: cursor?.id || undefined
+      });
+      const fetched = result.requests || [];
+      const rows = fetched.slice(0, PANEL_PAGE_SIZE);
+      if (!rows.length && blockRequestPageIndex === 0) {
+        target.innerHTML = '<div class="empty">No hay solicitudes de bloqueo registradas.</div>';
+        return;
+      }
+      if (!rows.length) target.innerHTML = '<div class="empty">No hay más solicitudes en esta página.</div>';
+      target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Negocio</th><th>Solicitante</th><th>Cuenta solicitada</th><th>Motivo</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${rows.map(r => `<tr><td>${dateTime(r.created_at)}</td><td>${esc(r.businesses?.name || shortId(r.business_id))}</td><td>${esc(r.requested_by_name || shortId(r.requested_by))}</td><td>${esc(r.target_user_name || shortId(r.target_user_id))}</td><td>${esc(r.reason)}</td><td>${esc(r.status)}</td><td>${r.status === 'pending' ? `<button class="small-button" data-request-resolve="${esc(r.id)}" data-decision="approved">Bloquear acceso</button> <button class="small-button" data-request-resolve="${esc(r.id)}" data-decision="rejected">Rechazar</button>` : esc(r.technician_note || 'Resuelta')}</td></tr>`).join('')}</tbody></table></div>`;
+      appendCursorPager(target, {
+        page: blockRequestPageIndex + 1, canPrevious: blockRequestPageIndex > 0,
+        hasMore: fetched.length > PANEL_PAGE_SIZE,
+        previous: () => { blockRequestPageIndex--; void loadBlockRequests(false); },
+        next: () => {
+          const last = rows[rows.length - 1];
+          if (!last) return;
+          blockRequestCursorStack[blockRequestPageIndex + 1] = { created_at: last.created_at, id: last.id };
+          blockRequestPageIndex++;
+          void loadBlockRequests(false);
+        }
+      });
+      target.querySelectorAll('[data-request-resolve]').forEach(button => button.addEventListener('click', async () => {
+        const decision = button.dataset.decision;
+        const note = window.prompt('Nota del servicio técnico (opcional):', '') || '';
+        if (decision === 'approved' && !window.confirm('Se suspenderá únicamente la membresía de esta persona en el negocio indicado. ¿Deseas continuar?')) return;
+        button.disabled = true;
+        try {
+          const result = await callTechnicalFunction({
+            action: 'resolve_block_request',
+            request_id: button.dataset.requestResolve,
+            decision,
+            technician_note: note
+          });
+          alert(result.message);
+          await loadBlockRequests();
+          await loadTechnical();
+        } catch (error) {
+          alert(error.message || 'No se pudo resolver la solicitud.');
+          button.disabled = false;
+        }
+      }));
+    } catch (error) {
+      showError(target, error);
+    }
+  }
+
+  async function loadAccessEvents(id, selector, reset = true) {
     const target = document.querySelector(selector);
-    let query = db.from('audit_logs').select('id,business_id,actor_id,action,details,created_at').eq('action', 'panel.login').order('created_at', { ascending: false }).limit(100);
-    if (id) query = query.eq('business_id', id);
-    const { data, error } = await query;
-    if (error) return showError(target, error);
-    const rows = data || [];
-    const names = await getUserNames(rows.map(e => e.actor_id));
-    if (!rows.length) { target.innerHTML = '<div class="empty">No hay registros de acceso para este filtro todavía.</div>'; return; }
-    target.innerHTML = tableHtml(['Fecha y hora','Usuario','Panel','Evento'], rows.map(e => [dateTime(e.created_at), names.get(e.actor_id) || shortId(e.actor_id), esc(e.details?.panel || '—'), 'Inicio de sesión']));
+    if (!target) return;
+    const key = selector + ':' + (id || 'all');
+    if (reset) { accessCursorStacks.set(key, [null]); accessPageIndexes.set(key, 0); }
+    if (!accessCursorStacks.has(key)) accessCursorStacks.set(key, [null]);
+    if (!accessPageIndexes.has(key)) accessPageIndexes.set(key, 0);
+    const pageIndex = accessPageIndexes.get(key);
+    const cursor = accessCursorStacks.get(key)[pageIndex];
+    target.innerHTML = '<div class="empty">Consultando registros de acceso…</div>';
+    let rows = [];
+    let names = new Map();
+    let hasMore = false;
+
+    if (panel === 'technical') {
+      try {
+        const result = await callTechnicalFunction({
+          action: 'list_audit_logs',
+          action_filter: 'panel_access',
+          business_id: id || undefined,
+          limit: PANEL_PAGE_SIZE + 1,
+          before_created_at: cursor?.created_at || undefined,
+          before_id: cursor?.id || undefined
+        });
+        const fetched = result.audit_logs || [];
+        hasMore = fetched.length > PANEL_PAGE_SIZE;
+        rows = fetched.slice(0, PANEL_PAGE_SIZE);
+        names = new Map(rows.filter(entry => entry.actor_name)
+          .map(entry => [entry.actor_id, entry.actor_name]));
+      } catch (error) {
+        return showError(target, error);
+      }
+    } else {
+      let query = db.from('audit_logs')
+        .select('id,business_id,actor_id,action,details,created_at')
+        .eq('action', 'panel.login')
+        .order('created_at', { ascending: false }).order('id', { ascending: false })
+        .limit(PANEL_PAGE_SIZE + 1);
+      if (id) query = query.eq('business_id', id);
+      if (cursor) query = query.or('created_at.lt.' + cursor.created_at + ',and(created_at.eq.' + cursor.created_at + ',id.lt.' + cursor.id + ')');
+      const { data, error } = await query;
+      if (error) return showError(target, error);
+      const fetched = data || [];
+      hasMore = fetched.length > PANEL_PAGE_SIZE;
+      rows = fetched.slice(0, PANEL_PAGE_SIZE);
+      names = await getUserNames(rows.map(entry => entry.actor_id));
+    }
+
+    if (!rows.length && pageIndex === 0) {
+      target.innerHTML = '<div class="empty">No hay registros de acceso para este filtro todavía.</div>';
+      return;
+    }
+    if (!rows.length) target.innerHTML = '<div class="empty">No hay más registros de acceso en esta página.</div>';
+    if (rows.length) {
+      target.innerHTML = tableHtml(
+        ['Fecha y hora', 'Usuario', 'Panel', 'Evento'],
+        rows.map(entry => [
+          dateTime(entry.created_at),
+          names.get(entry.actor_id) || shortId(entry.actor_id),
+          esc(entry.details?.panel || entry.panel || '—'),
+          'Inicio de sesión'
+        ])
+      );
+    }
+    appendCursorPager(target, {
+      page: pageIndex + 1, canPrevious: pageIndex > 0, hasMore,
+      previous: () => { accessPageIndexes.set(key, pageIndex - 1); void loadAccessEvents(id, selector, false); },
+      next: () => {
+        const last = rows[rows.length - 1];
+        if (!last) return;
+        accessCursorStacks.get(key)[pageIndex + 1] = { created_at: last.created_at, id: last.id };
+        accessPageIndexes.set(key, pageIndex + 1);
+        void loadAccessEvents(id, selector, false);
+      }
+    });
   }
 
-  async function loadAuditEvents(id, selector) {
+  async function loadAuditEvents(id, selector, reset = true) {
     const target = document.querySelector(selector);
-    let query = db.from('audit_logs').select('id,business_id,actor_id,action,entity_type,entity_id,details,created_at').order('created_at', { ascending: false }).limit(100);
-    if (id) query = query.eq('business_id', id);
-    else if (panel !== 'technical') query = query.eq('actor_id', currentUser.id);
-    const { data, error } = await query;
-    if (error) return showError(target, error);
-    const rows = data || [];
-    const names = await getUserNames(rows.map(e => e.actor_id));
-    if (!rows.length) { target.innerHTML = '<div class="empty">No hay registros de auditoría para este filtro todavía.</div>'; return; }
-    target.innerHTML = tableHtml(['Fecha y hora','Usuario','Acción','Entidad','Registro','Detalle'], rows.map(e => [dateTime(e.created_at), names.get(e.actor_id) || shortId(e.actor_id), esc(e.action), esc(e.entity_type), e.entity_id || '—', esc(JSON.stringify(e.details || {}))]));
+    if (!target) return;
+    const key = selector + ':' + (id || 'self');
+    if (reset) { auditCursorStacks.set(key, [null]); auditPageIndexes.set(key, 0); }
+    if (!auditCursorStacks.has(key)) auditCursorStacks.set(key, [null]);
+    if (!auditPageIndexes.has(key)) auditPageIndexes.set(key, 0);
+    const pageIndex = auditPageIndexes.get(key);
+    const cursor = auditCursorStacks.get(key)[pageIndex];
+    target.innerHTML = '<div class="empty">Cargando auditoría…</div>';
+    let rows = [];
+    let names = new Map();
+    let hasMore = false;
+    if (panel === 'technical') {
+      try {
+        const result = await callTechnicalFunction({
+          action: 'list_audit_logs', business_id: id || undefined, limit: PANEL_PAGE_SIZE + 1,
+          before_created_at: cursor?.created_at || undefined, before_id: cursor?.id || undefined
+        });
+        const fetched = result.audit_logs || [];
+        hasMore = fetched.length > PANEL_PAGE_SIZE;
+        rows = fetched.slice(0, PANEL_PAGE_SIZE);
+        names = new Map(rows.filter(row => row.actor_name).map(row => [row.actor_id, row.actor_name]));
+      } catch (error) {
+        return showError(target, error);
+      }
+    } else {
+      let query = db.from('audit_logs')
+        .select('id,business_id,actor_id,action,entity_type,entity_id,details,created_at')
+        .order('created_at', { ascending: false }).order('id', { ascending: false })
+        .limit(PANEL_PAGE_SIZE + 1);
+      if (id) query = query.eq('business_id', id);
+      else query = query.eq('actor_id', currentUser.id);
+      if (cursor) query = query.or('created_at.lt.' + cursor.created_at + ',and(created_at.eq.' + cursor.created_at + ',id.lt.' + cursor.id + ')');
+      const { data, error } = await query;
+      if (error) return showError(target, error);
+      const fetched = data || [];
+      hasMore = fetched.length > PANEL_PAGE_SIZE;
+      rows = fetched.slice(0, PANEL_PAGE_SIZE);
+      names = await getUserNames(rows.map(e => e.actor_id));
+    }
+    if (!rows.length && pageIndex === 0) { target.innerHTML = '<div class="empty">No hay registros de auditoría para este filtro todavía.</div>'; return; }
+    if (!rows.length) target.innerHTML = '<div class="empty">No hay más registros en esta página.</div>';
+    if (rows.length) target.innerHTML = tableHtml(['Fecha y hora','Usuario','Acción','Entidad','Registro','Detalle'], rows.map(e => [dateTime(e.created_at), names.get(e.actor_id) || shortId(e.actor_id), esc(e.action), esc(e.entity_type), e.entity_id || '—', esc(JSON.stringify(e.details || {}))]));
+    appendCursorPager(target, {
+      page: pageIndex + 1, canPrevious: pageIndex > 0, hasMore,
+      previous: () => { auditPageIndexes.set(key, pageIndex - 1); void loadAuditEvents(id, selector, false); },
+      next: () => {
+        const last = rows[rows.length - 1];
+        if (!last) return;
+        auditCursorStacks.get(key)[pageIndex + 1] = { created_at: last.created_at, id: last.id };
+        auditPageIndexes.set(key, pageIndex + 1);
+        void loadAuditEvents(id, selector, false);
+      }
+    });
   }
 
   async function getUserNames(ids) {
@@ -871,23 +2651,279 @@
     if (!orders.length) { target.innerHTML = '<div class="empty">No hay pedidos registrados en este negocio.</div>'; return; }
     const rows = orders.map(o => {
       const items = Array.isArray(o.items) ? o.items.map(i => `${esc(i.product_name)} × ${esc(i.quantity)}`).join('<br>') : '';
-      const action = nextStatus[o.status] ? `<button class="small-button" data-next="${nextStatus[o.status]}" data-order="${esc(o.id)}">Marcar: ${statusLabels[nextStatus[o.status]]}</button>` : '—';
-      const base = [esc(`#${o.order_number}`), esc(o.customer_name || 'Cliente'), esc(o.customer_phone || '—'), esc(o.delivery_address || '—') + (o.delivery_notes ? `<br><small>${esc(o.delivery_notes)}</small>` : ''), items || 'Sin detalle', `<span class="pill ${statusClass[o.status] || ''}">${statusLabels[o.status] || esc(o.status)}</span>`, dateTime(o.created_at)];
-      if (admin) base.splice(5, 0, `${money(o.total)}<br><small>${esc(o.payment_status || '—')}</small>`);
+      const paymentAction = admin && o.payment_status === 'pending' && o.status !== 'cancelled'
+        ? ` <button class="small-button" data-mark-payment="${esc(o.id)}" data-payment-method="${esc(o.payment_method || '')}">Confirmar pago recibido</button>`
+        : '';
+      const action = `${nextStatus[o.status] ? `<button class="small-button" data-next="${nextStatus[o.status]}" data-order="${esc(o.id)}" data-current-status="${esc(o.status)}">Marcar: ${statusLabels[nextStatus[o.status]]}</button>` : ''}${paymentAction}${!['delivered','cancelled'].includes(o.status) ? ` <button class="small-button" data-cancel-request="${esc(o.id)}">Solicitar cancelación</button>` : ''}` || '—';
+      const base = [esc(`#${o.order_number}`), esc(o.customer_name || 'Cliente'), esc(o.customer_phone || '—'), esc(o.delivery_address || '—') + (o.delivery_notes ? `<br><small>${esc(o.delivery_notes)}</small>` : '') + (o.delivery_tracking ? `<br><small>Seguimiento: ${esc(o.delivery_tracking)}</small>` : ''), items || 'Sin detalle', `<span class="pill ${statusClass[o.status] || ''}">${statusLabels[o.status] || esc(o.status)}</span>`, dateTime(o.created_at)];
+      if (admin) {
+        const methodLabel = o.payment_method_name || ({cash:'Efectivo',transfer:'Transferencia',card:'Tarjeta',other:'Otro'}[o.payment_method] || o.payment_method || '—');
+        base.splice(5, 0, `${money(o.total)}<br><small>${esc(o.payment_status || '—')} · ${esc(methodLabel)}</small>`);
+      }
       base.push(action);
       return base;
     });
     const headers = admin ? ['Pedido','Cliente','Teléfono','Entrega','Productos','Total / pago','Estado','Creado','Acción'] : ['Pedido','Cliente','Teléfono','Entrega','Productos','Estado','Creado','Acción'];
     target.innerHTML = tableHtml(headers, rows);
-    target.querySelectorAll('[data-next][data-order]').forEach(button => button.addEventListener('click', () => changeOrderStatus(button.dataset.order, button.dataset.next, button)));
+    target.querySelectorAll('[data-next][data-order][data-current-status]').forEach(button => button.addEventListener('click', () => changeOrderStatus(button.dataset.order, button.dataset.currentStatus, button.dataset.next, button)));
+    target.querySelectorAll('[data-mark-payment]').forEach(button => button.addEventListener('click', () => markOrderPaymentReceived(button.dataset.markPayment, button.dataset.paymentMethod, button)));
+    target.querySelectorAll('[data-cancel-request]').forEach(button => button.addEventListener('click', () => requestCancellation(button.dataset.cancelRequest, button)));
   }
 
-  async function changeOrderStatus(orderId, next, button) {
+  async function loadRefundableOrders(reset = true) {
+    const target = document.querySelector('#refundsContainer');
+    if (!target || panel !== 'business_admin') return;
+    if (reset) { refundCursorStack = [null]; refundPageIndex = 0; }
+    target.innerHTML = '<div class="empty">Consultando pedidos pagados y cancelados…</div>';
+    const cursor = refundCursorStack[refundPageIndex];
+    const { data, error } = await db.rpc('get_business_admin_order_financials_page', {
+      p_business_id: businessId,
+      p_refundable_only: true,
+      p_limit: PANEL_PAGE_SIZE + 1,
+      p_before_created_at: cursor?.created_at || null,
+      p_before_order_id: cursor?.order_id || null
+    });
+    if (error) return showError(target, error);
+    const fetchedRows = data || [];
+    const orders = fetchedRows.slice(0, PANEL_PAGE_SIZE);
+    if (!orders.length && refundPageIndex === 0) {
+      target.innerHTML = '<div class="empty">No hay reembolsos pendientes de registrar.</div>';
+      return;
+    }
+    if (!orders.length) target.innerHTML = '<div class="empty">No hay más reembolsos pendientes en esta página.</div>';
+    if (orders.length) {
+      const rows = orders.map(o => [
+        esc(`#${o.order_number}`),
+        money(o.total),
+        dateTime(o.created_at),
+        'Pendiente de devolución',
+        `<button class="small-button" data-register-refund="${esc(o.order_id)}">Registrar devolución realizada</button>`
+      ]);
+      target.innerHTML = tableHtml(['Pedido','Importe a devolver','Fecha del pedido','Estado de devolución','Acción'], rows);
+      target.querySelectorAll('[data-register-refund]').forEach(button => {
+        button.addEventListener('click', () => registerOrderRefund(button.dataset.registerRefund, button));
+      });
+    }
+    appendCursorPager(target, {
+      page: refundPageIndex + 1,
+      canPrevious: refundPageIndex > 0,
+      hasMore: fetchedRows.length > PANEL_PAGE_SIZE,
+      previous: () => { refundPageIndex--; void loadRefundableOrders(false); },
+      next: () => {
+        const last = orders[orders.length - 1];
+        if (!last) return;
+        refundCursorStack[refundPageIndex + 1] = { created_at: last.created_at, order_id: last.order_id };
+        refundPageIndex++;
+        void loadRefundableOrders(false);
+      }
+    });
+  }
+
+  async function markOrderPaymentReceived(orderId, paymentMethod, button) {
+    if (!window.confirm('Confirma que el negocio ya recibió realmente el pago de este pedido? Esta acción registrará el ingreso y no realiza ningún cobro automático.')) return;
+    const provider = window.prompt('Entidad o proveedor (opcional, por ejemplo, banco o billetera):');
+    if (provider === null) return;
+    const reference = window.prompt(paymentMethod === 'cash'
+      ? 'Referencia o comprobante (opcional para efectivo):'
+      : 'Referencia o número del comprobante del pago recibido:');
+    if (reference === null) return;
+    if (paymentMethod !== 'cash' && !reference.trim()) {
+      alert('Para pagos que no son en efectivo debes registrar una referencia o comprobante.');
+      return;
+    }
+    const notes = window.prompt('Observaciones adicionales (opcional):');
+    if (notes === null) return;
     button.disabled = true;
-    const { error } = await db.from('orders').update({ status: next }).eq('id', orderId).eq('business_id', businessId);
+    const { data, error } = await db.rpc('mark_order_payment_received', {
+      p_order_id: orderId,
+      p_provider: provider.trim() || null,
+      p_reference: reference.trim() || null,
+      p_notes: notes.trim() || null
+    });
     if (error) {
-      alert(`No se pudo cambiar el estado: ${error.message}`);
+      alert(`No se pudo confirmar el pago. Comprueba que el procedimiento de confirmación esté desplegado y que el dinero ya se haya recibido. ${error.message}`);
       button.disabled = false;
+      return;
+    }
+    alert('Pago recibido y registrado. El ingreso quedó guardado en los movimientos financieros.');
+    await loadBusinessAdmin();
+  }
+
+  async function registerOrderRefund(orderId, button) {
+    const method = window.prompt('Medio utilizado para devolver el dinero (por ejemplo, transferencia o efectivo):');
+    if (method === null) return;
+    if (!method.trim()) { alert('Debes indicar el medio de reembolso.'); return; }
+    const provider = window.prompt('Entidad o proveedor (opcional, por ejemplo, banco o billetera):');
+    if (provider === null) return;
+    const reference = window.prompt('Referencia o número del comprobante del reembolso ya realizado:');
+    if (reference === null) return;
+    if (!reference.trim()) { alert('Debes registrar una referencia o comprobante.'); return; }
+    const notes = window.prompt('Observaciones adicionales (opcional):');
+    if (notes === null) return;
+    button.disabled = true;
+    const { data, error } = await db.rpc('complete_order_refund', {
+      p_order_id: orderId,
+      p_refund_method: method.trim(),
+      p_provider: provider.trim() || null,
+      p_reference: reference.trim(),
+      p_notes: notes.trim() || null
+    });
+    if (error) {
+      alert(`No se pudo registrar el reembolso. Comprueba que el procedimiento de reembolsos esté desplegado y que el dinero ya se haya devuelto. ${error.message}`);
+      button.disabled = false;
+      return;
+    }
+    alert('Reembolso registrado. El pedido ahora figura como reembolsado.');
+    await loadBusinessAdmin();
+  }
+
+  async function requestCancellation(orderId, button) {
+    const reason = window.prompt('Escribe el motivo comunicado por el cliente (mínimo 5 caracteres):');
+    if (reason === null) return;
+    if (reason.trim().length < 5 || reason.trim().length > 2000) {
+      alert('El motivo debe tener entre 5 y 2000 caracteres.');
+      return;
+    }
+    button.disabled = true;
+    const { data, error } = await db.rpc('request_order_cancellation', {
+      p_business_id: businessId,
+      p_order_id: orderId,
+      p_customer_reason: reason.trim()
+    });
+    if (error) {
+      alert(`No se pudo registrar la solicitud. Comprueba que la migración de cancelaciones esté desplegada. ${error.message}`);
+      button.disabled = false;
+      return;
+    }
+    alert('La solicitud quedó registrada y pendiente de decisión del administrador.');
+    if (panel === 'business_admin') await Promise.all([loadBusinessOrders(), loadCancellationRequests()]);
+    else await loadEmployeeOrders();
+  }
+
+  async function loadCancellationRequests(reset = true) {
+    const target = document.querySelector('#cancellationRequestsContainer');
+    if (!target || panel !== 'business_admin') return;
+    if (reset) { cancellationCursorStack = [null]; cancellationPageIndex = 0; }
+    target.innerHTML = '<div class="empty">Cargando solicitudes…</div>';
+    let query = db.from('order_cancellation_requests')
+      .select('id,order_id,customer_reason,status,forwarded_at,admin_response,created_at,orders(order_number,status)')
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+      .limit(PANEL_PAGE_SIZE + 1);
+    const cursor = cancellationCursorStack[cancellationPageIndex];
+    if (cursor) query = query.or('created_at.lt.' + cursor.created_at + ',and(created_at.eq.' + cursor.created_at + ',id.lt.' + cursor.id + ')');
+    const { data, error } = await query;
+    if (error) return showError(target, error);
+    const fetchedRows = data || [];
+    const requests = fetchedRows.slice(0, PANEL_PAGE_SIZE);
+    if (!requests.length && cancellationPageIndex === 0) {
+      target.innerHTML = '<div class="empty">Todavía no hay solicitudes de cancelación.</div>';
+      return;
+    }
+    if (!requests.length) target.innerHTML = '<div class="empty">No hay más solicitudes en esta página.</div>';
+    if (requests.length) {
+      const rows = requests.map(r => {
+        const order = Array.isArray(r.orders) ? r.orders[0] : r.orders;
+        const decision = r.status === 'pending'
+          ? `<button class="small-button" data-cancellation-decision="approved" data-request="${esc(r.id)}">Aprobar</button> <button class="small-button" data-cancellation-decision="rejected" data-request="${esc(r.id)}">Rechazar</button>`
+          : esc(r.status === 'approved' ? 'Aprobada' : 'Rechazada');
+        return [
+          esc(order?.order_number ? `#${order.order_number}` : r.order_id),
+          esc(r.customer_reason),
+          esc(statusLabels[order?.status] || order?.status || '—'),
+          esc(r.status === 'pending' ? 'Pendiente' : r.status === 'approved' ? 'Aprobada' : 'Rechazada'),
+          dateTime(r.forwarded_at),
+          esc(r.admin_response || '—'),
+          decision
+        ];
+      });
+      target.innerHTML = tableHtml(['Pedido','Motivo','Estado del pedido','Solicitud','Fecha','Respuesta del administrador','Decisión'], rows);
+      target.querySelectorAll('[data-cancellation-decision][data-request]').forEach(button => {
+        button.addEventListener('click', () => decideCancellation(button.dataset.request, button.dataset.cancellationDecision, button));
+      });
+    }
+    appendCursorPager(target, {
+      page: cancellationPageIndex + 1,
+      canPrevious: cancellationPageIndex > 0,
+      hasMore: fetchedRows.length > PANEL_PAGE_SIZE,
+      previous: () => { cancellationPageIndex--; void loadCancellationRequests(false); },
+      next: () => {
+        const last = requests[requests.length - 1];
+        if (!last) return;
+        cancellationCursorStack[cancellationPageIndex + 1] = { created_at: last.created_at, id: last.id };
+        cancellationPageIndex++;
+        void loadCancellationRequests(false);
+      }
+    });
+  }
+
+  async function decideCancellation(requestId, decision, button) {
+    const response = window.prompt(decision === 'approved'
+      ? 'Respuesta para dejar registrada al aprobar (opcional):'
+      : 'Indica el motivo del rechazo:');
+    if (response === null) return;
+    if (decision === 'rejected' && response.trim().length < 5) {
+      alert('Escribe un motivo de rechazo de al menos 5 caracteres.');
+      return;
+    }
+    button.disabled = true;
+    const { data, error } = await db.rpc('decide_order_cancellation', {
+      p_request_id: requestId,
+      p_decision: decision,
+      p_admin_response: response.trim() || null
+    });
+    if (error) {
+      alert(`No se pudo procesar la solicitud. Comprueba que la migración esté desplegada. ${error.message}`);
+      button.disabled = false;
+      return;
+    }
+    alert(decision === 'approved'
+      ? 'Cancelación aprobada. El inventario asociado fue restituido. Si el pedido estaba pagado, el reembolso debe gestionarse por separado.'
+      : 'Solicitud rechazada. El pedido y el inventario no fueron modificados.');
+    await loadBusinessAdmin();
+  }
+
+  async function changeOrderStatus(orderId, currentStatus, next, button) {
+    const allowedNext = nextStatus[currentStatus];
+    if (!allowedNext || allowedNext !== next) {
+      alert('El estado del pedido cambió o la transición ya no está permitida. Actualiza la lista antes de continuar.');
+      if (panel === 'employee') await loadEmployeeOrders(); else await loadBusinessOrders();
+      return;
+    }
+    button.disabled = true;
+    const changes = { status: next };
+
+    // Al iniciar el reparto, guardar una referencia que el cliente pueda consultar
+    // con su código privado de seguimiento.
+    if (next === 'on_the_way') {
+      const tracking = window.prompt(
+        'Ingresa una referencia que el cliente podrá ver usando su código privado. No incluyas teléfonos personales, direcciones privadas ni datos sensibles. Ejemplo: Domiciliario del negocio.',
+        'Domiciliario del negocio'
+      );
+      if (tracking === null) {
+        button.disabled = false;
+        return;
+      }
+      const normalizedTracking = tracking.trim();
+      if (normalizedTracking.length < 3 || normalizedTracking.length > 500) {
+        alert('La referencia de seguimiento debe tener entre 3 y 500 caracteres.');
+        button.disabled = false;
+        return;
+      }
+      changes.delivery_tracking = normalizedTracking;
+    }
+
+    const { data: updatedOrder, error } = await db.from('orders')
+      .update(changes)
+      .eq('id', orderId)
+      .eq('business_id', businessId)
+      .eq('status', currentStatus)
+      .select('id,status,delivery_tracking')
+      .maybeSingle();
+    if (error || !updatedOrder) {
+      alert(`No se pudo cambiar el estado: ${error?.message || 'El pedido pudo cambiar en otra sesión. Se actualizará la lista para evitar sobrescribir un estado más reciente.'}`);
+      button.disabled = false;
+      if (panel === 'employee') await loadEmployeeOrders(); else await loadBusinessOrders();
       return;
     }
     if (panel === 'employee') await loadEmployeeOrders(); else await loadBusinessOrders();
@@ -897,6 +2933,17 @@
     const target = document.querySelector('#statsGrid');
     target.innerHTML = items.map(([label, value, detail]) => `<article class="stat"><span>${esc(label)}</span><strong>${esc(value)}</strong><small>${esc(detail)}</small></article>`).join('');
   }
+  function appendCursorPager(target, options) {
+    const pager = document.createElement('div');
+    pager.className = 'form-grid';
+    pager.style.alignItems = 'center';
+    pager.style.marginTop = '14px';
+    pager.innerHTML = '<button type="button" class="button secondary" data-page-previous ' + (options.canPrevious ? '' : 'disabled') + '>Anterior</button><span class="muted" style="text-align:center">Página ' + options.page + '</span><button type="button" class="button secondary" data-page-next ' + (options.hasMore ? '' : 'disabled') + '>Siguiente</button>';
+    pager.querySelector('[data-page-previous]').addEventListener('click', options.previous);
+    pager.querySelector('[data-page-next]').addEventListener('click', options.next);
+    target.appendChild(pager);
+  }
+
   function tableHtml(headers, rows) {
     return `<div class="table-wrap"><table><thead><tr>${headers.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${cell === null || cell === undefined ? '—' : cell}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   }

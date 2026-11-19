@@ -41,7 +41,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: profile, error: profileError } = await admin
     .from("profiles")
-    .select("id, display_name, platform_role, is_blocked")
+    .select("id, display_name, avatar_url, platform_role, is_blocked")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -53,7 +53,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: memberships, error: membershipError } = await admin
     .from("business_memberships")
-    .select("id, business_id, role, status, businesses(id, name, slug, status)")
+    .select("id, business_id, role, status, job_title, businesses(id, name, slug, status)")
     .eq("user_id", user.id)
     .order("created_at", { ascending: true });
 
@@ -71,6 +71,9 @@ Deno.serve(async (req: Request) => {
       membership_id: membership.id,
       business_id: membership.business_id,
       role: membership.role,
+      panel_name: membership.role === "business_admin" ? "Panel de administrador" : "Panel de empleados",
+      role_label: membership.role === "business_admin" ? "Administrador del negocio" : "Empleado",
+      job_title: membership.job_title ?? null,
       business: business ? { id: business.id, name: business.name, slug: business.slug } : null,
     };
   }).filter((membership: any) => membership.business !== null);
@@ -78,7 +81,7 @@ Deno.serve(async (req: Request) => {
   return reply(200, {
     ok: true,
     user: { id: user.id, email: user.email ?? null },
-    profile: { id: profile.id, display_name: profile.display_name ?? null, platform_role: profile.platform_role ?? null },
+    profile: { id: profile.id, display_name: profile.display_name ?? null, avatar_url: profile.avatar_url ?? null, platform_role: profile.platform_role ?? null, account_status: "active", panel_name: profile.platform_role === "platform_owner" ? "Panel técnico superior" : "Panel de cliente" },
     is_platform_owner: profile.platform_role === "platform_owner",
     memberships: activeMemberships,
   });
