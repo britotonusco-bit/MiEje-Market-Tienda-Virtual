@@ -366,6 +366,9 @@ BEGIN
      OR position('cr.decided_at <' IN lower(pg_get_functiondef(
        'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
      ))) = 0
+     OR position('paid.currency=''cop''' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0
      OR position('america/bogota' IN lower(pg_get_functiondef(
        'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
      ))) = 0 THEN
