@@ -164,7 +164,7 @@ Controles observados:
 - El bucket `job-applications-private` es privado, con límite de 5 MB y MIME permitido PDF/DOC/DOCX.
 - La ruta vincula UUID del negocio, UUID de postulación y nombre de archivo aleatorio.
 - La Edge Function valida que el negocio esté activo y que la página corresponda a una vacante publicada, aprobada y del mismo negocio.
-- La solicitud de carga crea una sesión con vencimiento de 30 minutos y devuelve un token de carga firmado.
+- La solicitud de carga genera primero el token firmado de Storage y obtiene su vencimiento real desde el claim `exp` del token. La sesión SQL vence cinco minutos después de ese instante; así, la limpieza no puede borrar el archivo mientras el token siga vigente. Se rechazan tokens sin `exp`, vencidos o con una vigencia superior a 24 horas.
 - Al enviar, el servidor comprueba sesión, negocio, página, ruta, vencimiento y que el objeto exista; la RPC vuelve a validar la sesión y la consume dentro de una transacción.
 
 Riesgos pendientes:
@@ -183,7 +183,7 @@ Por tanto, el código de GitHub no coincide completamente con la función desple
 
 ### 5. Conservación, sesiones temporales y eliminación de CV
 
-- La sesión temporal expira a los 30 minutos, pero eso no borra por sí solo el archivo del bucket.
+- La sesión temporal expira cinco minutos después del vencimiento real del token firmado de carga. Esa expiración SQL no borra por sí sola el archivo del bucket.
 - El borrador `database/maintenance/job-application-cleanup-draft.sql` y la Edge Function `cleanup-job-application-data` existen en la rama, pero la función de limpieza no está desplegada y la RPC de listado de sesiones vencidas no está instalada en la base activa.
 - La limpieza candidata elimina archivos huérfanos de sesiones vencidas y filas antiguas del limitador. Cuando una postulación existe, conserva el CV y retira solo la sesión temporal.
 - No se encontró un plazo ni un proceso aprobado para eliminar postulaciones completadas o sus hojas de vida. En consecuencia, los CV asociados a postulaciones pueden permanecer almacenados sin una fecha de eliminación definida.
