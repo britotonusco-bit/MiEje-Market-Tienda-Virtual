@@ -217,14 +217,23 @@
     const orders = ordersResult.data || [], products = productsResult.data || [];
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
     const todayOrders = orders.filter(o => new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) === today && o.status !== 'cancelled');
-    const todayPaidSales = todayOrders.filter(o => o.payment_status === 'paid')
-      .reduce((sum, o) => sum + Number(o.total || 0), 0);
-    const received = orders.filter(o => o.payment_status === 'paid')
+    // El indicador de dinero usa la misma fecha efectiva que el informe:
+    // completed_at del movimiento financiero, no created_at del pedido.
+    const todayFinanceResult = await db.rpc('get_business_admin_profit_report', {
+      p_business_id: businessId,
+      p_start_date: today,
+      p_end_date: today
+    });
+    if (todayFinanceResult.error || !todayFinanceResult.data) {
+      throw todayFinanceResult.error || new Error('No se pudo conciliar el total cobrado hoy.');
+    }
+    const todayPaidSales = Number(todayFinanceResult.data.sales || 0);
+    const currentlyPaid = orders.filter(o => o.payment_status === 'paid')
       .reduce((sum, o) => sum + Number(o.total || 0), 0);
     renderStats([
       ['Pedidos de hoy', number(todayOrders.length), 'Pedidos creados hoy, sin cancelados'],
-      ['Pedidos de hoy con pago confirmado', money(todayPaidSales), 'Importe de pedidos creados hoy cuyo pago figura confirmado'],
-      ['Total de pedidos con pago confirmado', money(received), 'Suma de pedidos cuyo estado de pago figura como confirmado'],
+      ['Cobros confirmados hoy', money(todayPaidSales), 'Suma de movimientos de pago completados hoy, según la fecha efectiva en hora Colombia'],
+      ['Total actual de pedidos marcados como pagados', money(currentlyPaid), 'Importe de pedidos cuyo estado actual de pago es paid; no representa todos los cobros históricos'],
       ['Pedidos abiertos', number(orders.filter(o => !['delivered','cancelled'].includes(o.status)).length), 'Pendientes de completar'],
       ['Productos con poco stock', number(products.filter(p => p.is_active && Number(p.inventory || 0) <= 5).length), 'Cinco unidades o menos']
     ]);
