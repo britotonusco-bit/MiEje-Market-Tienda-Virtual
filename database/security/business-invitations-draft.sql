@@ -628,13 +628,15 @@ REVOKE ALL ON FUNCTION public.prepare_business_invitation(uuid,text,text,text,te
 REVOKE ALL ON FUNCTION public.attach_business_invitation_user(uuid,uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.mark_business_invitation_failed(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.accept_business_invitation(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION public.expire_business_invitation(uuid) FROM PUBLIC, anon, authenticated;\nREVOKE ALL ON FUNCTION public.revoke_business_invitation(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.expire_business_invitation(uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.revoke_business_invitation(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz) TO service_role;
 GRANT EXECUTE ON FUNCTION public.attach_business_invitation_user(uuid,uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.mark_business_invitation_failed(uuid,uuid,text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.accept_business_invitation(uuid,uuid,text) TO service_role;
-GRANT EXECUTE ON FUNCTION public.expire_business_invitation(uuid) TO service_role;\nGRANT EXECUTE ON FUNCTION public.revoke_business_invitation(uuid,uuid,text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.expire_business_invitation(uuid) TO service_role;
+GRANT EXECUTE ON FUNCTION public.revoke_business_invitation(uuid,uuid,text) TO service_role;
 
 -- Verificación manual posterior en staging:
 -- 1) Una invitación pendiente produce membresía suspended con la marca exacta.
