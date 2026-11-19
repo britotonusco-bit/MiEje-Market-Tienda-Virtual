@@ -285,30 +285,31 @@
       if (!rows?.length) return;
       const activeBusinessIds = rows.filter(row => row.status === "active").map(row => row.id);
       let products = [];
-      if (activeBusinessIds.length) {
-        products = await fetchAllVisibleRows(() => client.from("products")
-          .select("id,business_id,name,description,image_url,price,inventory,is_active,created_at", { count: "exact" })
-          .in("business_id", activeBusinessIds).eq("is_active", true)
-          .order("created_at", { ascending: false }).order("id", { ascending: false }));
-      }
       let paymentMethods = [];
-      if (activeBusinessIds.length) {
-        const { data: paymentData, error: paymentError } = await client.functions.invoke("get-public-storefront", { body: { business_ids: activeBusinessIds } });
-        if (paymentError) console.warn("No se pudieron cargar las formas de pago públicas.", paymentError);
-        else paymentMethods = paymentData?.payment_methods || [];
-      }
       let publicContentPages = [];
-      if (activeBusinessIds.length) {
-        try {
-          publicContentPages = await fetchAllVisibleRows(() => client.from('business_content_pages')
-            .select('id,business_id,content_type,title,body,content,created_at', { count: "exact" })
-            .in('business_id', activeBusinessIds)
-            .eq('is_published', true)
-            .eq('moderation_status', 'approved')
-            .order('created_at', { ascending: false }).order('id', { ascending: false }));
-        } catch (contentError) {
-          console.warn('No se pudieron cargar las publicaciones públicas.', contentError);
-        }
+      for (let index = 0; index < activeBusinessIds.length; index += 100) {
+        const businessBatch = activeBusinessIds.slice(index, index + 100);
+        const batchProducts = await fetchAllVisibleRows(() => client.from("products")
+          .select("id,business_id,name,description,image_url,price,inventory,is_active,created_at", { count: "exact" })
+          .in("business_id", businessBatch).eq("is_active", true)
+          .order("created_at", { ascending: false }).order("id", { ascending: false }));
+        products.push(...batchProducts);
+        const batchContent = await fetchAllVisibleRows(() => client.from('business_content_pages')
+          .select('id,business_id,content_type,title,body,content,created_at', { count: "exact" })
+          .in('business_id', businessBatch)
+          .eq('is_published', true)
+          .eq('moderation_status', 'approved')
+          .order('created_at', { ascending: false }).order('id', { ascending: false }));
+        publicContentPages.push(...batchContent);
+      }
+      // La Edge Function limita cada solicitud a 200 negocios.
+      for (let index = 0; index < activeBusinessIds.length; index += 200) {
+        const businessBatch = activeBusinessIds.slice(index, index + 200);
+        const { data: paymentData, error: paymentError } = await client.functions.invoke("get-public-storefront", {
+          body: { business_ids: businessBatch }
+        });
+        if (paymentError) throw paymentError;
+        paymentMethods.push(...(paymentData?.payment_methods || []));
       }
       const productsByBusiness = new Map();
       products.forEach(product => {
