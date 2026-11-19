@@ -294,6 +294,11 @@
         if (contentError) console.warn('No se pudieron cargar las publicaciones públicas.', contentError);
         else publicContentPages = contentRows || [];
       }
+      const productsByBusiness = new Map();
+      products.forEach(product => {
+        if (!productsByBusiness.has(product.business_id)) productsByBusiness.set(product.business_id, []);
+        productsByBusiness.get(product.business_id).push(product);
+      });
       const contentPagesByBusiness = new Map();
       publicContentPages.forEach(page => {
         if (!contentPagesByBusiness.has(page.business_id)) contentPagesByBusiness.set(page.business_id, []);
@@ -331,7 +336,7 @@
         slug: row.slug,
         deliveryFee: Number(row.delivery_fee || 0),
         minimumOrderAmount: Number(row.minimum_order_amount || 0),
-        products: products.filter(product => product.business_id === row.id).map(product => ({
+        products: (productsByBusiness.get(row.id) || []).map(product => ({
           id: product.id,
           name: product.name,
           description: product.description || "Producto disponible en esta tienda.",
