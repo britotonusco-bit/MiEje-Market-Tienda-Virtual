@@ -1865,7 +1865,8 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'FALLO: falta business_memberships.job_title.';
   END IF;
-  IF to_regprocedure('public.create_business_membership_assignment(uuid,uuid,text,text,text,uuid,boolean,boolean)') IS NULL
+  IF to_regprocedure('public.create_business_membership_assignment(uuid,uuid,text,text,text,uuid,boolean)') IS NOT NULL
+     OR to_regprocedure('public.create_business_membership_assignment(uuid,uuid,text,text,text,uuid,boolean,boolean)') IS NULL
      OR to_regprocedure('public.update_business_membership_assignment(uuid,text,text,uuid)') IS NULL
      OR to_regprocedure('public.suspend_business_membership(uuid,text,uuid)') IS NULL
      OR to_regprocedure('public.reactivate_business_membership(uuid,text,uuid)') IS NULL
