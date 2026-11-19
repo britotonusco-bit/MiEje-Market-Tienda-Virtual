@@ -984,6 +984,7 @@
   let businessDirectoryPageIndex = 0;
   let businessDirectoryHasMore = false;
   let businessDirectoryCounts = { total: 0, active: 0, suspended: 0 };
+  let technicalAuditCount = 0;
 
   async function loadTechnicalBusinesses(reset = true) {
     if (reset) {
@@ -1006,7 +1007,8 @@
     renderStats([
       ['Negocios registrados', number(businessDirectoryCounts.total), 'Total de la plataforma'],
       ['Negocios activos', number(businessDirectoryCounts.active), 'Con acceso habilitado'],
-      ['Negocios suspendidos', number(businessDirectoryCounts.suspended), 'Requieren revisión o reactivación']
+      ['Negocios suspendidos', number(businessDirectoryCounts.suspended), 'Requieren revisión o reactivación'],
+      ['Eventos de auditoría', number(technicalAuditCount), 'Registros de actividad']
     ]);
     renderBusinesses();
   }
@@ -1014,13 +1016,7 @@
   async function loadTechnical() {
     const auditResult = await callTechnicalFunction({ action: 'list_audit_logs', limit: 1 });
     await loadTechnicalBusinesses(true);
-    const auditStat = document.querySelector('#statsGrid');
-    if (auditStat) {
-      const stat = document.createElement('div');
-      stat.className = 'stat-card';
-      stat.innerHTML = '<span>Eventos de auditoría</span><strong>' + number(auditResult.audit_count || 0) + '</strong><small>Registros de actividad</small>';
-      auditStat.appendChild(stat);
-    }
+    technicalAuditCount = Number(auditResult.audit_count || 0);
     const pageBusinesses = cachedBusinesses;
     const options = `<option value="">Todos los negocios</option>` + pageBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (inactivo)'}</option>`).join('');
     const select = document.querySelector('#businessSelect'); if (select) select.innerHTML = options;
