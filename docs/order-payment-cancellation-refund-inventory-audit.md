@@ -156,3 +156,13 @@ Las identidades revisadas son:
 Se amplió el verificador SQL para exigir estas identidades, la inclusión de un año bisiesto y la separación del domicilio como dato informativo. Esto no sustituye una prueba con transacciones de ensayo: la aditividad día→mes→año debe verificarse con movimientos reales controlados, incluyendo pagos, cancelaciones, reembolsos y gastos que crucen límites de mes y año.
 
 No se ejecutó SQL ni se modificó Supabase.
+
+### 14. Cancelaciones pagadas y obligaciones de devolución
+
+La lista del panel de administrador consulta pedidos cancelados que siguen con `payment_status='paid'`. Esos pedidos no deben interpretarse como reembolsados: representan importes pendientes de devolver hasta que exista un movimiento de reembolso completado.
+
+Se ajustó el panel para mostrar explícitamente el estado **Pendiente de devolución** y para indicar que el administrador solo debe registrar el reembolso después de haber devuelto realmente el dinero fuera de MiEje Market. La RPC `complete_order_refund` exige pedido cancelado y pagado, exactamente un pago completado en COP que coincida con el total, una solicitud de cancelación aprobada y una referencia de devolución; el índice único impide duplicar el reembolso completado.
+
+El informe financiero resta únicamente reembolsos efectivamente completados dentro del periodo. Por tanto, una cancelación pagada aún no reembolsada permanece en los cobros netos hasta que se registre el movimiento real. El costo de inventario, en cambio, se revierte cuando se aprueba la cancelación. Son movimientos distintos y deben mostrarse por separado.
+
+**Límite:** el modelo actual registra reembolsos totales, no parciales, y no ejecuta transferencias ni pagos automáticos. La prueba de conciliación de casos pendientes y completados sigue pendiente en staging.
