@@ -1066,6 +1066,21 @@ BEGIN
      OR to_regprocedure('public.void_business_expense(uuid,text)') IS NULL THEN
     RAISE EXCEPTION 'FALLO: faltan RPCs de confirmación de gasto o asociación de comprobantes.';
   END IF;
+
+  IF position('v_expense.payment_status <> ''pending''' IN lower(pg_get_functiondef(
+       'public.void_business_expense(uuid,text)'::regprocedure
+     ))) = 0
+     OR position('payment_status=''pending''' IN lower(pg_get_functiondef(
+       'public.void_business_expense(uuid,text)'::regprocedure
+     ))) = 0
+     OR position('old.payment_status = ''pending''' IN lower(pg_get_functiondef(
+       'private.guard_business_expense_update()'::regprocedure
+     ))) = 0
+     OR position('new.payment_status = ''pending''' IN lower(pg_get_functiondef(
+       'private.guard_business_expense_update()'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: se permite anular un gasto pagado y retirarlo del histórico financiero.';
+  END IF;
   IF has_function_privilege('anon','public.attach_business_expense_receipt(uuid,text)','EXECUTE')
      OR has_function_privilege('anon','public.pay_business_expense(uuid,text,text)','EXECUTE')
      OR NOT has_function_privilege('authenticated','public.attach_business_expense_receipt(uuid,text)','EXECUTE')
