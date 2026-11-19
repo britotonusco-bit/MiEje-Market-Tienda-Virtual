@@ -875,6 +875,61 @@ BEGIN
     RAISE EXCEPTION 'FALLO: la lectura de hojas de vida no está restringida al administrador autenticado del negocio.';
   END IF;
 
+  -- Las cuatro operaciones administrativas de imágenes deben derivar el
+  -- negocio desde la ruta real del objeto y exigir exactamente dos carpetas.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname='storage' AND tablename='objects'
+      AND policyname='business_assets_admin_upload' AND cmd='INSERT'
+      AND roles @> ARRAY['authenticated']::name[]
+      AND with_check ILIKE '%business-assets%'
+      AND with_check ILIKE '%storage.foldername(objects.name)%'
+      AND with_check ILIKE '%array_length%'
+      AND with_check ILIKE '%has_business_role%'
+      AND with_check ILIKE '%business_admin%'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname='storage' AND tablename='objects'
+      AND policyname='business_assets_admin_read' AND cmd='SELECT'
+      AND roles @> ARRAY['authenticated']::name[]
+      AND qual ILIKE '%business-assets%'
+      AND qual ILIKE '%storage.foldername(objects.name)%'
+      AND qual ILIKE '%array_length%'
+      AND qual ILIKE '%has_business_role%'
+      AND qual ILIKE '%business_admin%'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname='storage' AND tablename='objects'
+      AND policyname='business_assets_admin_update' AND cmd='UPDATE'
+      AND roles @> ARRAY['authenticated']::name[]
+      AND qual ILIKE '%storage.foldername(objects.name)%'
+      AND qual ILIKE '%has_business_role%'
+      AND with_check ILIKE '%storage.foldername(objects.name)%'
+      AND with_check ILIKE '%has_business_role%'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname='storage' AND tablename='objects'
+      AND policyname='business_assets_admin_delete' AND cmd='DELETE'
+      AND roles @> ARRAY['authenticated']::name[]
+      AND qual ILIKE '%storage.foldername(objects.name)%'
+      AND qual ILIKE '%has_business_role%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: las políticas de business-assets no aíslan las operaciones por ruta y administrador del negocio.';
+  END IF;
+
+  -- La política privada debe vincular UUID de negocio, UUID de postulación
+  -- y ruta exacta guardada en la fila; conocer una ruta no basta.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='storage' AND tablename='objects'
+      AND policyname='job_application_documents_business_admin_read'
+      AND cmd='SELECT'
+      AND qual ILIKE '%ja.id%'
+      AND qual ILIKE '%ja.business_id%'
+      AND qual ILIKE '%ja.resume_path%'
+      AND qual ILIKE '%objects.name%'
+      AND qual ILIKE '%storage.foldername(objects.name)%'
+      AND qual ILIKE '%storage.filename(objects.name)%'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: la política privada no vincula el archivo con su postulación y ruta exactas.';
+  END IF;
+
   IF NOT EXISTS (
     SELECT 1 FROM pg_policies
     WHERE schemaname='storage' AND tablename='objects'
