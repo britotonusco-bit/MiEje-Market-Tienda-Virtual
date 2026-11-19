@@ -1175,6 +1175,37 @@ BEGIN
     RAISE EXCEPTION 'FALLO: el historial de inventario no está limitado a administradores de negocios activos.';
   END IF;
 
+  -- Checkout y cancelación: bloqueo determinista y restitución atómica.
+  IF to_regprocedure('public.create_public_order(uuid,text,text,text,text,text,text,jsonb)') IS NULL THEN
+    RAISE EXCEPTION 'FALLO: falta la RPC base de checkout con control de inventario.';
+  END IF;
+  IF position('order by (value->>''product_id'')::uuid' IN lower(pg_get_functiondef(
+       'public.create_public_order(uuid,text,text,text,text,text,text,jsonb)'::regprocedure
+     ))) = 0
+     OR position('for update' IN lower(pg_get_functiondef(
+       'public.create_public_order(uuid,text,text,text,text,text,text,jsonb)'::regprocedure
+     ))) = 0
+     OR position('inventory = inventory -' IN lower(pg_get_functiondef(
+       'public.create_public_order(uuid,text,text,text,text,text,text,jsonb)'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: el checkout no bloquea productos en orden determinista o no descuenta inventario.';
+  END IF;
+
+  IF position('for update of p' IN lower(pg_get_functiondef(
+       'public.decide_order_cancellation(uuid,text,text)'::regprocedure
+     ))) = 0
+     OR position('order by p.id' IN lower(pg_get_functiondef(
+       'public.decide_order_cancellation(uuid,text,text)'::regprocedure
+     ))) = 0
+     OR position('inventory = p.inventory + quantities.quantity' IN lower(pg_get_functiondef(
+       'public.decide_order_cancellation(uuid,text,text)'::regprocedure
+     ))) = 0
+     OR position('v_restored_products <> v_expected_products' IN lower(pg_get_functiondef(
+       'public.decide_order_cancellation(uuid,text,text)'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: la cancelación no bloquea/restaura todos los productos de forma controlada.';
+  END IF;
+
   -- Métodos de pago: la escritura directa queda cerrada y se usa la RPC atómica.
   IF to_regprocedure('public.save_business_payment_methods(uuid,jsonb)') IS NULL
      OR has_table_privilege('authenticated','public.business_payment_methods','INSERT')
