@@ -26,6 +26,7 @@ AS $function$
 DECLARE
   v_actor uuid := auth.uid();
   v_order public.orders%ROWTYPE;
+  v_business_id uuid;
   v_request_id uuid;
   v_transaction_id uuid;
   v_payment_count integer := 0;
@@ -54,13 +55,13 @@ BEGIN
 
   -- Autorizar el negocio antes de adquirir el bloqueo del pedido para
   -- impedir que usuarios de otras tiendas bloqueen operaciones ajenas.
-  SELECT o.business_id INTO v_order.business_id
+  SELECT o.business_id INTO v_business_id
   FROM public.orders o
   WHERE o.id = p_order_id;
 
   IF NOT FOUND
-     OR NOT private.business_is_active(v_order.business_id)
-     OR NOT private.has_business_role(v_order.business_id, ARRAY['business_admin']::text[]) THEN
+     OR NOT private.business_is_active(v_business_id)
+     OR NOT private.has_business_role(v_business_id, ARRAY['business_admin']::text[]) THEN
     RAISE EXCEPTION 'No se encontró el pedido o no tienes permiso para procesarlo.'
       USING ERRCODE = '42501';
   END IF;
@@ -68,7 +69,7 @@ BEGIN
   SELECT * INTO v_order
   FROM public.orders
   WHERE id = p_order_id
-    AND business_id = v_order.business_id
+    AND business_id = v_business_id
   FOR UPDATE;
 
   IF NOT FOUND
