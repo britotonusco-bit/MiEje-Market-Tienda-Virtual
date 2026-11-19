@@ -322,3 +322,10 @@ La función `cleanup-job-application-data` no recorre el bucket completo buscand
 Por tanto, el alcance probado por lectura de código es **limpieza de objetos asociados a sesiones vencidas**, no detección general de todos los objetos huérfanos del bucket. No se debe ampliar la eliminación a un barrido indiscriminado: cualquier rutina futura debe comparar rutas con postulaciones y sesiones, limitarse a un prefijo validado y registrar cada eliminación. Los objetos sin sesión detectable requieren un proceso separado de conciliación y revisión antes de borrarse.
 
 La migración de permisos del paso 20 se reforzó para revocar dinámicamente las concesiones UPDATE por columna de todas las columnas reales, salvo `status` y `admin_notes`; luego revoca esos dos permisos a todos los roles y los concede únicamente a `authenticated`. Así no depende de que el listado de columnas del esquema base esté completo.
+
+
+### Revisión adicional de integridad de inventario — 19 nov 2026
+
+La lectura de `business-admin-boundaries.sql` confirma que el permiso directo de UPDATE sobre `products.inventory` se revoca a `authenticated` y `anon`. El ajuste de existencias se canaliza por `adjust_business_inventory`, que valida negocio activo y rol `business_admin`, bloquea la fila del producto y compara las existencias esperadas antes de guardar. El historial `inventory_movements` tiene RLS y una política de lectura para el administrador del negocio activo.
+
+Se amplió `verify-integration-package.sql` para comprobar en staging que: ningún cliente pueda insertar, modificar o borrar el historial; nadie pueda actualizar directamente `products.inventory`; la RPC sea `SECURITY DEFINER` con `search_path` vacío; y la política de lectura del historial exija administrador y negocio activo. Estas son comprobaciones estáticas del verificador; todavía no se han ejecutado contra staging ni producción.
