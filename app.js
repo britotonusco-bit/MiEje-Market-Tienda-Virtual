@@ -258,23 +258,38 @@
   const getProduct = (business, productId) =>
     business?.products.find(product => product.id === productId);
 
+  async function fetchAllVisibleRows(buildQuery, pageSize = 500) {
+    const collected = [];
+    let offset = 0;
+    let expectedCount = null;
+    while (expectedCount === null || offset < expectedCount) {
+      const { data, error, count } = await buildQuery().range(offset, offset + pageSize - 1);
+      if (error) throw error;
+      const page = data || [];
+      if (expectedCount === null && Number.isFinite(count)) expectedCount = count;
+      if (!page.length) break;
+      collected.push(...page);
+      offset += page.length;
+      if (expectedCount === null && page.length < pageSize) break;
+    }
+    return collected;
+  }
+
   async function loadRegisteredBusinesses() {
     try {
       if (!window.supabase || !window.MIEJE_SUPABASE_URL || !window.MIEJE_SUPABASE_PUBLISHABLE_KEY) return;
       const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
-      const { data: rows, error } = await client.from("businesses")
-        .select("id,name,slug,business_type,category,description,tagline,city,contact_phone,whatsapp_support,opening_hours,logo_url,status,public_suspension_message,delivery_fee,minimum_order_amount")
-        .order("name", { ascending: true }).limit(200);
-      if (error) throw error;
+      const rows = await fetchAllVisibleRows(() => client.from("businesses")
+        .select("id,name,slug,business_type,category,description,tagline,city,contact_phone,whatsapp_support,opening_hours,logo_url,status,public_suspension_message,delivery_fee,minimum_order_amount", { count: "exact" })
+        .order("name", { ascending: true }).order("id", { ascending: true }));
       if (!rows?.length) return;
       const activeBusinessIds = rows.filter(row => row.status === "active").map(row => row.id);
       let products = [];
       if (activeBusinessIds.length) {
-        const { data: productRows, error: productError } = await client.from("products")
-          .select("id,business_id,name,description,image_url,price,inventory,is_active")
-          .in("business_id", activeBusinessIds).eq("is_active", true).order("created_at", { ascending: false }).limit(1000);
-        if (productError) throw productError;
-        products = productRows || [];
+        products = await fetchAllVisibleRows(() => client.from("products")
+          .select("id,business_id,name,description,image_url,price,inventory,is_active,created_at", { count: "exact" })
+          .in("business_id", activeBusinessIds).eq("is_active", true)
+          .order("created_at", { ascending: false }).order("id", { ascending: false }));
       }
       let paymentMethods = [];
       if (activeBusinessIds.length) {
@@ -284,15 +299,16 @@
       }
       let publicContentPages = [];
       if (activeBusinessIds.length) {
-        const { data: contentRows, error: contentError } = await client.from('business_content_pages')
-          .select('id,business_id,content_type,title,body,content')
-          .in('business_id', activeBusinessIds)
-          .eq('is_published', true)
-          .eq('moderation_status', 'approved')
-          .order('created_at', { ascending: false })
-          .limit(500);
-        if (contentError) console.warn('No se pudieron cargar las publicaciones públicas.', contentError);
-        else publicContentPages = contentRows || [];
+        try {
+          publicContentPages = await fetchAllVisibleRows(() => client.from('business_content_pages')
+            .select('id,business_id,content_type,title,body,content,created_at', { count: "exact" })
+            .in('business_id', activeBusinessIds)
+            .eq('is_published', true)
+            .eq('moderation_status', 'approved')
+            .order('created_at', { ascending: false }).order('id', { ascending: false }));
+        } catch (contentError) {
+          console.warn('No se pudieron cargar las publicaciones públicas.', contentError);
+        }
       }
       const productsByBusiness = new Map();
       products.forEach(product => {
