@@ -1412,7 +1412,7 @@
     try {
       const result = await callTechnicalFunction({
         action: suspended ? 'block_member' : 'unblock_member',
-        membership_id: form.elements.user_id.value,
+        membership_id: form.elements.membership_id.value,
         reason
       });
       message.textContent = result.message || (suspended ? 'Acceso suspendido.' : 'Acceso reactivado.');
