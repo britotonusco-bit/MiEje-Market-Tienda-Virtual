@@ -726,7 +726,7 @@ Deno.serve(async (req: Request) => {
           if (failedError) console.error("Could not mark invitation as failed:", failedError);
           console.error("inviteUserByEmail failed:", inviteError);
           return reply(502, {
-            error: "Supabase no confirmó el envío del correo. La invitación quedó registrada como fallida; puedes iniciar una nueva invitación sin duplicar una asignación.",
+            error: "Supabase no confirmó el envío del correo y la invitación quedó marcada como fallida. Antes de repetir, revisa Authentication > Users: si no existe la cuenta, puedes intentarlo de nuevo; si quedó una cuenta invitada sin confirmar, requiere reconciliación técnica y no debes crear otra cuenta.",
             invitation_sent: false,
           });
         }
