@@ -416,6 +416,40 @@ BEGIN
     RAISE EXCEPTION 'FALLO: cobros, reembolsos, cancelaciones o gastos no se filtran por su fecha efectiva en hora Bogotá.';
   END IF;
 
+  -- Identidades aritméticas: los acumulados por subperiodos deben ser aditivos
+  -- porque todas las clases usan rangos semiabiertos por su fecha efectiva.
+  -- Domicilios son informativos: ya están incluidos en sales y no se suman otra vez.
+  IF position('sum(unit_cost*quantity*direction)' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0
+     OR position('''net_sales'',sales-refunds' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0
+     OR position('''gross_profit_estimate'',case when missing_cost_lines=0' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0
+     OR position('then sales-refunds-cost_of_sales' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0
+     OR position('then sales-refunds-cost_of_sales-paid_expenses' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0
+     OR position('''delivery_fees_collected'',delivery_fees' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0
+     OR position('''sales'',sales' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: las identidades de cobros netos, costos, ganancias o domicilios pueden duplicar importes o romper la aditividad de los periodos.';
+  END IF;
+
+  -- El periodo anual completo debe caber en el límite declarado por el RPC.
+  IF position('p_end_date - p_start_date > 366' IN lower(pg_get_functiondef(
+       'public.get_business_admin_profit_report(uuid,date,date)'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: el reporte no admite un año calendario completo de 366 días.';
+  END IF;
+
   -- Las cancelaciones aprobadas no pueden duplicar la reversión de costo.
   IF NOT EXISTS (
     SELECT 1 FROM pg_indexes
