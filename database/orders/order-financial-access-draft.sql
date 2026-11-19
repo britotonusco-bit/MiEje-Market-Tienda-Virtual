@@ -383,7 +383,7 @@ BEGIN
     SELECT ft.order_id, sum(ft.amount)::numeric(14,2) amount
     FROM public.financial_transactions ft
     WHERE ft.business_id=p_business_id AND ft.transaction_type='payment_received'
-      AND ft.status='completed'
+      AND ft.status='completed' AND ft.currency='COP'
       AND ft.completed_at >= (p_start_date::timestamp AT TIME ZONE 'America/Bogota')
       AND ft.completed_at < ((p_end_date + 1)::timestamp AT TIME ZONE 'America/Bogota')
     GROUP BY ft.order_id
@@ -392,7 +392,7 @@ BEGIN
     SELECT COALESCE(sum(ft.amount),0)::numeric(14,2) amount
     FROM public.financial_transactions ft
     WHERE ft.business_id=p_business_id AND ft.transaction_type='refund'
-      AND ft.status='completed'
+      AND ft.status='completed' AND ft.currency='COP'
       AND ft.completed_at >= (p_start_date::timestamp AT TIME ZONE 'America/Bogota')
       AND ft.completed_at < ((p_end_date + 1)::timestamp AT TIME ZONE 'America/Bogota')
   ),
