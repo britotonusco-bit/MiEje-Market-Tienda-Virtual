@@ -458,3 +458,10 @@ El RPC `get_business_admin_profit_report` ahora devuelve `NULL` en las estimacio
 **Pedidos históricos:** el paso 9 instala `order_items_history_guard`. Las líneas nuevas deben conservar un producto del mismo negocio que el pedido; sus snapshots no pueden modificarse ni eliminarse. La FK `order_items_product_id_fkey` usa `ON DELETE RESTRICT`, por lo que los productos vendidos deben desactivarse en lugar de borrarse. Las líneas antiguas cuyo `product_id` ya sea NULL se conservan para consulta; el paso 14 impide aprobar automáticamente su cancelación porque no es posible reponer inventario con certeza. Deben revisarse manualmente antes de cualquier resolución.
 
 **Contraste de solo lectura con Supabase activo (proyecto independiente):** `public.order_items` existe y actualmente tiene 0 filas; por tanto, la consulta no encontró referencias nulas ni líneas cruzadas entre negocios. Sin embargo, la FK activa `order_items_product_id_fkey` todavía usa `ON DELETE SET NULL`, no `ON DELETE RESTRICT`. La corrección está solo en el borrador de la rama y no se ha aplicado. No se ejecutaron escrituras.
+
+
+## Aislamiento de operaciones de pedidos
+
+Las RPC `mark_order_payment_received`, `complete_order_refund` y `decide_order_cancellation` deben autorizar al usuario contra el negocio propietario antes de adquirir bloqueos de filas. Después del bloqueo deben comprobar nuevamente que el negocio siga activo y que el usuario conserve el rol de administrador. El verificador integral comprueba el orden de estas validaciones.
+
+En staging, ejecutar pruebas con dos negocios y sesiones distintas: un administrador del negocio A debe ser rechazado al usar IDs del negocio B sin bloquear el pedido ni la solicitud; el administrador de B debe poder completar la operación normalmente. Repetir con solicitudes concurrentes y cambios de membresía/suspensión.
