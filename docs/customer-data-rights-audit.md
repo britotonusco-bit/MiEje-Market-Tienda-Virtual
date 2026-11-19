@@ -310,3 +310,6 @@ Se creó `database/jobs/job-application-review-audit-draft.sql` (paso 20). Revoc
 El panel `panel-live.js` se ajustó para enviar únicamente `status` y `admin_notes`. Ya no confía en el navegador para indicar quién revisó la postulación ni cuándo. El verificador integral comprueba que no exista UPDATE a nivel de tabla para `authenticated`, que no pueda modificar directamente los metadatos y que el trigger esté instalado.
 
 **Orden requerido:** aplicar el esquema base aprobado de vacantes, luego los pasos 18 y 19 según el README, y finalmente el paso 20. La migración es un borrador y no se ha ejecutado en Supabase. Confirmar también que la policy RLS de UPDATE continúa limitando cada fila al administrador del negocio activo.
+
+
+El paso 20 también agrega la restricción `job_applications_status_allowed_check`, que limita los estados a `pending`, `reviewing`, `contacted`, `accepted` y `rejected`. Antes de crearla, el script comprueba que no existan estados históricos fuera de ese catálogo; si encuentra alguno, se detiene para revisión manual. El panel valida los mismos valores y limita las notas a 3000 caracteres, pero la restricción de PostgreSQL es la protección definitiva frente a solicitudes directas.
