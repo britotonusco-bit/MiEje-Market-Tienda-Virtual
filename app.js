@@ -1221,8 +1221,16 @@
     const address = String(form.get("address") || "").trim();
     const customerName = String(form.get("customerName") || "").trim();
     const customerPhone = String(form.get("phone") || "").trim();
+    const privacyConsent = event.currentTarget.elements.namedItem("privacyConsent");
+    const privacyConsentAccepted = privacyConsent instanceof HTMLInputElement && privacyConsent.checked === true;
+    const privacyConsentVersion = "privacy-2026-11-19-v1";
     if (!paymentMethodId || !deliveryMethod || !address || !customerName || !customerPhone) {
       showToast("Completa tus datos, la dirección y la forma de pago.");
+      return;
+    }
+    if (!privacyConsentAccepted) {
+      showToast("Debes aceptar el tratamiento de datos para registrar el pedido.");
+      privacyConsent?.focus();
       return;
     }
     if (!window.supabase || !window.MIEJE_SUPABASE_URL || !window.MIEJE_SUPABASE_PUBLISHABLE_KEY) {
@@ -1241,6 +1249,8 @@
         delivery_address: address,
         delivery_notes: `Método de entrega: ${deliveryMethod === "delivery" ? "Domicilio" : deliveryMethod}`,
         payment_method_id: paymentMethodId,
+        privacy_consent: privacyConsentAccepted,
+        privacy_consent_version: privacyConsentVersion,
         items: cart.map(item => ({ product_id: item.productId, quantity: item.quantity }))
       };
       const client = window.supabase.createClient(window.MIEJE_SUPABASE_URL, window.MIEJE_SUPABASE_PUBLISHABLE_KEY);
