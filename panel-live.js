@@ -1020,10 +1020,10 @@
     const pageBusinesses = cachedBusinesses;
     const options = `<option value="">Todos los negocios</option>` + pageBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (inactivo)'}</option>`).join('');
     const select = document.querySelector('#businessSelect'); if (select) select.innerHTML = options;
-    const memberSelect = document.querySelector('#memberBusinessSelect'); if (memberSelect) memberSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + pageBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
-    const assignmentBusinessSelect = document.querySelector('#assignmentBusinessSelect'); if (assignmentBusinessSelect) assignmentBusinessSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + pageBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
-    const suspensionSelect = document.querySelector('#suspensionBusinessSelect'); if (suspensionSelect) suspensionSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + pageBusinesses.map(b => `<option value="${esc(b.id)}">${esc(b.name)}${b.status === 'active' ? '' : ' (suspendido)'}</option>`).join('');
-    const inviteSelect = document.querySelector('#inviteBusinessSelect'); if (inviteSelect) inviteSelect.innerHTML = `<option value="">Selecciona un negocio</option>` + pageBusinesses.filter(b => b.status === 'active').map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+    initBusinessPicker('#memberBusinessSelect');
+    initBusinessPicker('#assignmentBusinessSelect');
+    initBusinessPicker('#suspensionBusinessSelect');
+    initBusinessPicker('#inviteBusinessSelect', true);
     await loadSelectedBusiness('');
     await loadAccessEvents(null, '#accessContainer');
     await loadAuditEvents(null, '#auditContainer');
@@ -1031,6 +1031,91 @@
     await loadBlockRequests();
     await loadContentModeration();
     await initPlatformAi();
+  }
+
+  const businessPickerStates = new Map();
+
+  function initBusinessPicker(selector, activeOnly = false) {
+    const select = document.querySelector(selector);
+    if (!select || businessPickerStates.has(selector)) return;
+    const search = document.createElement('input');
+    search.type = 'search';
+    search.className = 'field';
+    search.placeholder = 'Buscar negocio por nombre o identificador…';
+    search.setAttribute('aria-label', 'Buscar negocio');
+    search.style.marginBottom = '6px';
+    const pager = document.createElement('div');
+    pager.className = 'inline-note';
+    pager.style.display = 'flex';
+    pager.style.alignItems = 'center';
+    pager.style.gap = '8px';
+    pager.style.marginTop = '6px';
+    select.parentNode.insertBefore(search, select);
+    select.insertAdjacentElement('afterend', pager);
+    const state = { selector, activeOnly, search: '', cursors: [null], page: 0, hasMore: false, timer: null };
+    businessPickerStates.set(selector, state);
+    search.addEventListener('input', () => {
+      state.search = search.value.trim();
+      state.cursors = [null];
+      state.page = 0;
+      if (state.timer) window.clearTimeout(state.timer);
+      state.timer = window.setTimeout(() => { void loadBusinessPickerPage(state); }, 250);
+    });
+    void loadBusinessPickerPage(state);
+  }
+
+  async function loadBusinessPickerPage(state) {
+    const select = document.querySelector(state.selector);
+    const pager = select?.nextElementSibling;
+    if (!select || !pager) return;
+    select.disabled = true;
+    select.innerHTML = '<option value="">Cargando negocios…</option>';
+    pager.textContent = 'Consultando…';
+    try {
+      const cursor = state.cursors[state.page];
+      const result = await callTechnicalFunction({
+        action: 'list_businesses',
+        limit: PANEL_PAGE_SIZE + 1,
+        search: state.search || undefined,
+        active_only: state.activeOnly,
+        before_created_at: cursor?.created_at || undefined,
+        before_id: cursor?.id || undefined
+      });
+      const rows = result.businesses || [];
+      state.hasMore = Boolean(result.has_more);
+      state.last = rows[rows.length - 1] || null;
+      select.innerHTML = '<option value="">Selecciona un negocio</option>' + rows.map(b =>
+        `<option value="${esc(b.id)}">${esc(b.name)} · ${esc(b.slug)}${b.status === 'active' ? '' : ' (suspendido)'}</option>`
+      ).join('');
+      if (!rows.length) select.innerHTML = '<option value="">No se encontraron negocios</option>';
+      const previous = document.createElement('button');
+      previous.type = 'button';
+      previous.className = 'small-button';
+      previous.textContent = 'Anterior';
+      previous.disabled = state.page === 0;
+      previous.addEventListener('click', () => {
+        if (state.page > 0) { state.page--; void loadBusinessPickerPage(state); }
+      });
+      const label = document.createElement('span');
+      label.textContent = `Página ${state.page + 1}${state.hasMore ? ' · hay más resultados' : ' · última página'}`;
+      const next = document.createElement('button');
+      next.type = 'button';
+      next.className = 'small-button';
+      next.textContent = 'Siguiente';
+      next.disabled = !state.hasMore || !state.last;
+      next.addEventListener('click', () => {
+        if (!state.hasMore || !state.last) return;
+        state.cursors[state.page + 1] = { created_at: state.last.created_at, id: state.last.id };
+        state.page++;
+        void loadBusinessPickerPage(state);
+      });
+      pager.replaceChildren(previous, label, next);
+    } catch (error) {
+      select.innerHTML = '<option value="">No se pudieron cargar los negocios</option>';
+      pager.textContent = error.message || 'Error al consultar negocios.';
+    } finally {
+      select.disabled = false;
+    }
   }
 
   function renderBusinesses() {
