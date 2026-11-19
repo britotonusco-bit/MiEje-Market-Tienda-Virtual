@@ -197,3 +197,76 @@ La Edge Function desplegada versión 6 sí tiene la acción `moderate_business_c
 Si la actualización funciona y el INSERT de auditoría falla, el contenido queda moderado sin evidencia correspondiente. Tampoco usa bloqueo transaccional de la fila mediante la RPC nueva.
 
 La rama reemplaza ese flujo por `moderate_business_content_transactionally`. La función activa tampoco contiene la comprobación AAL2 que ya está preparada en la rama para la función técnica. Por ello no debe considerarse protegida contra llamadas directas con una sesión técnica de nivel AAL1.
+
+
+## Auditoría transversal de `audit_logs` — 19 nov 2026
+
+### AUD-01 — La tabla activa está vacía
+
+Consulta SQL de solo lectura en Supabase activo `cqixlrwbqatbhzmpygiz`:
+- `public.audit_logs` existe.
+- Tiene columnas `id`, `business_id`, `actor_id`, `action`, `entity_type`, `entity_id`, `details`, `created_at`.
+- La secuencia `public.audit_logs_id_seq` está asociada al identificador.
+- La tabla tiene RLS habilitado y una policy SELECT.
+- La consulta agregada devolvió cero eventos; por tanto, no hay eventos históricos con los que validar la cobertura real, la antigüedad o la integridad del historial.
+- No se observaron triggers en la tabla.
+- `service_role` conserva SELECT, INSERT, UPDATE, DELETE, TRUNCATE, TRIGGER y REFERENCES.
+- La policy activa `audit_logs_owner_or_business_admin_select` permite lectura global al propietario técnico, lectura de todos los eventos del negocio al administrador y lectura de eventos propios al actor.
+
+### AUD-02 — La rama limita la lectura directa
+
+Se actualizó `database/security/business-admin-boundaries.sql`:
+- Se elimina la policy con bypass global `is_platform_owner()`.
+- El panel técnico obtiene el historial global mediante la Edge Function autenticada y con rol técnico/MFA; no necesita SELECT global desde el navegador.
+- La lectura directa queda limitada a un negocio activo.
+- El administrador activo puede leer los eventos de su negocio.
+- Un administrador o empleado activo puede leer sus propios eventos de ese negocio.
+- No se concede lectura directa a usuarios anónimos ni a miembros de otros negocios.
+
+El verificador exige la policy nueva y rechaza cualquier policy SELECT de `audit_logs` que incluya `is_platform_owner()`.
+
+### AUD-03 — Inmutabilidad y calidad de metadatos
+
+El borrador `database/security/audit-log-immutability-draft.sql` ahora incluye:
+- Bloqueo de UPDATE y DELETE por trigger.
+- Bloqueo de TRUNCATE por trigger.
+- Revocación de UPDATE/DELETE/TRUNCATE a PUBLIC, anon, authenticated y service_role.
+- Conservación de INSERT para el servidor.
+- Validación de acción y entidad no vacías, longitudes máximas, `details` como objeto JSON y máximo 16 KiB.
+- `created_at` fijado por PostgreSQL con `transaction_timestamp()` en cada INSERT.
+- Comentario de columna que prohíbe almacenar contraseñas, tokens, documentos, teléfonos, correos y datos personales innecesarios.
+
+No se exige `actor_id NOT NULL` porque puede existir auditoría de sistema y la FK histórica usa `ON DELETE SET NULL`. Las operaciones administrativas de usuario deben pasar siempre el actor obtenido del JWT validado.
+
+### AUD-04 — Textos libres en eventos
+
+Las RPC de rama incluyen motivos y notas de suspensión, reactivación, moderación y solicitudes de bloqueo. Esos campos son útiles para explicar una decisión, pero son texto libre y podrían contener datos personales introducidos por error.
+
+Se añadieron avisos junto a los formularios de motivos en `panel-tecnico.html` y `panel-negocio.html`, indicando que no deben introducir contraseñas, teléfonos, correos, documentos ni datos personales innecesarios. Los límites de tamaño de los formularios y el límite global de 16 KiB del evento reducen el volumen, pero no detectan automáticamente PII en texto libre.
+
+### AUD-05 — Consulta del historial
+
+La acción `list_audit_logs`:
+- Solo está disponible después de validar al propietario técnico.
+- Permite filtrar por negocio.
+- Ahora limita cada respuesta a un máximo de 100 eventos.
+- Valida que el filtro de negocio tenga formato UUID.
+- Devuelve los nombres visibles de los actores que siguen teniendo perfil.
+
+El contador de eventos utiliza `count: exact`; la tabla de panel muestra hasta 100 eventos recientes. No se ha implementado paginación histórica por cursor.
+
+### AUD-06 — Retención no definida
+
+No se encontró una política de retención, archivo o particionado para `audit_logs`. Tampoco se identificó una automatización de purga. El borrador favorece conservar el historial sin modificaciones ni borrados, pero eso no sustituye una política formal de conservación, acceso y tratamiento de datos.
+
+Antes de producción debe decidirse un plazo de conservación y, si el volumen crece, un mecanismo de archivo que preserve integridad y disponibilidad. No debe añadirse una purga automática hasta que exista una regla aprobada y compatible con las obligaciones legales y de investigación.
+
+### Verificaciones estáticas añadidas
+
+- Trigger BEFORE INSERT de validación y timestamp.
+- Función de trigger SECURITY INVOKER con `search_path` vacío.
+- Policy de lectura directa limitada por negocio/rol y sin bypass técnico global.
+- Triggers de UPDATE/DELETE y TRUNCATE.
+- Privilegios de service_role: INSERT conservado; UPDATE/DELETE/TRUNCATE revocados.
+
+No se ejecutaron migraciones ni escrituras SQL. El conteo de eventos en la base activa fue solo agregado y devolvió cero.
