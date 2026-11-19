@@ -119,3 +119,21 @@ No se eliminaron índices, no se modificaron políticas RLS, no se alteraron con
 - [ ] Confirmar plan y límites de recursos del proyecto antes de abrir al público.
 
 **Conclusión:** se identificaron correcciones concretas de índices y límites de carga, pero la capacidad real de crecimiento aún no está demostrada. El siguiente paso seguro es validar los índices y la paginación en staging, no optimizar a ciegas la base activa.
+
+
+## 11. Primera implementación de paginación en paneles
+
+Se actualizó `panel-live.js` en la rama:
+- Productos del administrador: páginas de 50 filas, orden estable `created_at DESC, id DESC`, cursor compuesto y botones Anterior/Siguiente.
+- El panel consulta costos solo para los IDs de los 50 productos visibles, en vez de descargar todos los costos del negocio.
+- Pedidos del empleado: páginas de 50 filas con el mismo patrón de cursor estable.
+- Se solicita una fila adicional para determinar si existe página siguiente.
+- El filtro de cursor siempre se combina con `business_id`, por lo que la paginación no amplía el alcance del negocio.
+
+Limitaciones que permanecen:
+- Pedidos del administrador todavía cargan hasta 100 y dependen de la RPC financiera que entrega un conjunto independiente; no se cambió para evitar mostrar pedidos sin sus datos financieros.
+- Catálogo público todavía carga topes globales (200 negocios, 1.000 productos, 500 publicaciones).
+- Favoritos, postulaciones, gastos, movimientos de inventario, cancelaciones y auditoría todavía requieren paginación.
+- No se ha probado el cursor con registros que compartan exactamente la misma fecha ni bajo inserciones concurrentes en navegador/staging.
+
+La implementación está en rama y requiere pruebas de integración con Supabase antes de considerarse cerrada.
