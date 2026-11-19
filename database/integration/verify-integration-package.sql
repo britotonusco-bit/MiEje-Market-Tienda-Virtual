@@ -1673,6 +1673,24 @@ BEGIN
     RAISE EXCEPTION 'FALLO: las RPC técnicas no están restringidas a service_role.';
   END IF;
 
+  -- Ninguna política de pedidos, partidas, cancelaciones o finanzas puede
+  -- conservar un bypass del propietario técnico, aunque tenga otro nombre.
+  IF EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename IN (
+        'orders', 'order_items', 'order_cancellation_requests',
+        'financial_transactions', 'refund_details'
+      )
+      AND (
+        coalesce(qual, '') ILIKE '%is_platform_owner%'
+        OR coalesce(with_check, '') ILIKE '%is_platform_owner%'
+      )
+  ) THEN
+    RAISE EXCEPTION 'FALLO: existe un bypass del propietario técnico en políticas de pedidos, cancelaciones o finanzas.';
+  END IF;
+
   -- Las RPC que reciben IDs de pedidos/solicitudes deben autorizar el negocio
   -- antes del primer FOR UPDATE y volver a validar después de adquirir el lock.
   v_mark_payment := pg_get_functiondef(
