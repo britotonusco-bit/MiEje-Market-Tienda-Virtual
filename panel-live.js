@@ -21,6 +21,8 @@
   let expensePageIndex = 0;
   let inventoryCursorStack = [null];
   let inventoryPageIndex = 0;
+  const auditCursorStacks = new Map();
+  const auditPageIndexes = new Map();
   let employeeOrderPageIndex = 0;
   let productCursorStack = [null];
   let productPageIndex = 0;
@@ -2033,29 +2035,61 @@
     );
   }
 
-  async function loadAuditEvents(id, selector) {
+  async function loadAuditEvents(id, selector, reset = true) {
     const target = document.querySelector(selector);
+    if (!target) return;
+    const key = selector + ':' + (id || 'self');
+    if (reset) { auditCursorStacks.set(key, [null]); auditPageIndexes.set(key, 0); }
+    if (!auditCursorStacks.has(key)) auditCursorStacks.set(key, [null]);
+    if (!auditPageIndexes.has(key)) auditPageIndexes.set(key, 0);
+    const pageIndex = auditPageIndexes.get(key);
+    const cursor = auditCursorStacks.get(key)[pageIndex];
+    target.innerHTML = '<div class="empty">Cargando auditoría…</div>';
     let rows = [];
     let names = new Map();
+    let hasMore = false;
     if (panel === 'technical') {
       try {
-        const result = await callTechnicalFunction({ action: 'list_audit_logs', business_id: id || undefined, limit: 100 });
-        rows = result.audit_logs || [];
+        const result = await callTechnicalFunction({
+          action: 'list_audit_logs', business_id: id || undefined, limit: PANEL_PAGE_SIZE + 1,
+          before_created_at: cursor?.created_at || undefined, before_id: cursor?.id || undefined
+        });
+        const fetched = result.audit_logs || [];
+        hasMore = fetched.length > PANEL_PAGE_SIZE;
+        rows = fetched.slice(0, PANEL_PAGE_SIZE);
         names = new Map(rows.filter(row => row.actor_name).map(row => [row.actor_id, row.actor_name]));
       } catch (error) {
         return showError(target, error);
       }
     } else {
-      let query = db.from('audit_logs').select('id,business_id,actor_id,action,entity_type,entity_id,details,created_at').order('created_at', { ascending: false }).limit(100);
+      let query = db.from('audit_logs')
+        .select('id,business_id,actor_id,action,entity_type,entity_id,details,created_at')
+        .order('created_at', { ascending: false }).order('id', { ascending: false })
+        .limit(PANEL_PAGE_SIZE + 1);
       if (id) query = query.eq('business_id', id);
       else query = query.eq('actor_id', currentUser.id);
+      if (cursor) query = query.or('created_at.lt.' + cursor.created_at + ',and(created_at.eq.' + cursor.created_at + ',id.lt.' + cursor.id + ')');
       const { data, error } = await query;
       if (error) return showError(target, error);
-      rows = data || [];
+      const fetched = data || [];
+      hasMore = fetched.length > PANEL_PAGE_SIZE;
+      rows = fetched.slice(0, PANEL_PAGE_SIZE);
       names = await getUserNames(rows.map(e => e.actor_id));
     }
-    if (!rows.length) { target.innerHTML = '<div class="empty">No hay registros de auditoría para este filtro todavía.</div>'; return; }
-    target.innerHTML = tableHtml(['Fecha y hora','Usuario','Acción','Entidad','Registro','Detalle'], rows.map(e => [dateTime(e.created_at), names.get(e.actor_id) || shortId(e.actor_id), esc(e.action), esc(e.entity_type), e.entity_id || '—', esc(JSON.stringify(e.details || {}))]));
+    if (!rows.length && pageIndex === 0) { target.innerHTML = '<div class="empty">No hay registros de auditoría para este filtro todavía.</div>'; return; }
+    if (!rows.length) target.innerHTML = '<div class="empty">No hay más registros en esta página.</div>';
+    if (rows.length) target.innerHTML = tableHtml(['Fecha y hora','Usuario','Acción','Entidad','Registro','Detalle'], rows.map(e => [dateTime(e.created_at), names.get(e.actor_id) || shortId(e.actor_id), esc(e.action), esc(e.entity_type), e.entity_id || '—', esc(JSON.stringify(e.details || {}))]));
+    appendCursorPager(target, {
+      page: pageIndex + 1, canPrevious: pageIndex > 0, hasMore,
+      previous: () => { auditPageIndexes.set(key, pageIndex - 1); void loadAuditEvents(id, selector, false); },
+      next: () => {
+        const last = rows[rows.length - 1];
+        if (!last) return;
+        auditCursorStacks.get(key)[pageIndex + 1] = { created_at: last.created_at, id: last.id };
+        auditPageIndexes.set(key, pageIndex + 1);
+        void loadAuditEvents(id, selector, false);
+      }
+    });
   }
 
   async function getUserNames(ids) {
