@@ -42,7 +42,7 @@ Cada archivo es una unidad independiente. Ejecutar uno a uno, revisar el resulta
 | 17 | `database/finance/business-expense-audit-draft.sql` | Después del paso 16 y de los límites de negocio; sustituye escrituras directas por RPC auditadas. |
 | 18 | `database/jobs/job-application-consent-draft.sql` | Añade versión y fecha de aceptación a postulaciones existentes; requiere que el esquema base de vacantes ya esté instalado. |
 | 19 | `database/maintenance/job-application-cleanup-draft.sql` | Después del paso 18; actualiza la RPC de registro con consentimiento versionado y prepara la limpieza de sesiones vencidas. |
-| 20 | `database/jobs/job-application-review-audit-draft.sql` | Después del esquema base de vacantes; limita UPDATE del administrador a estado/notas y genera revisor/fecha mediante trigger en PostgreSQL. |
+| 20 | `database/jobs/job-application-review-audit-draft.sql` | Después del esquema base de vacantes; valida el catálogo de estados, limita UPDATE del administrador a estado/notas y genera revisor/fecha mediante trigger en PostgreSQL. |
 
 La normalización histórica de estados y la función `private.enforce_order_status_transition()` quedan centralizadas en el paso 2 (`business-admin-boundaries.sql`). El paso 11 solo sustituye el checkout y registra movimientos de venta; no vuelve a definir el trigger ni repite la conversión. La normalización se ejecuta en una transacción y desactiva el trigger anterior únicamente durante esa conversión.
 
