@@ -1448,6 +1448,7 @@
       if (result.audit_warning) message.textContent += ` Advertencia: ${result.audit_warning}`;
       message.className = result.audit_warning ? 'message error' : 'message success';
       await loadTechnicalMembers(form.elements.business_id.value, '#assignmentMemberSelect');
+      fillMemberAssignment();
     } catch (error) {
       message.textContent = error.message || 'No se pudo actualizar la asignación.';
       message.className = 'message error';
@@ -1480,6 +1481,8 @@
       message.textContent = result.message || (suspended ? 'Acceso suspendido.' : 'Acceso reactivado.');
       if (result.audit_warning) message.textContent += ` Advertencia: ${result.audit_warning}`;
       message.className = result.audit_warning ? 'message error' : 'message success';
+      const note = document.querySelector('#memberTargetStatusNote');
+      if (note) note.textContent = '';
       await loadTechnicalMembers(form.elements.business_id.value);
     } catch (error) {
       message.textContent = error.message || 'No se pudo cambiar el acceso.';
