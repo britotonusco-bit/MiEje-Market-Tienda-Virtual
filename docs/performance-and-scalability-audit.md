@@ -137,3 +137,10 @@ Limitaciones que permanecen:
 - No se ha probado el cursor con registros que compartan exactamente la misma fecha ni bajo inserciones concurrentes en navegador/staging.
 
 La implementación está en rama y requiere pruebas de integración con Supabase antes de considerarse cerrada.
+
+
+## 12. Optimización de agrupación del catálogo público
+
+En `app.js` se sustituyó el filtrado completo de productos para cada negocio por una agrupación previa en un `Map` indexado por `business_id`. La asignación de productos a negocios pasa de recorrer repetidamente el catálogo a una pasada de agrupación y consultas directas por negocio. Esto reduce trabajo en memoria cuando aumenta el número de negocios y productos.
+
+La carga remota todavía conserva los topes de 200 negocios, 1.000 productos y 500 publicaciones; no se considera resuelto el límite de catálogo. No se añadieron solicitudes de paginación al storefront en este cambio porque el carrito, la ficha de producto, favoritos y el asistente dependen de tener los productos de cada tienda disponibles localmente. Ese cambio requiere una estrategia de carga por tienda y persistencia de producto seleccionada para el carrito.
