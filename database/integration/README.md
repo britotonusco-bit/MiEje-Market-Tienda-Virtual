@@ -414,3 +414,6 @@ El limitador de `create-job-application` usa solo `cf-connecting-ip`, encabezado
 
 
 El paso 20 de vacantes revoca UPDATE a nivel de tabla para `PUBLIC`, `anon` y `authenticated`, concede a `authenticated` únicamente UPDATE de `status` y `admin_notes`, y genera `reviewed_by` desde `auth.uid()` y `reviewed_at` desde PostgreSQL mediante trigger. El panel no envía esos metadatos desde el navegador. Aplicar solo después de verificar que la tabla base contiene las columnas esperadas y que la policy RLS `job_applications_business_admin_update` limita la fila al administrador del negocio activo.
+
+
+**Nota de limpieza:** el endpoint actual procesa sesiones vencidas y sus archivos vinculados; no hace un barrido completo del bucket para localizar objetos sin fila de sesión. Esos posibles huérfanos requieren conciliación separada, no borrado automático indiscriminado.
