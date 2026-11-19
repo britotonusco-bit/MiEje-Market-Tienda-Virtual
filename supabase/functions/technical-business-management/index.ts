@@ -703,7 +703,8 @@ Deno.serve(async (req: Request) => {
       const membershipId = textValue(body.membership_id, 80);
       const role = textValue(body.role, 40);
       const jobTitle = textValue(body.job_title, 100);
-      if (!membershipId || !["business_admin", "employee"].includes(role) || jobTitle.length < 2) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(membershipId)
+          || !["business_admin", "employee"].includes(role) || jobTitle.length < 2) {
         return reply(400, { error: "Selecciona una membresía, un rol válido y un cargo de al menos dos caracteres." });
       }
 
@@ -773,7 +774,9 @@ Deno.serve(async (req: Request) => {
     if (action === "block_member") {
       const membershipId = textValue(body.membership_id, 80);
       const reason = textValue(body.reason, 2000);
-      if (!membershipId || !reason) return reply(400, { error: "La membresía y el motivo son obligatorios." });
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(membershipId) || reason.length < 5) {
+        return reply(400, { error: "Selecciona una membresía válida y escribe un motivo de al menos cinco caracteres." });
+      }
 
       const { data, error } = await admin.rpc("suspend_business_membership", {
         p_membership_id: membershipId,
@@ -803,7 +806,7 @@ Deno.serve(async (req: Request) => {
     if (action === "unblock_member") {
       const membershipId = textValue(body.membership_id, 80);
       const reason = textValue(body.reason, 2000);
-      if (!membershipId || reason.length < 5) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(membershipId) || reason.length < 5) {
         return reply(400, { error: "La membresía y un motivo de reactivación son obligatorios." });
       }
 
