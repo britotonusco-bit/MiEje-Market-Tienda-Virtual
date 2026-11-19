@@ -632,3 +632,6 @@ Los listados técnicos de negocios, miembros, moderación y solicitudes de bloqu
 
 
 Los registros de acceso se paginan en bloques de 50 con cursor `created_at + id`. En el panel técnico, la Edge Function aplica primero el filtro de eventos de acceso (`panel.login`, `log_login`, `panel_open`) y luego el cursor; en el panel de negocio se filtra por `panel.login` y por el negocio correspondiente.
+
+
+El listado de publicaciones del administrador del negocio se pagina en bloques de 50 con cursor `created_at + id`, manteniendo el filtro `business_id` en cada consulta. Despublicar sigue limitado al negocio seleccionado y no elimina postulaciones.
