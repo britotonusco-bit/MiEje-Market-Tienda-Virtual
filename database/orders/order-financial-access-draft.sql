@@ -465,7 +465,7 @@ BEGIN
       THEN sales-refunds-cost_of_sales-paid_expenses ELSE NULL END,
     'missing_cost_lines',missing_cost_lines,'paid_orders',paid_orders,
     'complete_cost_data',missing_cost_lines=0,
-    'basis','Reporte de movimientos por fecha de confirmación en hora Bogotá. Los cobros incluyen productos y domicilio; el costo de entrega debe registrarse como gasto si lo asume el negocio. El costo de productos se reconoce con el pago y se revierte al aprobar una cancelación pagada. Resultado estimado, no estado contable certificado.'
+    'basis','Reporte de movimientos por fecha de confirmación en hora Bogotá. Los cobros incluyen productos y domicilio; el costo de entrega debe registrarse como gasto si lo asume el negocio. El costo de productos se reconoce con el pago y se revierte al aprobar una cancelación pagada. Los cobros netos restan únicamente reembolsos efectivamente completados en el periodo: una cancelación pagada sin reembolso completado continúa representando dinero pendiente de devolver y no se descuenta hasta registrar el reembolso real. Resultado estimado, no estado contable certificado.'
   ) INTO v_result FROM totals;
   RETURN v_result;
 END;
