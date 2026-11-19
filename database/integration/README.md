@@ -44,6 +44,10 @@ Cada archivo es una unidad independiente. Ejecutar uno a uno, revisar el resulta
 | 19 | `database/maintenance/job-application-cleanup-draft.sql` | Después del paso 18; actualiza la RPC de registro con consentimiento versionado y prepara la limpieza de sesiones vencidas. |
 | 20 | `database/jobs/job-application-review-audit-draft.sql` | Después del esquema base de vacantes; valida el catálogo de estados, limita UPDATE del administrador a estado/notas y genera revisor/fecha mediante trigger en PostgreSQL. |
 
+
+
+**Paso adicional obligatorio para bases que ya tenían productos:** después del paso 9 y antes de permitir ventas/ajustes, revisar y ejecutar con autorización `database/inventory/inventory-ledger-baseline-draft.sql`. Crea una única línea base para cada producto preexistente con existencias mayores que cero y sin movimientos. Después ejecutar la consulta de solo lectura `database/inventory/verify-inventory-ledger.sql`; las diferencias deben investigarse, no corregirse insertando movimientos arbitrarios.
+
 La normalización histórica de estados y la función `private.enforce_order_status_transition()` quedan centralizadas en el paso 2 (`business-admin-boundaries.sql`). El paso 11 solo sustituye el checkout y registra movimientos de venta; no vuelve a definir el trigger ni repite la conversión. La normalización se ejecuta en una transacción y desactiva el trigger anterior únicamente durante esa conversión.
 
 El paso 8 (`customer-account-migration.sql`) es la única fuente de verdad para `orders.customer_user_id`, su índice y la tabla `customer_favorites`. El paso 12 solo configura las políticas de favoritos y las políticas de lectura necesarias para el historial; ya no vuelve a crear columnas, índices ni la tabla.
