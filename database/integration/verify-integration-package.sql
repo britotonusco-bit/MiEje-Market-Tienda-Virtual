@@ -14,6 +14,45 @@ BEGIN
     RAISE EXCEPTION 'FALLO: falta orders.customer_user_id.';
   END IF;
 
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='orders'
+      AND column_name='privacy_consent'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='orders'
+      AND column_name='privacy_consent_version'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='orders'
+      AND column_name='privacy_consent_at'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid='public.orders'::regclass
+      AND conname='orders_privacy_consent_evidence_check'
+  ) THEN
+    RAISE EXCEPTION 'FALLO: falta la evidencia versionada y fechada del consentimiento de privacidad en pedidos.';
+  END IF;
+
+  IF to_regprocedure('public.create_public_order_for_customer_with_payment_method(uuid,uuid,uuid,text,text,text,text,text,text,boolean,text,jsonb)') IS NULL
+     OR NOT has_function_privilege('service_role',
+       'public.create_public_order_for_customer_with_payment_method(uuid,uuid,uuid,text,text,text,text,text,text,boolean,text,jsonb)','EXECUTE')
+     OR has_function_privilege('anon',
+       'public.create_public_order_for_customer_with_payment_method(uuid,uuid,uuid,text,text,text,text,text,text,boolean,text,jsonb)','EXECUTE')
+     OR has_function_privilege('authenticated',
+       'public.create_public_order_for_customer_with_payment_method(uuid,uuid,uuid,text,text,text,text,text,text,boolean,text,jsonb)','EXECUTE') THEN
+    RAISE EXCEPTION 'FALLO: la RPC que persiste el consentimiento no tiene la firma o los permisos exclusivos de servidor.';
+  END IF;
+
+  IF position('privacy_consent_at' IN lower(pg_get_functiondef(
+       'public.create_public_order_for_customer_with_payment_method(uuid,uuid,uuid,text,text,text,text,text,text,boolean,text,jsonb)'::regprocedure
+     ))) = 0
+     OR position('transaction_timestamp' IN lower(pg_get_functiondef(
+       'public.create_public_order_for_customer_with_payment_method(uuid,uuid,uuid,text,text,text,text,text,text,boolean,text,jsonb)'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: la RPC no registra la fecha de consentimiento desde PostgreSQL.';
+  END IF;
+
   IF to_regclass('public.customer_favorites') IS NULL
      OR to_regclass('private.checkout_idempotency') IS NULL
      OR to_regclass('private.checkout_rate_limit_reservations') IS NULL
@@ -194,9 +233,9 @@ BEGIN
     RAISE EXCEPTION 'FALLO: falta business_memberships.job_title.';
   END IF;
 
-  IF to_regprocedure('public.get_public_order_idempotent(uuid,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)') IS NULL
-     OR to_regprocedure('public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)') IS NULL
-     OR to_regprocedure('public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)') IS NULL THEN
+  IF to_regprocedure('public.get_public_order_idempotent(uuid,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)') IS NULL
+     OR to_regprocedure('public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,text,jsonb)') IS NULL
+     OR to_regprocedure('public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,text,jsonb)') IS NULL THEN
     RAISE EXCEPTION 'FALLO: faltan RPCs de idempotencia del checkout.';
   END IF;
 
@@ -359,23 +398,23 @@ BEGIN
   END IF;
 
   IF NOT has_function_privilege('service_role',
-       'public.get_public_order_idempotent(uuid,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE')
+       'public.get_public_order_idempotent(uuid,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)','EXECUTE')
      OR NOT has_function_privilege('service_role',
-       'public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE')
+       'public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,text,jsonb)','EXECUTE')
      OR NOT has_function_privilege('service_role',
-       'public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE')
+       'public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,text,jsonb)','EXECUTE')
      OR has_function_privilege('anon',
-       'public.get_public_order_idempotent(uuid,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE')
+       'public.get_public_order_idempotent(uuid,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)','EXECUTE')
      OR has_function_privilege('authenticated',
-       'public.get_public_order_idempotent(uuid,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE')
+       'public.get_public_order_idempotent(uuid,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,jsonb)','EXECUTE')
      OR has_function_privilege('anon',
-       'public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE')
+       'public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,text,jsonb)','EXECUTE')
      OR has_function_privilege('authenticated',
-       'public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE')
+       'public.reserve_checkout_rate_limit(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,text,jsonb)','EXECUTE')
      OR has_function_privilege('anon',
-       'public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE')
+       'public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,text,jsonb)','EXECUTE')
      OR has_function_privilege('authenticated',
-       'public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE') THEN
+       'public.create_public_order_idempotent(uuid,text,uuid,uuid,uuid,boolean,text,text,text,text,text,text,text,text,jsonb)','EXECUTE') THEN
     RAISE EXCEPTION 'FALLO: permisos incorrectos en RPCs de idempotencia del checkout.';
   END IF;
 
