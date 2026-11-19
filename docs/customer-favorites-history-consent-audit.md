@@ -38,3 +38,17 @@ La modificación debe hacerse en la rama y en los borradores SQL, respetando el 
 - Verificación de RLS/grants/RPC instaladas: pendiente; los scripts revisados son borradores.
 - Pruebas reales de checkout, historial y favoritos: pendientes.
 - Cambios en Supabase activo o despliegues: ninguno.
+
+
+## Implementación en la rama (19 nov 2026)
+
+Se implementó el flujo de consentimiento en la rama `correcciones-funcionales`:
+
+- El checkbox del checkout identifica explícitamente la versión `privacy-2026-11-19-v1`.
+- `app.js` exige aceptación y envía el indicador y la versión; ambos quedan incluidos en la huella local del intento.
+- La Edge Function rechaza solicitudes sin aceptación explícita o con una versión distinta de la admitida por el servidor.
+- `checkout-idempotency-draft.sql` agrega a `orders` los campos `privacy_consent`, `privacy_consent_version` y `privacy_consent_at`. La restricción permite valores nulos solo para pedidos históricos; los nuevos pedidos deben guardar aceptación, versión y fecha.
+- La RPC de creación vuelve a validar la aceptación y la versión, y genera la fecha con `transaction_timestamp()`. Los tres RPC de idempotencia incluyen la aceptación y versión en el hash del intento.
+- `verify-integration-package.sql` comprueba las columnas, la restricción, la firma/permisos de la RPC y la generación de fecha en el servidor.
+
+**Estado:** cambios guardados en la rama; falta revisar el diff completo, validar las firmas SQL y probar en staging. No se aplicó ninguna migración ni se desplegó la Edge Function. La versión debe actualizarse coordinadamente en la política pública, el HTML, la Edge Function y el borrador SQL cuando se publique una nueva versión del aviso.
