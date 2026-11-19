@@ -301,3 +301,18 @@ La revisión encontró que el formulario pedía una nota al reactivar una tienda
 - El formulario y la Edge Function también exigen el motivo para cualquier cambio de estado.
 
 El verificador SQL ahora comprueba que la RPC contenga la persistencia de `decision_reason`. No se aplicó el borrador a Supabase activo.
+
+
+## Revisión de cambios de rol y estados concurrentes — 19 nov 2026
+
+Se comprobó la lógica de las RPC transaccionales de asignación, cambio de rol, suspensión y reactivación:
+
+- Las operaciones de membresía usan el bloqueo de la fila del negocio como punto de serialización y después bloquean la membresía concreta. Así, dos cambios simultáneos dentro del mismo negocio no pueden calcular a la vez que ambos son el último administrador.
+- El cambio de rol de administrador a empleado cuenta los demás administradores activos y rechaza retirar el último rol administrativo.
+- La suspensión aplica la misma protección al último administrador activo.
+- La reactivación exige que el negocio esté activo y que el perfil no tenga bloqueo global.
+- Los cambios efectivos escriben su registro de auditoría dentro de la misma transacción; los estados ya aplicados devuelven una respuesta idempotente sin crear un evento duplicado.
+- Se añadieron comprobaciones al verificador para exigir bloqueos, protección del último administrador y auditoría en las tres RPC.
+- En la interfaz, cambiar el negocio ahora limpia la cuenta y los campos de rol/cargo anteriores. Mientras se carga la lista, se deshabilita el envío del formulario. Antes de enviar, se comprueba que la membresía seleccionada pertenezca al negocio elegido. Después de guardar, se limpian los campos para evitar mostrar una selección antigua.
+
+Estas comprobaciones son de código y no equivalen a una prueba de concurrencia real. Aún faltan Deno check, ejecución del verificador en una base de staging y pruebas simultáneas que intenten degradar o suspender al último administrador. No se aplicaron migraciones ni se modificó la base activa.
