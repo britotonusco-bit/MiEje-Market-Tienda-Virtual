@@ -316,3 +316,16 @@ Se comprobó la lógica de las RPC transaccionales de asignación, cambio de rol
 - En la interfaz, cambiar el negocio ahora limpia la cuenta y los campos de rol/cargo anteriores. Mientras se carga la lista, se deshabilita el envío del formulario. Antes de enviar, se comprueba que la membresía seleccionada pertenezca al negocio elegido. Después de guardar, se limpian los campos para evitar mostrar una selección antigua.
 
 Estas comprobaciones son de código y no equivalen a una prueba de concurrencia real. Aún faltan Deno check, ejecución del verificador en una base de staging y pruebas simultáneas que intenten degradar o suspender al último administrador. No se aplicaron migraciones ni se modificó la base activa.
+
+
+## Verificación de triggers en Supabase activo — 19 nov 2026
+
+Se realizó una consulta SQL estrictamente de solo lectura sobre los triggers no internos de `public.business_memberships` y `public.audit_logs` en el proyecto activo.
+
+Resultado:
+
+- En `business_memberships` solo apareció `memberships_set_updated_at`.
+- No apareció el trigger `guard_last_active_business_admin`.
+- No aparecieron triggers append-only en `audit_logs` para impedir UPDATE, DELETE o TRUNCATE.
+
+Esto confirma que las protecciones del borrador de rama no están instaladas en la base activa. El código de rama contiene la lógica de protección y el verificador exige su instalación, pero no se debe considerar protegida la base de producción hasta ejecutar el paquete en staging, validar los resultados y autorizar su aplicación. No se realizó ninguna escritura ni cambio de configuración.
