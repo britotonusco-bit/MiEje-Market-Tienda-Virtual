@@ -188,21 +188,40 @@ BEGIN
       USING ERRCODE = '42501';
   END IF;
 
-  IF EXISTS (
-    SELECT 1 FROM public.business_memberships m
-    WHERE m.business_id = v_business_id AND m.user_id = p_user_id
-  ) THEN
-    RAISE EXCEPTION 'La cuenta ya tiene una membresía en este negocio.'
-      USING ERRCODE = '23505';
-  END IF;
+  SELECT m.* INTO v_membership
+  FROM public.business_memberships m
+  WHERE m.business_id = v_business_id AND m.user_id = p_user_id
+  FOR UPDATE;
 
-  INSERT INTO public.business_memberships (
-    business_id, user_id, role, job_title, status, blocked_reason, created_by
-  ) VALUES (
-    v_business_id, p_user_id, v_invitation.role, v_invitation.job_title,
-    'suspended', 'Invitación pendiente de aceptación', v_invitation.created_by
-  )
-  RETURNING * INTO v_membership;
+  IF FOUND THEN
+    -- Solo se puede reutilizar una membresía suspendida por una invitación
+    -- anterior/revocada/expirada; nunca una suspensión administrativa normal.
+    IF v_membership.status <> 'suspended'
+       OR v_membership.blocked_reason NOT IN (
+         'Invitación pendiente de aceptación',
+         'Invitación revocada'
+       ) THEN
+      RAISE EXCEPTION 'La cuenta ya tiene una membresía que no puede reutilizarse como invitación.'
+        USING ERRCODE = '23505';
+    END IF;
+
+    UPDATE public.business_memberships
+    SET role = v_invitation.role,
+        job_title = v_invitation.job_title,
+        status = 'suspended',
+        blocked_reason = 'Invitación pendiente de aceptación',
+        created_by = v_invitation.created_by
+    WHERE id = v_membership.id
+    RETURNING * INTO v_membership;
+  ELSE
+    INSERT INTO public.business_memberships (
+      business_id, user_id, role, job_title, status, blocked_reason, created_by
+    ) VALUES (
+      v_business_id, p_user_id, v_invitation.role, v_invitation.job_title,
+      'suspended', 'Invitación pendiente de aceptación', v_invitation.created_by
+    )
+    RETURNING * INTO v_membership;
+  END IF;
 
   UPDATE public.business_invitations
   SET user_id = p_user_id, membership_id = v_membership.id, updated_at = pg_catalog.now()
@@ -453,7 +472,16 @@ BEGIN
         RAISE EXCEPTION 'La membresía ya no es una asignación pendiente; no se eliminó.'
           USING ERRCODE = '23514';
       END IF;
-      DELETE FROM public.business_memberships WHERE id = v_membership.id;
+      UPDATE public.business_memberships
+      SET status = 'suspended',
+          blocked_reason = 'Invitación revocada'
+      WHERE id = v_membership.id
+        AND status = 'suspended'
+        AND blocked_reason = 'Invitación pendiente de aceptación';
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'La membresía cambió durante la revocación.'
+          USING ERRCODE = '40001';
+      END IF;
     END IF;
   END IF;
 
