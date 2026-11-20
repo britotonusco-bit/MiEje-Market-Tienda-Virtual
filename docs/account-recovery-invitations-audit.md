@@ -408,3 +408,23 @@ Se corrigió en la rama:
 - El verificador SQL inspecciona las definiciones de las cuatro RPC para exigir estas barreras.
 
 Así, la aceptación es la única vía para activar una invitación pendiente y una invitación revocada no puede recuperarse mediante la acción administrativa genérica de reactivar una membresía.
+
+
+### ACC-10 — Invitación con OTP manual para evitar consumo automático del enlace
+
+La documentación oficial de Supabase advierte que algunos filtros de correo abren automáticamente los enlaces de confirmación. Si el mensaje usa `{{ .ConfirmationURL }}`, ese acceso automático puede consumir el token de un solo uso antes de que la persona llegue a la página. Para evitarlo, el flujo se cambió en la rama:
+
+- La página de aceptación ya no intenta verificar un `token_hash` al cargar.
+- El correo presenta el código OTP `{{ .Token }}` y un botón que abre directamente la página de MiEje.
+- La persona introduce el correo destinatario y el código. El navegador ejecuta `verifyOtp({ email, token, type: 'invite' })` solo cuando la persona pulsa **Verificar correo**.
+- El identificador y token privado de MiEje viajan en el fragmento URL (`#...`), no en la consulta HTTP. La página los conserva en memoria y limpia la barra de direcciones inmediatamente.
+- El cliente Auth usa `detectSessionInUrl: false` para que no intente procesar automáticamente enlaces de Auth.
+- Si la sesión del destinatario ya quedó verificada en ese navegador, puede continuar sin volver a consumir el OTP. Si hay otra cuenta abierta, la página cierra esa sesión local antes de verificar el código.
+
+Se añadió `supabase/templates/invite.html` y se configuró esa plantilla para el entorno local en `supabase/config.toml`.
+
+**Acción manual obligatoria antes de desplegar el nuevo flujo:** en el proyecto Supabase hospedado, abrir Authentication → Email Templates → Invite User y sustituir la plantilla por el contenido de `supabase/templates/invite.html`. Debe utilizar `{{ .Token }}` y `{{ .RedirectTo }}`, y no debe incluir `{{ .ConfirmationURL }}`. También debe estar permitida la URL de aceptación en Authentication → URL Configuration. No se cambió la configuración hospedada desde esta tarea.
+
+Las invitaciones enviadas con la plantilla antigua no contienen el nuevo formato OTP y no se deben considerar compatibles automáticamente. Antes de activar el nuevo código habrá que definir cómo renovar de forma controlada esas invitaciones históricas.
+
+**Pruebas pendientes:** validar en staging el envío de invitación, recepción del código, expiración, OTP incorrecto, OTP ya consumido, sesión de otra cuenta abierta, recarga tras verificar, contraseña guardada con fallo posterior de RPC y revocación concurrente. No se ejecutó el flujo contra Auth real ni se desplegó el código.
