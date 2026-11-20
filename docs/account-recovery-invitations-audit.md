@@ -460,3 +460,27 @@ Se implementó en la rama una reserva temporal para que la revocación no compit
 La reserva serializa la revocación con la operación de aceptación. Si vence antes de finalizar, la activación se detiene; el usuario puede reintentar con el mismo enlace y la membresía permanece suspendida. La ventana de siete minutos supera el límite máximo de ejecución de 400 segundos documentado para Edge Functions hospedadas en planes de pago; también cubre el límite de 150 segundos del plan gratuito.
 
 **Pendiente de validación real:** no se ha ejecutado este SQL en staging, no se ha hecho una prueba de concurrencia real ni se ha desplegado la Edge Function. La comprobación actual es estática y no demuestra que el flujo funcione en Supabase hospedado.
+
+
+### ACC-13 — Renovación de invitaciones para cuentas Auth existentes sin confirmar
+
+Se corrigió el bloqueo de cuentas que ya existen en `auth.users` pero todavía no tienen `email_confirmed_at`, incluyendo cuentas creadas por intentos de invitación anteriores y registros heredados con `invited_at`.
+
+Nuevo comportamiento de `invite_member`:
+
+1. Busca la cuenta existente y confirma que el correo sigue sin verificar.
+2. Respeta las invitaciones pendientes válidas: no crea otra ni envía un duplicado.
+3. Si no hay invitación pendiente, prepara una nueva fila individual con token aleatorio, hash SHA-256 y expiración de 55 minutos.
+4. Vincula esa invitación a la cuenta Auth existente mediante `attach_business_invitation_user`. La membresía se conserva suspendida.
+5. Solicita un nuevo OTP de confirmación con `auth.resend({ type: 'signup' })`; no crea otro usuario Auth ni cambia su contraseña.
+6. El correo utiliza la nueva plantilla `supabase/templates/confirm-signup.html`. La página de aceptación distingue `auth_type=email` para la confirmación renovada y `auth_type=invite` para invitaciones nuevas.
+7. Si el envío falla, `mark_business_invitation_delivery_failed` cierra solo la invitación fallida, conserva la cuenta Auth y mantiene la membresía suspendida para que pueda renovarse de nuevo.
+8. Se aplica una espera de 60 segundos por negocio/correo después de un fallo de entrega, además de los límites de envío de Supabase.
+
+El verificador de integración ahora exige la nueva RPC y comprueba que el fallo de entrega conserve la marca de membresía pendiente y la autorización técnica.
+
+**Límites:** `auth.resend(type='signup')` está documentado por Supabase para reenviar confirmaciones de registro. La compatibilidad concreta con cuentas heredadas creadas mediante invitación debe probarse en staging con usuarios no confirmados reales. Si Auth rechaza el reenvío para un estado heredado particular, la función devuelve error, conserva la cuenta y no activa la membresía. No se crean usuarios duplicados.
+
+**Configuración pendiente en el proyecto hospedado:** copiar `supabase/templates/confirm-signup.html` en Authentication → Email Templates → Confirm signup y permitir la URL de aceptación. La plantilla local de `supabase/config.toml` no modifica automáticamente la configuración hospedada.
+
+No se ha desplegado la Edge Function ni se ha ejecutado el SQL.
