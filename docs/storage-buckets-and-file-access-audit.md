@@ -208,3 +208,18 @@ En PostgreSQL, varias políticas permisivas aplicables se combinan de forma que 
 **Commit:** `a23d42dd923f4e6cb678099150cf3e15453b0d98`.
 
 Este refuerzo es una comprobación preventiva del verificador. No demuestra que el proyecto activo tenga una política adicional vulnerable: las consultas de solo lectura anteriores no mostraron otra policy para el bucket privado. La condición nueva debe ejecutarse en staging después de aplicar el paquete y revisar manualmente cualquier policy que haga fallar el control.
+
+
+## 10. ACC-21 — La lectura de comprobantes no exigía que el objeto fuera el comprobante asociado al gasto
+
+**Hallazgo de revisión estática:** la policy propuesta `business_expense_receipts_admin_read` validaba bucket privado, estructura de ruta, UUID de negocio, UUID de gasto, extensión y rol de administrador. Sin embargo, no comparaba el nombre del objeto con `business_expenses.receipt_path`.
+
+Esto no permitía leer archivos de otros negocios, pero sí dejaba que un administrador autorizado del mismo negocio leyera cualquier objeto que siguiera el patrón de ruta de uno de sus gastos, aunque ese objeto no fuera el comprobante asociado al registro. La asociación exacta reduce la superficie de acceso a archivos huérfanos o no vinculados.
+
+**Corrección en la rama:** la policy SELECT ahora exige `e.receipt_path = name`, además de las condiciones anteriores. La RPC `attach_business_expense_receipt` ya valida la existencia del objeto y asocia la ruta exacta; el verificador integral ahora exige también la condición `receipt_path` en la policy de lectura.
+
+**Commits:**
+- Policy de Storage: `553fb906a1a86faab29fc0c1d4628c7920ee6cf3`
+- Verificador: `54392017238dae227548cdeefd9ee5d39ad1296d`
+
+La corrección afecta únicamente el borrador y el verificador en GitHub. No se creó el bucket, no se aplicó SQL y no se modificó Supabase activo.
