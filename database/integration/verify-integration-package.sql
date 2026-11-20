@@ -2227,6 +2227,7 @@ $verify$;
 DO $verify_invitations$
 DECLARE
   v_role_helper text;
+  v_prepare text;
   v_accept text;
   v_revoke text;
   v_reactivate text;
@@ -2282,6 +2283,9 @@ BEGIN
     RAISE EXCEPTION 'FALLO: has_business_role no excluye membresías pendientes/suspendidas.';
   END IF;
 
+  v_prepare := pg_get_functiondef(
+    'public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz)'::regprocedure
+  );
   v_accept := pg_get_functiondef(
     'public.accept_business_invitation(uuid,uuid,text)'::regprocedure
   );
@@ -2298,7 +2302,8 @@ BEGIN
     'public.suspend_business_membership(uuid,text,uuid)'::regprocedure
   );
 
-  IF position('for update' IN lower(v_accept)) = 0
+  IF position('55 minutes' IN lower(v_prepare)) = 0
+     OR position('for update' IN lower(v_accept)) = 0
      OR position('token_hash' IN lower(v_accept)) = 0
      OR position('blocked_reason' IN lower(v_accept)) = 0
      OR position('p.is_blocked is false' IN lower(v_accept)) = 0
