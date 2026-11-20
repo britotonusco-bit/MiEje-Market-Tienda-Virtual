@@ -765,7 +765,7 @@ Deno.serve(async (req: Request) => {
             job_title: jobTitle,
           },
           requires_email_confirmation: true,
-          message: "Invitación enviada. La membresía permanece bloqueada hasta que la persona verifique el enlace y establezca su contraseña.",
+          message: "Invitación enviada. La membresía permanece bloqueada hasta que la persona verifique el código recibido por correo y establezca su contraseña.",
         });
       }
 
