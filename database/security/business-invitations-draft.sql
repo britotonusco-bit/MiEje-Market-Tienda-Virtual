@@ -348,6 +348,44 @@ BEGIN
 END;
 $function$;
 
+-- Marca fallido un reenvío de confirmación cuando Auth no pudo enviar el correo.
+-- La membresía asociada permanece suspendida y puede reutilizarse en una nueva invitación.
+CREATE OR REPLACE FUNCTION public.mark_business_invitation_delivery_failed(
+  p_invitation_id uuid, p_actor_id uuid, p_failure_code text
+) RETURNS jsonb
+LANGUAGE plpgsql SECURITY INVOKER SET search_path = ''
+AS $function$
+DECLARE
+  v_invitation public.business_invitations%ROWTYPE;
+  v_membership public.business_memberships%ROWTYPE;
+BEGIN
+  PERFORM 1 FROM public.profiles p WHERE p.id = p_actor_id
+    AND p.platform_role = 'platform_owner' AND p.is_blocked IS FALSE FOR SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Técnico no autorizado.' USING ERRCODE = '42501'; END IF;
+  SELECT * INTO v_invitation FROM public.business_invitations WHERE id = p_invitation_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'No se encontró la invitación.' USING ERRCODE = 'P0002'; END IF;
+  IF v_invitation.status <> 'pending' OR v_invitation.user_id IS NULL OR v_invitation.membership_id IS NULL THEN
+    RAISE EXCEPTION 'La invitación no corresponde a un reenvío vinculado pendiente.' USING ERRCODE = '23514';
+  END IF;
+  SELECT * INTO v_membership FROM public.business_memberships
+    WHERE id = v_invitation.membership_id AND business_id = v_invitation.business_id
+      AND user_id = v_invitation.user_id FOR UPDATE;
+  IF NOT FOUND OR v_membership.status <> 'suspended'
+     OR v_membership.blocked_reason IS DISTINCT FROM 'Invitación pendiente de aceptación' THEN
+    RAISE EXCEPTION 'La membresía ya no está pendiente de aceptación.' USING ERRCODE = '23514';
+  END IF;
+  UPDATE public.business_invitations SET status = 'failed', updated_at = pg_catalog.now()
+    WHERE id = v_invitation.id AND status = 'pending';
+  INSERT INTO public.audit_logs (business_id, actor_id, action, entity_type, entity_id, details)
+    VALUES (v_invitation.business_id, p_actor_id, 'business.invitation_delivery_failed',
+      'business_invitation', v_invitation.id::text,
+      pg_catalog.jsonb_build_object('failure_code', pg_catalog.left(coalesce(p_failure_code,'unknown'),80),
+        'membership_id', v_invitation.membership_id));
+  RETURN pg_catalog.jsonb_build_object('ok', true, 'status', 'failed',
+    'membership_preserved', true, 'auth_user_deleted', false);
+END;
+$function$;
+
 -- Solo la Edge Function de aceptación llama esta RPC después de validar el JWT,
 -- el correo confirmado, la identidad y la contraseña mediante Auth Admin.
 -- Reserva la aceptación durante el cambio de contraseña para serializarla con la revocación.
@@ -711,6 +749,7 @@ $function$;
 REVOKE ALL ON FUNCTION public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.attach_business_invitation_user(uuid,uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.mark_business_invitation_failed(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.mark_business_invitation_delivery_failed(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.claim_business_invitation_acceptance(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.release_business_invitation_acceptance(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.accept_business_invitation(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
@@ -720,6 +759,7 @@ REVOKE ALL ON FUNCTION public.revoke_business_invitation(uuid,uuid,text) FROM PU
 GRANT EXECUTE ON FUNCTION public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz) TO service_role;
 GRANT EXECUTE ON FUNCTION public.attach_business_invitation_user(uuid,uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.mark_business_invitation_failed(uuid,uuid,text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.mark_business_invitation_delivery_failed(uuid,uuid,text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.claim_business_invitation_acceptance(uuid,uuid,text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.release_business_invitation_acceptance(uuid,uuid,text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.accept_business_invitation(uuid,uuid,text) TO service_role;
