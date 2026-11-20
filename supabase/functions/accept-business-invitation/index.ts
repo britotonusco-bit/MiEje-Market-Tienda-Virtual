@@ -99,26 +99,70 @@ Deno.serve(async (req: Request) => {
   if (!invitation) return reply(404, { error: "La invitación no existe o ya no está disponible." });
 
   const suppliedHash = await sha256Hex(rawInvitationToken);
-  if (invitation.status !== "pending"
-      || invitation.user_id !== user.id
+  if (invitation.user_id !== user.id
       || invitation.email_normalized !== user.email.toLowerCase()
       || !constantTimeEqual(invitation.token_hash, suppliedHash)) {
-    return reply(403, { error: "La invitación no corresponde a esta cuenta o ya fue utilizada/revocada." });
+    return reply(403, { error: "La invitación no corresponde a esta cuenta." });
   }
 
-  if (Date.parse(invitation.expires_at) <= Date.now()) {
-    const { error: expireError } = await admin.rpc("expire_business_invitation", {
-      p_invitation_id: invitationId,
+  if (invitation.status === "accepted") {
+    return reply(200, {
+      ok: true,
+      invitation_id: invitationId,
+      business_id: invitation.business_id,
+      membership_id: invitation.membership_id,
+      status: "accepted",
     });
-    if (expireError) console.error("Invitation expiry update failed:", expireError);
-    return reply(410, { error: "La invitación venció. Solicita al propietario técnico que genere una nueva." });
+  }
+  if (invitation.status !== "pending") {
+    return reply(403, { error: "La invitación ya no está pendiente o fue revocada." });
   }
 
-  // La contraseña se establece desde el servidor. Si la RPC posterior falla,
-  // la membresía sigue suspendida y el mismo enlace permite reintentar.
+  // Reserva el registro antes de cambiar la contraseña. La RPC serializa este
+  // paso con la revocación y evita cambiar credenciales si la invitación ya fue retirada.
+  const { data: claim, error: claimError } = await admin.rpc("claim_business_invitation_acceptance", {
+    p_invitation_id: invitationId,
+    p_user_id: user.id,
+    p_token_hash: suppliedHash,
+  });
+  if (claimError) {
+    console.error("Invitation acceptance claim failed:", claimError.code || "unknown");
+    if (claimError.code === "55P03") return reply(409, { error: "La invitación está siendo procesada o la reserva venció. Espera un momento e inténtalo otra vez." });
+    if (claimError.code === "42501") return reply(403, { error: "La invitación ya no está disponible para esta cuenta." });
+    if (claimError.code === "23514") return reply(409, { error: "El negocio no está activo y no puede aceptar la invitación." });
+    if (claimError.code === "P0002") return reply(404, { error: "No se encontró la invitación." });
+    return reply(503, { error: "No se pudo reservar la aceptación. Inténtalo de nuevo.", retryable: true });
+  }
+
+  if (claim?.status === "accepted") {
+    return reply(200, {
+      ok: true,
+      invitation_id: invitationId,
+      business_id: invitation.business_id,
+      membership_id: claim.membership_id,
+      status: "accepted",
+    });
+  }
+  if (!claim?.ok || claim.status !== "claimed") {
+    if (claim?.status === "expired") return reply(410, { error: "La invitación venció. Solicita al propietario técnico que genere una nueva." });
+    if (claim?.status === "in_progress") return reply(409, { error: "La aceptación ya está en proceso. Espera un momento antes de volver a intentarlo." });
+    return reply(409, { error: "La invitación cambió de estado. Actualiza la página y vuelve a intentarlo si sigue disponible." });
+  }
+
+  const releaseClaim = async () => {
+    const { error } = await admin.rpc("release_business_invitation_acceptance", {
+      p_invitation_id: invitationId,
+      p_user_id: user.id,
+      p_token_hash: suppliedHash,
+    });
+    if (error) console.error("Invitation acceptance lease release failed:", error.code || "unknown");
+  };
+
+  // Si Auth Admin falla, libera la reserva para que el usuario pueda reintentar.
   const { error: passwordError } = await admin.auth.admin.updateUserById(user.id, { password });
   if (passwordError) {
-    console.error("Invitation password update failed:", passwordError);
+    await releaseClaim();
+    console.error("Invitation password update failed:", passwordError.code || "unknown");
     return reply(400, { error: "No se pudo guardar la contraseña. Verifica los requisitos e inténtalo de nuevo." });
   }
 
@@ -129,7 +173,10 @@ Deno.serve(async (req: Request) => {
   });
 
   if (acceptError) {
-    console.error("Invitation acceptance RPC failed:", acceptError);
+    await releaseClaim();
+    console.error("Invitation acceptance RPC failed:", acceptError.code || "unknown");
+    if (acceptError.code === "42501") return reply(403, { error: "La cuenta o la invitación dejaron de cumplir los requisitos de acceso." });
+    if (acceptError.code === "55P03") return reply(409, { error: "La reserva venció antes de finalizar. Vuelve a intentar con el mismo enlace." });
     return reply(503, {
       error: "La contraseña quedó guardada, pero no se pudo finalizar el acceso al negocio. La membresía continúa bloqueada; vuelve a intentar con el mismo enlace.",
       retryable: true,
@@ -137,6 +184,7 @@ Deno.serve(async (req: Request) => {
   }
 
   if (!accepted?.ok || accepted.status !== "accepted") {
+    await releaseClaim();
     return reply(410, { error: "La invitación venció o dejó de estar disponible. Solicita una nueva invitación." });
   }
 
