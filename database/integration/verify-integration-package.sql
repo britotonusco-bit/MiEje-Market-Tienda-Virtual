@@ -2275,6 +2275,7 @@ BEGIN
 
   IF has_function_privilege('anon','public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz)','EXECUTE')
      OR has_function_privilege('authenticated','public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz)','EXECUTE')
+     OR has_function_privilege('anon','public.mark_business_invitation_delivery_failed(uuid,uuid,text)','EXECUTE')
      OR has_function_privilege('authenticated','public.mark_business_invitation_delivery_failed(uuid,uuid,text)','EXECUTE')
      OR has_function_privilege('authenticated','public.claim_business_invitation_acceptance(uuid,uuid,text)','EXECUTE')
      OR has_function_privilege('authenticated','public.release_business_invitation_acceptance(uuid,uuid,text)','EXECUTE')
