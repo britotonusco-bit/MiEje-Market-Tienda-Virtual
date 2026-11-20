@@ -38,6 +38,14 @@
 - La autorización debe seguir verificándose en cada RPC, Edge Function y política RLS. La revalidación del navegador es una defensa adicional, no un control de acceso suficiente.
 - La recuperación de contraseña no modifica `profiles.is_blocked`, membresías ni estado del negocio; por tanto, no debe restituir permisos.
 
+## Bloqueador de seguridad conocido en la base activa
+
+En la auditoría previa de la base Supabase activa se detectaron políticas RLS que incluían un bypass para `platform_owner` en varias tablas sensibles y permisos directos sobre columnas personales/financieras. Los borradores de la rama intentan retirar esos accesos amplios, pero no se han aplicado.
+
+Esto significa que el MFA de la interfaz y de la Edge Function técnica no basta por sí solo para proteger las consultas directas al Data API si la base activa conserva esas políticas. Un usuario autenticado como propietario podría intentar consultar directamente tablas desde un cliente propio, sin pasar por el formulario del panel.
+
+**Bloqueador:** no considerar protegidos los datos sensibles por el solo hecho de exigir AAL2 en la pantalla técnica. Antes de cerrar la auditoría, hay que aplicar el conjunto revisado de políticas/grants en un proyecto de staging, probar accesos directos con AAL1/AAL2 y cada rol, y solo después planificar cualquier cambio en producción con autorización expresa. Esta revisión no ejecutó SQL ni modificó la base activa.
+
 ## Riesgo residual que requiere decisión técnica
 
 El cierre global de Auth revoca los refresh tokens, pero los access tokens JWT ya emitidos pueden seguir siendo aceptados hasta su expiración. La comprobación de `getUser(token)` valida el token, pero por sí sola no garantiza revocación instantánea de un JWT que todavía no ha vencido.
