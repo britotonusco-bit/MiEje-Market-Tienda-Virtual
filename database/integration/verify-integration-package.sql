@@ -1059,6 +1059,48 @@ BEGIN
     RAISE EXCEPTION 'FALLO: anon tiene una política directa sobre hojas de vida o comprobantes financieros.';
   END IF;
 
+  -- Ninguna política adicional de Storage puede abrir el bucket privado
+  -- por una condición amplia. Toda policy de cliente distinta de la policy
+  -- exacta de CV debe limitar explícitamente el bucket y no incluir el bucket
+  -- privado de postulaciones. Se revisan SELECT/DELETE por USING e
+  -- INSERT/UPDATE por WITH CHECK.
+  IF EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname='storage'
+      AND tablename='objects'
+      AND roles && ARRAY['public','anon','authenticated']::name[]
+      AND policyname <> 'job_application_documents_business_admin_read'
+      AND (
+        (cmd IN ('SELECT','DELETE') AND (
+          coalesce(qual,'') NOT ILIKE '%bucket_id%'
+          OR coalesce(qual,'') ILIKE '%job-applications-private%'
+        ))
+        OR (cmd = 'INSERT' AND (
+          coalesce(with_check,'') NOT ILIKE '%bucket_id%'
+          OR coalesce(with_check,'') ILIKE '%job-applications-private%'
+        ))
+        OR (cmd = 'UPDATE' AND (
+          coalesce(qual,'') NOT ILIKE '%bucket_id%'
+          OR coalesce(qual,'') ILIKE '%job-applications-private%'
+          OR coalesce(with_check,'') NOT ILIKE '%bucket_id%'
+          OR coalesce(with_check,'') ILIKE '%job-applications-private%'
+        ))
+      )
+  ) THEN
+    RAISE EXCEPTION 'FALLO: existe una política adicional de Storage que podría ampliar el acceso al bucket privado de postulaciones; revisar todas las políticas de storage.objects.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='storage'
+      AND tablename='objects'
+      AND policyname='job_application_documents_business_admin_read'
+      AND roles <> ARRAY['authenticated']::name[]
+  ) THEN
+    RAISE EXCEPTION 'FALLO: la política de hojas de vida debe estar asignada exclusivamente a authenticated.';
+  END IF;
+
 
   IF to_regclass('public.job_applications') IS NULL
      OR to_regclass('public.job_application_upload_sessions') IS NULL
