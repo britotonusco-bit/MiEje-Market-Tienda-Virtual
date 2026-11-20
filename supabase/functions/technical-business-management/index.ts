@@ -539,6 +539,7 @@ Deno.serve(async (req: Request) => {
       let query = admin.from("business_memberships")
         .select("id,business_id,user_id,role,status,job_title,blocked_reason,created_at,profiles(display_name,is_blocked)")
         .eq("business_id", businessId)
+        .not("blocked_reason", "in", '("Invitación pendiente de aceptación","Invitación revocada")')
         .order("created_at", { ascending: false }).order("id", { ascending: false })
         .limit(limit);
       if (cursor.createdAt && cursor.id) query = query.or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`);
