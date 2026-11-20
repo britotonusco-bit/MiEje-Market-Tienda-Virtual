@@ -93,3 +93,27 @@ La ventana de revalidación de 30 segundos solo afecta a la interfaz del panel. 
 6. Registrar evidencias y resultados antes de considerar terminada la auditoría.
 
 **No considerar esta auditoría como certificación de seguridad ni como prueba funcional completa hasta superar la matriz de staging.**
+
+## Hallazgo ACC-14 — aprovisionamiento inicial del segundo factor
+
+**Estado: pendiente de decisión operativa y prueba en staging.**
+
+La revisión de `login.js` detecta que, cuando el perfil es `platform_owner` y no existe un factor TOTP verificado, el propio flujo de inicio de sesión permite registrar uno nuevo en esa misma sesión autenticada con correo y contraseña. Después exige verificar el código y alcanzar AAL2 antes de abrir el panel.
+
+Esto protege las operaciones técnicas posteriores frente a sesiones que no completaron AAL2, pero **no demuestra que el segundo factor inicial pertenezca previamente al propietario legítimo**. Si alguien obtiene la contraseña antes del primer enrolamiento, podría intentar registrar su propio autenticador. La misma cuestión aplica a un proceso de recuperación que permita volver a enrolar MFA sin una verificación independiente.
+
+Medidas necesarias antes de considerar cerrado este punto:
+
+1. Definir un procedimiento de alta inicial controlado para el propietario: enrolamiento presencial/controlado o una validación independiente aprobada por el responsable de la plataforma.
+2. Definir recuperación de MFA con verificación fuera de la sesión que se está recuperando; no permitir que conocer solo la contraseña baste para reemplazar un factor ya verificado.
+3. Probar en staging el primer enrolamiento, interrupción del proceso, factor pendiente, factor verificado, pérdida del dispositivo y recuperación.
+4. Verificar que un factor TOTP verificado existente nunca se elimina ni reemplaza automáticamente por el flujo normal de login.
+5. Registrar auditoría de enrolamiento, eliminación y recuperación, sin guardar secretos TOTP ni códigos.
+
+**No se modifica el código en este punto** hasta acordar el procedimiento de aprovisionamiento y recuperación. Un cambio improvisado podría bloquear al propietario o debilitar la verificación.
+
+## Revisión adicional de revocación de sesiones
+
+La función `resolve-my-access` valida el JWT con `auth.getUser(token)` y comprueba el bloqueo del perfil y las membresías activas. La función técnica también comprueba AAL2. Sin embargo, esta revisión no encuentra una comprobación de `session_id` contra el estado actual de las sesiones de Auth en cada operación sensible.
+
+Por tanto, el cierre global, el bloqueo de una cuenta o la suspensión de una membresía no deben describirse como revocación instantánea de todos los JWT ya emitidos. El control de revocación inmediata sigue pendiente de diseñarse y probarse en staging, considerando permisos sobre `auth.sessions`, coste y compatibilidad. Mientras tanto, las operaciones críticas deben seguir comprobando en servidor el estado actual del perfil, negocio y membresía; la revalidación del navegador cada 30 segundos es solo una medida de interfaz.
