@@ -56,6 +56,12 @@ BEGIN
     RAISE EXCEPTION 'FALLO: anon no debe ejecutar el helper privado de propiedad de pedidos.';
   END IF;
 
+  IF position('p.is_blocked = false' IN lower(pg_get_functiondef(
+       'private.customer_owns_order(uuid)'::regprocedure
+     ))) = 0 THEN
+    RAISE EXCEPTION 'FALLO: customer_owns_order debe rechazar perfiles bloqueados globalmente.';
+  END IF;
+
   IF NOT has_function_privilege('authenticated', 'public.mark_order_payment_received(uuid,text,text,text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'FALLO: falta EXECUTE del RPC de confirmación de pago.';
   END IF;
