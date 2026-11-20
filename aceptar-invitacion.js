@@ -9,6 +9,7 @@
   let ready = false;
   let invitationId = '';
   let invitationToken = '';
+  let authOtpType = 'invite';
 
   const show = (text, kind = '') => {
     status.textContent = text;
@@ -33,12 +34,14 @@
       const fragment = new URLSearchParams(url.hash.startsWith('#') ? url.hash.slice(1) : url.hash);
       invitationId = fragment.get('invitation_id') || '';
       invitationToken = fragment.get('invitation_token') || '';
+      authOtpType = fragment.get('auth_type') || 'invite';
 
       // El secreto vive solo en memoria; se quita de la barra antes de iniciar Auth.
       window.history.replaceState({}, document.title, url.pathname);
 
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invitationId)
-          || !/^[A-Za-z0-9_-]{43}$/.test(invitationToken)) {
+          || !/^[A-Za-z0-9_-]{43}$/.test(invitationToken)
+          || !['invite', 'email'].includes(authOtpType)) {
         throw new Error('Este enlace no contiene una invitación individual válida de MiEje Market. Solicita al propietario técnico que genere una nueva.');
       }
 
@@ -95,7 +98,7 @@
       const { data, error } = await client.auth.verifyOtp({
         email,
         token,
-        type: 'invite',
+        type: authOtpType,
       });
       if (error) throw error;
 
