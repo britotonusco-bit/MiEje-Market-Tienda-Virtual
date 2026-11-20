@@ -443,12 +443,20 @@ La expiración de la tabla de invitaciones se limita a 55 minutos. La plantilla 
 
 
 
-### ACC-12 — Concurrencia entre cambio de contraseña y revocación: pendiente
 
-Se evaluó reservar temporalmente la invitación antes de llamar a Auth Admin para evitar que una revocación compita con el cambio de contraseña. La propuesta requería cambios coordinados en el esquema, RPC, Edge Function y verificador.
+### ACC-12 — Reserva temporal entre aceptación y revocación
 
-Durante la revisión estática se detectó que el borrador SQL suplementario no quedó íntegro. Se retiraron esos cambios incompletos y se restauró `business-invitations-draft.sql` a su versión válida anterior. La Edge Function y el verificador también se restauraron a la versión coherente sin reserva.
+Se implementó en la rama una reserva temporal para que la revocación no compita con el cambio de contraseña de Auth Admin:
 
-**Estado correcto:** no existe todavía una reserva temporal de aceptación. La Edge Function verifica la invitación, cambia la contraseña mediante Auth Admin y después llama a la RPC de aceptación. Si una revocación ocurre justo entre esos pasos, la activación puede fallar después de que la contraseña ya haya cambiado. La membresía seguirá sin acceso, pero el cambio de contraseña podría haberse producido.
+- La tabla `business_invitations` incorpora `acceptance_lease_until`.
+- `claim_business_invitation_acceptance` bloquea negocio e invitación, comprueba identidad, token, vencimiento, perfil y membresía pendiente, y reserva el proceso por dos minutos.
+- La Edge Function reclama la reserva antes de cambiar la contraseña.
+- `accept_business_invitation` exige que la reserva siga vigente y la elimina al activar la membresía.
+- `release_business_invitation_acceptance` libera la reserva si falla el cambio de contraseña o la RPC final. Si el proceso se interrumpe, la reserva caduca automáticamente.
+- `revoke_business_invitation`, `expire_business_invitation` y la renovación de invitaciones respetan la reserva activa.
+- La Edge Function responde de forma idempotente si una solicitud repetida encuentra la invitación ya aceptada.
+- El verificador SQL exige las nuevas RPC, sus permisos y las comprobaciones de bloqueo/reserva.
 
-Este caso queda como riesgo conocido y debe resolverse con un diseño transaccional revisado y pruebas de concurrencia antes de desplegar. No se debe afirmar que aceptación y revocación ya están serializadas.
+La reserva serializa la revocación con la operación de aceptación. Si vence antes de finalizar, la activación se detiene; el usuario puede reintentar con el mismo enlace y la membresía permanece suspendida.
+
+**Pendiente de validación real:** no se ha ejecutado este SQL en staging, no se ha hecho una prueba de concurrencia real ni se ha desplegado la Edge Function. La comprobación actual es estática y no demuestra que el flujo funcione en Supabase hospedado.
