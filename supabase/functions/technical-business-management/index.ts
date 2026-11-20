@@ -722,9 +722,11 @@ Deno.serve(async (req: Request) => {
         redirectUrl.hash = new URLSearchParams({
           invitation_id: invitationId, invitation_token: rawInvitationToken, auth_type: "email",
         }).toString();
-        const { error: resendError } = await userClient.auth.resend("signup" as any, {
-          email, options: { emailRedirectTo: redirectUrl.toString() },
-        } as any);
+        const { error: resendError } = await userClient.auth.resend({
+          type: "signup",
+          email,
+          options: { emailRedirectTo: redirectUrl.toString() },
+        });
         if (resendError) {
           const failureCode = textValue((resendError as any)?.code, 80) || "signup_confirmation_resend_failed";
           const { error: failedError } = await admin.rpc("mark_business_invitation_delivery_failed", {
