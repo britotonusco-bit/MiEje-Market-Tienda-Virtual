@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="es">
+  <body style="margin:0;padding:32px 16px;background:#f4f6f8;font-family:Arial,sans-serif;color:#172033">
+    <main style="max-width:560px;margin:0 auto;padding:32px;background:#ffffff;border-radius:14px">
+      <h1 style="margin-top:0;color:#172033">Invitación a MiEje Market</h1>
+      <p>Hola,</p>
+      <p>Te han invitado a formar parte de un negocio en MiEje Market. Para confirmar que tienes acceso a este correo y crear tu contraseña, sigue estos pasos:</p>
+      <ol>
+        <li>Abre el botón de abajo para ir a la página segura de aceptación.</li>
+        <li>Escribe el código de un solo uso que aparece en este mensaje.</li>
+        <li>Después de verificarlo, crea tu contraseña personal.</li>
+      </ol>
+      <p style="margin:28px 0">
+        <a href="{{ .RedirectTo }}" style="display:inline-block;padding:13px 20px;border-radius:8px;background:#1769aa;color:#ffffff;text-decoration:none;font-weight:bold">Abrir invitación</a>
+      </p>
+      <p style="padding:16px;background:#eef3f8;border-radius:8px">
+        <strong>Tu código de verificación:</strong><br>
+        <span style="display:block;margin-top:8px;font-size:28px;letter-spacing:6px;font-weight:bold">{{ .Token }}</span>
+      </p>
+      <p>Este código es de un solo uso. No lo compartas con otras personas. Si no esperabas esta invitación, ignora este mensaje y comunícate con quien la envió.</p>
+      <p style="font-size:12px;color:#64748b">MiEje Market · Acceso seguro a negocios</p>
+    </main>
+  </body>
+</html>
