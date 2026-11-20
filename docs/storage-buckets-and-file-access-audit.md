@@ -223,3 +223,16 @@ Esto no permitía leer archivos de otros negocios, pero sí dejaba que un admini
 - Verificador: `54392017238dae227548cdeefd9ee5d39ad1296d`
 
 La corrección afecta únicamente el borrador y el verificador en GitHub. No se creó el bucket, no se aplicó SQL y no se modificó Supabase activo.
+
+
+## 11. ACC-22 — La limpieza de archivos temporales no tiene un programador configurado en el repositorio
+
+**Hallazgo:** existe la Edge Function `cleanup-job-application-data` y el borrador SQL de limpieza de sesiones vencidas, pero la rama no contiene un workflow programado ni una configuración de `pg_cron` que demuestre que la función se ejecutará periódicamente. En el proyecto activo ya se había observado que `pg_cron` no estaba instalado y no se había acreditado otro programador.
+
+La función no se ejecuta por existir en el repositorio. Sin un programador privado que la invoque con `JOB_APPLICATION_CLEANUP_SECRET`, las sesiones vencidas y los archivos temporales pueden permanecer almacenados.
+
+**Estado y decisión:** no se creó un cron ni un workflow improvisado. Antes de elegirlo hay que definir dónde se ejecutará el programador, cómo almacenará el secreto, la frecuencia, las alertas de fallos y el procedimiento de reintento. El programador no debe exponer el secreto en el navegador ni en un repositorio.
+
+**Pruebas pendientes:** invocación autorizada y no autorizada, ejecución repetida, lotes con más de 100 sesiones, error de Storage, reintento, preservación de CV asociados y evidencia de que los archivos temporales no se eliminan antes de expirar sus tokens.
+
+Este hallazgo es operativo y de retención; no significa que los CV asociados a postulaciones se estén borrando. La limpieza actual está diseñada para conservar los archivos vinculados a postulaciones y retirar únicamente objetos de sesiones vencidas sin postulación.
