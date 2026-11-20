@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS public.business_invitations (
   created_by uuid NOT NULL REFERENCES public.profiles(id) ON DELETE RESTRICT,
   created_at timestamptz NOT NULL DEFAULT now(),
   expires_at timestamptz NOT NULL,
+  acceptance_lease_until timestamptz NULL,
   accepted_at timestamptz NULL,
   revoked_at timestamptz NULL,
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -39,6 +40,8 @@ CREATE TABLE IF NOT EXISTS public.business_invitations (
     OR (status IN ('pending','expired','failed') AND accepted_at IS NULL AND revoked_at IS NULL)
   )
 );
+
+ALTER TABLE public.business_invitations ADD COLUMN IF NOT EXISTS acceptance_lease_until timestamptz NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS business_invitations_one_pending_email_idx
   ON public.business_invitations (business_id, email_normalized)
@@ -125,6 +128,7 @@ BEGIN
       AND email_normalized = v_email
       AND status = 'pending'
       AND expires_at <= pg_catalog.now()
+      AND (acceptance_lease_until IS NULL OR acceptance_lease_until <= pg_catalog.now())
     RETURNING id
   LOOP
     INSERT INTO public.audit_logs (
@@ -346,6 +350,86 @@ $function$;
 
 -- Solo la Edge Function de aceptación llama esta RPC después de validar el JWT,
 -- el correo confirmado, la identidad y la contraseña mediante Auth Admin.
+-- Reserva la aceptación durante el cambio de contraseña para serializarla con la revocación.
+CREATE OR REPLACE FUNCTION public.claim_business_invitation_acceptance(
+  p_invitation_id uuid, p_user_id uuid, p_token_hash text
+) RETURNS jsonb
+LANGUAGE plpgsql SECURITY INVOKER SET search_path = ''
+AS $function$
+DECLARE
+  v_business_id uuid;
+  v_business_status text;
+  v_invitation public.business_invitations%ROWTYPE;
+  v_membership public.business_memberships%ROWTYPE;
+BEGIN
+  IF p_invitation_id IS NULL OR p_user_id IS NULL OR p_token_hash IS NULL
+     OR p_token_hash !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'Datos de aceptación no válidos.' USING ERRCODE = '22023';
+  END IF;
+  SELECT i.business_id INTO v_business_id FROM public.business_invitations i WHERE i.id = p_invitation_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Invitación no encontrada.' USING ERRCODE = 'P0002'; END IF;
+  SELECT b.status INTO v_business_status FROM public.businesses b WHERE b.id = v_business_id FOR UPDATE;
+  IF NOT FOUND OR v_business_status <> 'active' THEN RAISE EXCEPTION 'El negocio no está activo.' USING ERRCODE = '23514'; END IF;
+  SELECT i.* INTO v_invitation FROM public.business_invitations i
+  WHERE i.id = p_invitation_id AND i.business_id = v_business_id FOR UPDATE;
+  IF NOT FOUND OR v_invitation.user_id IS DISTINCT FROM p_user_id
+     OR v_invitation.token_hash IS DISTINCT FROM p_token_hash THEN
+    RAISE EXCEPTION 'La invitación no corresponde a esta cuenta.' USING ERRCODE = '42501';
+  END IF;
+  IF v_invitation.status = 'accepted' THEN
+    RETURN pg_catalog.jsonb_build_object('ok', true, 'status', 'accepted', 'membership_id', v_invitation.membership_id);
+  END IF;
+  IF v_invitation.status <> 'pending' THEN RAISE EXCEPTION 'La invitación ya no está pendiente.' USING ERRCODE = '42501'; END IF;
+  IF v_invitation.expires_at <= pg_catalog.now()
+     AND (v_invitation.acceptance_lease_until IS NULL OR v_invitation.acceptance_lease_until <= pg_catalog.now()) THEN
+    UPDATE public.business_invitations SET status = 'expired', updated_at = pg_catalog.now() WHERE id = v_invitation.id;
+    INSERT INTO public.audit_logs (business_id, actor_id, action, entity_type, entity_id, details)
+    VALUES (v_business_id, p_user_id, 'business.invitation_expired', 'business_invitation', v_invitation.id::text, '{}'::jsonb);
+    RETURN pg_catalog.jsonb_build_object('ok', false, 'status', 'expired');
+  END IF;
+  IF v_invitation.acceptance_lease_until > pg_catalog.now() THEN
+    RETURN pg_catalog.jsonb_build_object('ok', false, 'status', 'in_progress');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = p_user_id AND p.is_blocked IS FALSE) THEN
+    RAISE EXCEPTION 'La cuenta está bloqueada o ya no tiene un perfil activo.' USING ERRCODE = '42501';
+  END IF;
+  SELECT m.* INTO v_membership FROM public.business_memberships m
+  WHERE m.id = v_invitation.membership_id AND m.business_id = v_business_id AND m.user_id = p_user_id FOR UPDATE;
+  IF NOT FOUND OR v_membership.status <> 'suspended'
+     OR v_membership.blocked_reason IS DISTINCT FROM 'Invitación pendiente de aceptación' THEN
+    RAISE EXCEPTION 'La asignación pendiente fue modificada o revocada.' USING ERRCODE = '42501';
+  END IF;
+  UPDATE public.business_invitations SET acceptance_lease_until = pg_catalog.now() + interval '2 minutes',
+    updated_at = pg_catalog.now() WHERE id = v_invitation.id AND status = 'pending';
+  RETURN pg_catalog.jsonb_build_object('ok', true, 'status', 'claimed', 'lease_until', pg_catalog.now() + interval '2 minutes');
+END;
+$function$;
+
+-- Libera la reserva ante errores; si el proceso cae, vence automáticamente.
+CREATE OR REPLACE FUNCTION public.release_business_invitation_acceptance(
+  p_invitation_id uuid, p_user_id uuid, p_token_hash text
+) RETURNS jsonb
+LANGUAGE plpgsql SECURITY INVOKER SET search_path = ''
+AS $function$
+DECLARE
+  v_business_id uuid;
+  v_invitation public.business_invitations%ROWTYPE;
+BEGIN
+  SELECT i.business_id INTO v_business_id FROM public.business_invitations i WHERE i.id = p_invitation_id;
+  IF NOT FOUND THEN RETURN pg_catalog.jsonb_build_object('ok', true, 'status', 'not_found'); END IF;
+  PERFORM 1 FROM public.businesses b WHERE b.id = v_business_id FOR UPDATE;
+  SELECT i.* INTO v_invitation FROM public.business_invitations i
+  WHERE i.id = p_invitation_id AND i.business_id = v_business_id FOR UPDATE;
+  IF NOT FOUND OR v_invitation.user_id IS DISTINCT FROM p_user_id
+     OR v_invitation.token_hash IS DISTINCT FROM p_token_hash THEN
+    RETURN pg_catalog.jsonb_build_object('ok', true, 'status', 'unchanged');
+  END IF;
+  IF v_invitation.status = 'pending' AND v_invitation.acceptance_lease_until > pg_catalog.now() THEN
+    UPDATE public.business_invitations SET acceptance_lease_until = NULL, updated_at = pg_catalog.now() WHERE id = v_invitation.id;
+  END IF;
+  RETURN pg_catalog.jsonb_build_object('ok', true, 'status', v_invitation.status);
+END;
+$function$;
 CREATE OR REPLACE FUNCTION public.accept_business_invitation(
   p_invitation_id uuid,
   p_user_id uuid,
@@ -395,25 +479,18 @@ BEGIN
       USING ERRCODE = '42501';
   END IF;
 
+  IF v_invitation.acceptance_lease_until IS NULL
+     OR v_invitation.acceptance_lease_until <= pg_catalog.now() THEN
+    RAISE EXCEPTION 'La reserva de aceptación venció; vuelve a intentar.'
+      USING ERRCODE = '55P03';
+  END IF;
+
   IF NOT EXISTS (
     SELECT 1 FROM public.profiles p
     WHERE p.id = p_user_id AND p.is_blocked IS FALSE
   ) THEN
     RAISE EXCEPTION 'La cuenta está bloqueada o ya no tiene un perfil activo.'
       USING ERRCODE = '42501';
-  END IF;
-
-  IF v_invitation.expires_at <= pg_catalog.now() THEN
-    UPDATE public.business_invitations
-    SET status = 'expired', updated_at = pg_catalog.now()
-    WHERE id = v_invitation.id;
-    INSERT INTO public.audit_logs (
-      business_id, actor_id, action, entity_type, entity_id, details
-    ) VALUES (
-      v_business_id, p_user_id, 'business.invitation_expired',
-      'business_invitation', v_invitation.id::text, '{}'::jsonb
-    );
-    RETURN pg_catalog.jsonb_build_object('ok', false, 'status', 'expired');
   END IF;
 
   SELECT m.* INTO v_membership
@@ -441,7 +518,8 @@ BEGIN
   END IF;
 
   UPDATE public.business_invitations
-  SET status = 'accepted', accepted_at = pg_catalog.now(), updated_at = pg_catalog.now()
+  SET status = 'accepted', accepted_at = pg_catalog.now(), acceptance_lease_until = NULL,
+      updated_at = pg_catalog.now()
   WHERE id = v_invitation.id;
 
   INSERT INTO public.audit_logs (
@@ -495,7 +573,8 @@ BEGIN
   END IF;
 
   IF v_invitation.status = 'pending'
-     AND v_invitation.expires_at <= pg_catalog.now() THEN
+     AND v_invitation.expires_at <= pg_catalog.now()
+     AND (v_invitation.acceptance_lease_until IS NULL OR v_invitation.acceptance_lease_until <= pg_catalog.now()) THEN
     UPDATE public.business_invitations
     SET status = 'expired', updated_at = pg_catalog.now()
     WHERE id = v_invitation.id;
@@ -574,6 +653,11 @@ BEGIN
       USING ERRCODE = '23514';
   END IF;
 
+  IF v_invitation.acceptance_lease_until > pg_catalog.now() THEN
+    RAISE EXCEPTION 'La invitación se está aceptando; espera a que termine el proceso antes de revocar.'
+      USING ERRCODE = '55P03';
+  END IF;
+
   IF v_invitation.membership_id IS NOT NULL THEN
     SELECT m.* INTO v_membership
     FROM public.business_memberships m
@@ -627,6 +711,8 @@ $function$;
 REVOKE ALL ON FUNCTION public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.attach_business_invitation_user(uuid,uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.mark_business_invitation_failed(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.claim_business_invitation_acceptance(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.release_business_invitation_acceptance(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.accept_business_invitation(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.expire_business_invitation(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.revoke_business_invitation(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
@@ -634,6 +720,8 @@ REVOKE ALL ON FUNCTION public.revoke_business_invitation(uuid,uuid,text) FROM PU
 GRANT EXECUTE ON FUNCTION public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz) TO service_role;
 GRANT EXECUTE ON FUNCTION public.attach_business_invitation_user(uuid,uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.mark_business_invitation_failed(uuid,uuid,text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.claim_business_invitation_acceptance(uuid,uuid,text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.release_business_invitation_acceptance(uuid,uuid,text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.accept_business_invitation(uuid,uuid,text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.expire_business_invitation(uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.revoke_business_invitation(uuid,uuid,text) TO service_role;
