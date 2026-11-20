@@ -399,9 +399,9 @@ BEGIN
      OR v_membership.blocked_reason IS DISTINCT FROM 'Invitación pendiente de aceptación' THEN
     RAISE EXCEPTION 'La asignación pendiente fue modificada o revocada.' USING ERRCODE = '42501';
   END IF;
-  UPDATE public.business_invitations SET acceptance_lease_until = pg_catalog.now() + interval '5 minutes',
+  UPDATE public.business_invitations SET acceptance_lease_until = pg_catalog.now() + interval '7 minutes',
     updated_at = pg_catalog.now() WHERE id = v_invitation.id AND status = 'pending';
-  RETURN pg_catalog.jsonb_build_object('ok', true, 'status', 'claimed', 'lease_until', pg_catalog.now() + interval '5 minutes');
+  RETURN pg_catalog.jsonb_build_object('ok', true, 'status', 'claimed', 'lease_until', pg_catalog.now() + interval '7 minutes');
 END;
 $function$;
 
