@@ -1,3 +1,9 @@
+# Plantilla de confirmación de cuenta para renovar OTP signup de usuarios Auth existentes.
+# La página recibe el OTP manualmente y lo verifica como type=email.
+[auth.email.template.confirmation]
+subject = "Confirma tu correo para MiEje Market"
+content_path = "./supabase/templates/confirm-signup.html"
+
 # Plantilla de invitación local: OTP manual para evitar que los escáneres de correo
 # consuman el enlace de confirmación antes de que el destinatario lo abra.
 [auth.email.template.invite]
