@@ -219,7 +219,21 @@
   }
 
   async function signOut() {
-    try { await db.auth.signOut(); } finally { window.location.replace('login.html'); }
+    try {
+      // El cierre normal del panel solicita revocar los refresh tokens de
+      // todas las sesiones de la cuenta; la expiración de JWT ya emitidos
+      // sigue dependiendo de su vencimiento y de la autorización en servidor.
+      const { error } = await db.auth.signOut({ scope: 'global' });
+      if (error) {
+        console.warn('No se confirmó el cierre global de sesiones; se cerrará al menos esta sesión.');
+        await db.auth.signOut({ scope: 'local' });
+      }
+    } catch (error) {
+      console.warn('No se pudo confirmar el cierre global; se intentará cerrar la sesión local.', error);
+      try { await db.auth.signOut({ scope: 'local' }); } catch (_) {}
+    } finally {
+      window.location.replace('login.html');
+    }
   }
 
   // Revalida el acceso en servidor mientras el panel permanece abierto.
