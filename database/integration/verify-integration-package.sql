@@ -2230,6 +2230,8 @@ DECLARE
   v_accept text;
   v_revoke text;
   v_reactivate text;
+  v_update_membership text;
+  v_suspend_membership text;
 BEGIN
   IF to_regclass('public.business_invitations') IS NULL THEN
     RAISE EXCEPTION 'FALLO: falta public.business_invitations.';
@@ -2289,6 +2291,12 @@ BEGIN
   v_reactivate := pg_get_functiondef(
     'public.reactivate_business_membership(uuid,text,uuid)'::regprocedure
   );
+  v_update_membership := pg_get_functiondef(
+    'public.update_business_membership_assignment(uuid,text,text,uuid)'::regprocedure
+  );
+  v_suspend_membership := pg_get_functiondef(
+    'public.suspend_business_membership(uuid,text,uuid)'::regprocedure
+  );
 
   IF position('for update' IN lower(v_accept)) = 0
      OR position('token_hash' IN lower(v_accept)) = 0
@@ -2297,8 +2305,12 @@ BEGIN
      OR position('for update' IN lower(v_revoke)) = 0
      OR position('auth_user_deleted' IN lower(v_revoke)) = 0
      OR position('invitación pendiente de aceptación' IN lower(v_reactivate)) = 0
-     OR position('invitación revocada' IN lower(v_reactivate)) = 0 THEN
-    RAISE EXCEPTION 'FALLO: aceptación/revocación no verifican token, bloquean filas o preservan Auth; reactivación genérica no debe saltar onboarding.';
+     OR position('invitación revocada' IN lower(v_reactivate)) = 0
+     OR position('invitación pendiente de aceptación' IN lower(v_update_membership)) = 0
+     OR position('invitación revocada' IN lower(v_update_membership)) = 0
+     OR position('invitación pendiente de aceptación' IN lower(v_suspend_membership)) = 0
+     OR position('invitación revocada' IN lower(v_suspend_membership)) = 0 THEN
+    RAISE EXCEPTION 'FALLO: aceptación/revocación y operaciones administrativas deben proteger las membresías de invitación.';
   END IF;
 
   IF NOT EXISTS (
