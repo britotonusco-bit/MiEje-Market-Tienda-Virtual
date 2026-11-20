@@ -442,15 +442,13 @@ Las invitaciones enviadas con la plantilla antigua no contienen el nuevo formato
 La expiración de la tabla de invitaciones se limita a 55 minutos. La plantilla OTP y el ajuste de expiración de Auth son requisitos conjuntos; no se debe enviar invitaciones reales hasta configurar y comprobar ambos en el proyecto hospedado.
 
 
-### ACC-12 — Reserva temporal para evitar carreras entre aceptación y revocación
 
-Se añadió a `business_invitations` el campo interno `acceptance_lease_until` y dos RPC privadas de servidor:
+### ACC-12 — Concurrencia entre cambio de contraseña y revocación: pendiente
 
-- `claim_business_invitation_acceptance`: bloquea negocio e invitación, valida destinatario, token, perfil, negocio y membresía pendiente; después reserva el proceso por dos minutos.
-- `release_business_invitation_acceptance`: libera la reserva cuando Auth Admin o la activación final fallan. Si el proceso se interrumpe sin liberar, la reserva vence automáticamente.
+Se evaluó reservar temporalmente la invitación antes de llamar a Auth Admin para evitar que una revocación compita con el cambio de contraseña. La propuesta requería cambios coordinados en el esquema, RPC, Edge Function y verificador.
 
-La Edge Function ahora reclama la reserva antes de cambiar la contraseña. La RPC final exige que la reserva siga vigente y la elimina al aceptar. La revocación devuelve conflicto mientras la aceptación está en curso; la expiración y la renovación tampoco pueden cerrar una invitación con una reserva activa.
+Durante la revisión estática se detectó que el borrador SQL suplementario no quedó íntegro. Se retiraron esos cambios incompletos y se restauró `business-invitations-draft.sql` a su versión válida anterior. La Edge Function y el verificador también se restauraron a la versión coherente sin reserva.
 
-También se añadió respuesta idempotente: si la invitación ya quedó aceptada y la respuesta HTTP anterior se perdió, repetir la misma solicitud devuelve el resultado aceptado sin volver a cambiar la contraseña.
+**Estado correcto:** no existe todavía una reserva temporal de aceptación. La Edge Function verifica la invitación, cambia la contraseña mediante Auth Admin y después llama a la RPC de aceptación. Si una revocación ocurre justo entre esos pasos, la activación puede fallar después de que la contraseña ya haya cambiado. La membresía seguirá sin acceso, pero el cambio de contraseña podría haberse producido.
 
-**Límites:** la reserva reduce las carreras entre procesos, pero todavía debe probarse con solicitudes simultáneas reales en staging. La ventana de dos minutos puede requerir ajuste si Auth Admin tarda más; si vence, la activación se detiene y el mismo enlace puede volver a intentar. No se ha ejecutado el SQL ni desplegado la Edge Function.
+Este caso queda como riesgo conocido y debe resolverse con un diseño transaccional revisado y pruebas de concurrencia antes de desplegar. No se debe afirmar que aceptación y revocación ya están serializadas.
