@@ -2228,8 +2228,6 @@ DO $verify_invitations$
 DECLARE
   v_role_helper text;
   v_prepare text;
-  v_claim text;
-  v_release text;
   v_accept text;
   v_revoke text;
   v_reactivate text;
@@ -2263,8 +2261,6 @@ BEGIN
   IF to_regprocedure('public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz)') IS NULL
      OR to_regprocedure('public.attach_business_invitation_user(uuid,uuid)') IS NULL
      OR to_regprocedure('public.mark_business_invitation_failed(uuid,uuid,text)') IS NULL
-     OR to_regprocedure('public.claim_business_invitation_acceptance(uuid,uuid,text)') IS NULL
-     OR to_regprocedure('public.release_business_invitation_acceptance(uuid,uuid,text)') IS NULL
      OR to_regprocedure('public.accept_business_invitation(uuid,uuid,text)') IS NULL
      OR to_regprocedure('public.expire_business_invitation(uuid)') IS NULL
      OR to_regprocedure('public.revoke_business_invitation(uuid,uuid,text)') IS NULL THEN
@@ -2273,13 +2269,9 @@ BEGIN
 
   IF has_function_privilege('anon','public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz)','EXECUTE')
      OR has_function_privilege('authenticated','public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz)','EXECUTE')
-     OR has_function_privilege('authenticated','public.claim_business_invitation_acceptance(uuid,uuid,text)','EXECUTE')
-     OR has_function_privilege('authenticated','public.release_business_invitation_acceptance(uuid,uuid,text)','EXECUTE')
      OR has_function_privilege('authenticated','public.accept_business_invitation(uuid,uuid,text)','EXECUTE')
      OR has_function_privilege('authenticated','public.expire_business_invitation(uuid)','EXECUTE')
      OR has_function_privilege('authenticated','public.revoke_business_invitation(uuid,uuid,text)','EXECUTE')
-     OR NOT has_function_privilege('service_role','public.claim_business_invitation_acceptance(uuid,uuid,text)','EXECUTE')
-     OR NOT has_function_privilege('service_role','public.release_business_invitation_acceptance(uuid,uuid,text)','EXECUTE')
      OR NOT has_function_privilege('service_role','public.accept_business_invitation(uuid,uuid,text)','EXECUTE')
      OR NOT has_function_privilege('service_role','public.expire_business_invitation(uuid)','EXECUTE')
      OR NOT has_function_privilege('service_role','public.revoke_business_invitation(uuid,uuid,text)','EXECUTE') THEN
@@ -2293,12 +2285,6 @@ BEGIN
 
   v_prepare := pg_get_functiondef(
     'public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz)'::regprocedure
-  );
-  v_claim := pg_get_functiondef(
-    'public.claim_business_invitation_acceptance(uuid,uuid,text)'::regprocedure
-  );
-  v_release := pg_get_functiondef(
-    'public.release_business_invitation_acceptance(uuid,uuid,text)'::regprocedure
   );
   v_accept := pg_get_functiondef(
     'public.accept_business_invitation(uuid,uuid,text)'::regprocedure
@@ -2317,20 +2303,12 @@ BEGIN
   );
 
   IF position('55 minutes' IN lower(v_prepare)) = 0
-     OR position('acceptance_lease_until' IN lower(v_claim)) = 0
-     OR position('for update' IN lower(v_claim)) = 0
-     OR position('2 minutes' IN lower(v_claim)) = 0
-     OR position('acceptance_lease_until' IN lower(v_release)) = 0
-     OR position('for update' IN lower(v_release)) = 0
-     OR position('acceptance_lease_until' IN lower(v_accept)) = 0
      OR position('for update' IN lower(v_accept)) = 0
      OR position('token_hash' IN lower(v_accept)) = 0
      OR position('blocked_reason' IN lower(v_accept)) = 0
      OR position('p.is_blocked is false' IN lower(v_accept)) = 0
      OR position('for update' IN lower(v_revoke)) = 0
      OR position('auth_user_deleted' IN lower(v_revoke)) = 0
-     OR position('acceptance_lease_until' IN lower(v_revoke)) = 0
-     OR position('55p03' IN lower(v_revoke)) = 0
      OR position('invitación pendiente de aceptación' IN lower(v_reactivate)) = 0
      OR position('invitación revocada' IN lower(v_reactivate)) = 0
      OR position('invitación pendiente de aceptación' IN lower(v_update_membership)) = 0
