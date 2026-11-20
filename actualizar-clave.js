@@ -4,6 +4,7 @@
   const button = document.querySelector('#updateBtn');
   let client;
   let recoverySessionReady = false;
+  let passwordUpdated = false;
   let resolveRecoveryEvent;
   const recoveryEvent = new Promise(resolve => { resolveRecoveryEvent = resolve; });
 
@@ -25,7 +26,7 @@
     );
 
     // Escuchar PASSWORD_RECOVERY antes de esperar la sesión. Una sesión normal
-    // que ya estuviera guardada en el navegador no autoriza cambiar la clave.
+    // guardada en el navegador no autoriza por sí sola a cambiar la contraseña.
     client.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY' && session?.user) {
         recoverySessionReady = true;
@@ -33,11 +34,11 @@
       }
     });
 
-    const { data, error } = await client.auth.getSession();
+    const { error } = await client.auth.getSession();
     if (error) throw error;
 
-    // PKCE puede intercambiar el código de la URL durante la inicialización.
-    // Esperamos el evento específico de recuperación, no basta con getSession().
+    // PKCE puede intercambiar el código durante la inicialización. No basta
+    // con encontrar una sesión previa: exigimos el evento de recuperación.
     const recoverySession = await Promise.race([
       recoveryEvent,
       new Promise(resolve => window.setTimeout(() => resolve(null), 10000))
@@ -50,8 +51,7 @@
     }
 
     recoverySessionReady = true;
-    // Una vez intercambiado el enlace, elimina el código/token de la URL visible
-    // para que no permanezca en el historial ni se copie accidentalmente.
+    // Retira el código o token de la URL después de que Auth lo haya validado.
     const cleanUrl = new URL(window.location.href);
     cleanUrl.search = '';
     cleanUrl.hash = '';
@@ -62,7 +62,7 @@
 
   form.addEventListener('submit', async event => {
     event.preventDefault();
-    if (!recoverySessionReady || !client) {
+    if (!recoverySessionReady || !client || passwordUpdated) {
       say('Primero debes abrir un enlace de recuperación válido enviado a tu correo.', 'error');
       return;
     }
@@ -82,17 +82,31 @@
     try {
       const { error } = await client.auth.updateUser({ password });
       if (error) throw error;
-
-      const { error: signOutError } = await client.auth.signOut({ scope: 'local' });
-      if (signOutError) {
-        console.warn('La contraseña se actualizó, pero no se pudo cerrar la sesión automáticamente.', signOutError);
-      }
-      say('Contraseña actualizada. Ya puedes iniciar sesión con tu nueva contraseña.', 'success');
-      form.reset();
+      passwordUpdated = true;
       recoverySessionReady = false;
+
+      // La recuperación de contraseña debe invalidar los refresh tokens de
+      // todos los dispositivos, no solo borrar la sesión de este navegador.
+      const { error: globalSignOutError } = await client.auth.signOut({ scope: 'global' });
+      if (globalSignOutError) {
+        console.warn('La contraseña se actualizó, pero no se confirmó el cierre global de sesiones.');
+        // Como mínimo, retirar la sesión local aunque falle la revocación global.
+        const { error: localSignOutError } = await client.auth.signOut({ scope: 'local' });
+        if (localSignOutError) {
+          console.warn('No se pudo cerrar la sesión local después de actualizar la contraseña.');
+        }
+        say('La contraseña se actualizó. No pudimos confirmar el cierre de las demás sesiones; vuelve a iniciar sesión y contacta al soporte si no reconoces algún acceso.', 'success');
+      } else {
+        say('Contraseña actualizada. Se solicitó el cierre de las sesiones de tu cuenta en los demás dispositivos. Inicia sesión nuevamente.', 'success');
+      }
+      form.reset();
     } catch (error) {
-      say(error.message || 'No se pudo cambiar la contraseña.', 'error');
-      button.disabled = false;
+      if (passwordUpdated) {
+        say('La contraseña se actualizó, pero hubo un problema al cerrar la sesión. Cierra esta ventana y vuelve a iniciar sesión.', 'error');
+      } else {
+        say(error.message || 'No se pudo cambiar la contraseña.', 'error');
+        button.disabled = false;
+      }
     }
   });
 
