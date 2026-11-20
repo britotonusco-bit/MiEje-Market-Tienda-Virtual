@@ -469,13 +469,14 @@ Se corrigió el bloqueo de cuentas que ya existen en `auth.users` pero todavía 
 Nuevo comportamiento de `invite_member`:
 
 1. Busca la cuenta existente y confirma que el correo sigue sin verificar.
-2. Respeta las invitaciones pendientes válidas: no crea otra ni envía un duplicado.
-3. Si no hay invitación pendiente, prepara una nueva fila individual con token aleatorio, hash SHA-256 y expiración de 55 minutos.
-4. Vincula esa invitación a la cuenta Auth existente mediante `attach_business_invitation_user`. La membresía se conserva suspendida.
-5. Solicita un nuevo OTP de confirmación con `auth.resend({ type: 'signup' })`; no crea otro usuario Auth ni cambia su contraseña.
-6. El correo utiliza la nueva plantilla `supabase/templates/confirm-signup.html`. La página de aceptación distingue `auth_type=email` para la confirmación renovada y `auth_type=invite` para invitaciones nuevas.
-7. Si el envío falla, `mark_business_invitation_delivery_failed` cierra solo la invitación fallida, conserva la cuenta Auth y mantiene la membresía suspendida para que pueda renovarse de nuevo.
-8. Se aplica una espera de 60 segundos por negocio/correo después de un fallo de entrega, además de los límites de envío de Supabase.
+2. Respeta las invitaciones pendientes válidas ya vinculadas: no crea otra ni envía un duplicado.
+3. Si existe una fila pendiente sin `user_id` y Auth ya contiene una cuenta no confirmada, marca esa fila huérfana como fallida y continúa con una invitación nueva. No se presupone que el correo anterior haya llegado.
+4. Si no hay invitación pendiente, prepara una nueva fila individual con token aleatorio, hash SHA-256 y expiración de 55 minutos.
+5. Vincula esa invitación a la cuenta Auth existente mediante `attach_business_invitation_user`. La membresía se conserva suspendida.
+6. Solicita un nuevo OTP de confirmación con `auth.resend({ type: 'signup' })`; no crea otro usuario Auth ni cambia su contraseña.
+7. El correo utiliza la nueva plantilla `supabase/templates/confirm-signup.html`. La página de aceptación distingue `auth_type=email` para la confirmación renovada y `auth_type=invite` para invitaciones nuevas.
+8. Si el envío falla, `mark_business_invitation_delivery_failed` cierra solo la invitación fallida, conserva la cuenta Auth y mantiene la membresía suspendida para que pueda renovarse de nuevo.
+9. Se aplica una espera de 60 segundos por negocio/correo después de un fallo de entrega, además de los límites de envío de Supabase.
 
 El verificador de integración ahora exige la nueva RPC y comprueba que el fallo de entrega conserve la marca de membresía pendiente y la autorización técnica.
 
