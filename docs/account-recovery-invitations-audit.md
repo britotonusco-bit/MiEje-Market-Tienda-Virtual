@@ -417,6 +417,7 @@ La documentación oficial de Supabase advierte que algunos filtros de correo abr
 - La página de aceptación ya no intenta verificar un `token_hash` al cargar.
 - El correo presenta el código OTP `{{ .Token }}` y un botón que abre directamente la página de MiEje.
 - La persona introduce el correo destinatario y el código. El navegador ejecuta `verifyOtp({ email, token, type: 'invite' })` solo cuando la persona pulsa **Verificar correo**.
+- La vigencia de la invitación de MiEje se redujo a 55 minutos para quedar por debajo del vencimiento Auth predeterminado de una hora. En el proyecto hospedado, la expiración OTP de invitaciones debe configurarse en 3600 segundos; si se reduce por debajo de 55 minutos, habrá que reducir también el plazo de MiEje.
 - El identificador y token privado de MiEje viajan en el fragmento URL (`#...`), no en la consulta HTTP. La página los conserva en memoria y limpia la barra de direcciones inmediatamente.
 - El cliente Auth usa `detectSessionInUrl: false` para que no intente procesar automáticamente enlaces de Auth.
 - Si la sesión del destinatario ya quedó verificada en ese navegador, puede continuar sin volver a consumir el OTP. Si hay otra cuenta abierta, la página cierra esa sesión local antes de verificar el código.
@@ -428,3 +429,14 @@ Se añadió `supabase/templates/invite.html` y se configuró esa plantilla para 
 Las invitaciones enviadas con la plantilla antigua no contienen el nuevo formato OTP y no se deben considerar compatibles automáticamente. Antes de activar el nuevo código habrá que definir cómo renovar de forma controlada esas invitaciones históricas.
 
 **Pruebas pendientes:** validar en staging el envío de invitación, recepción del código, expiración, OTP incorrecto, OTP ya consumido, sesión de otra cuenta abierta, recarga tras verificar, contraseña guardada con fallo posterior de RPC y revocación concurrente. No se ejecutó el flujo contra Auth real ni se desplegó el código.
+
+
+### ACC-11 — Ajuste visual y reintento de OTP
+
+- La página separa los pasos de verificación OTP y creación de contraseña.
+- El bloque de contraseña permanece oculto hasta que Auth devuelve una sesión válida del correo confirmado.
+- Si ya existe una sesión del destinatario con el correo confirmado, puede reanudar el paso de contraseña sin consumir nuevamente el OTP.
+- Si el navegador tiene abierta otra cuenta, se cierra solo esa sesión local antes de verificar el código recibido.
+- Se validó sintaxis JavaScript y la estructura de los elementos de la página. No se ejecutó el flujo contra Supabase Auth.
+
+La expiración de la tabla de invitaciones se limita a 55 minutos. La plantilla OTP y el ajuste de expiración de Auth son requisitos conjuntos; no se debe enviar invitaciones reales hasta configurar y comprobar ambos en el proyecto hospedado.
