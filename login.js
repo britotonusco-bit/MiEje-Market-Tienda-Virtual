@@ -131,7 +131,11 @@
         email: document.querySelector('#email').value.trim(),
         password: document.querySelector('#password').value
       });
-      if (authError) throw authError;
+      // Mantener una respuesta uniforme para credenciales inválidas y cuentas
+      // que todavía no pueden iniciar sesión; no revelar estados internos de Auth.
+      if (authError) {
+        throw new Error('No se pudo iniciar sesión. Verifica el correo y la contraseña, y confirma que la cuenta esté habilitada.');
+      }
       const access = await resolveAccess();
       const profile = access.profile;
       if (profile.platform_role === 'platform_owner' || access.is_platform_owner === true) {
