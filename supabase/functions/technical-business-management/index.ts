@@ -710,8 +710,12 @@ Deno.serve(async (req: Request) => {
         const invitationId = textValue(prepared?.invitation_id, 80);
         if (!uuidPattern.test(invitationId)) throw new Error("La RPC no devolvió un identificador de invitación válido.");
         const redirectUrl = new URL(redirectBase);
-        redirectUrl.searchParams.set("invitation_id", invitationId);
-        redirectUrl.searchParams.set("invitation_token", rawInvitationToken);
+        // El fragmento no se envía al servidor ni viaja en el encabezado Referer.
+        // El correo mostrará un OTP manual, no un enlace ConfirmationURL consumible por escáneres.
+        redirectUrl.hash = new URLSearchParams({
+          invitation_id: invitationId,
+          invitation_token: rawInvitationToken,
+        }).toString();
 
         const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
           data: { display_name: displayName },
