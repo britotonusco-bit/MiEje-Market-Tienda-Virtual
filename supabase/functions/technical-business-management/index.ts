@@ -890,7 +890,7 @@ Deno.serve(async (req: Request) => {
       if (error) {
         if (error.code === "P0002") return reply(404, { error: "No se encontró la invitación." });
         if (error.code === "42501") return reply(403, { error: "No estás autorizado para revocar esta invitación." });
-        if (error.code === "23514" || error.code === "40001") return reply(409, { error: error.message });
+        if (error.code === "23514" || error.code === "40001" || error.code === "55P03") return reply(409, { error: error.message });
         if (error.code === "22023") return reply(400, { error: "El motivo de revocación no es válido." });
         throw error;
       }
