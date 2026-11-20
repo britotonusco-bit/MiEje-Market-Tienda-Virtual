@@ -1,3 +1,9 @@
+# Plantilla de invitación local: OTP manual para evitar que los escáneres de correo
+# consuman el enlace de confirmación antes de que el destinatario lo abra.
+[auth.email.template.invite]
+subject = "Tu invitación a MiEje Market"
+content_path = "./supabase/templates/invite.html"
+
 # Mantener explícita la verificación JWT de cada Edge Function desplegada.
 # Las funciones públicas validan su propia solicitud o reciben tráfico de invitados;
 # las funciones privadas exigen un JWT válido y realizan autorización adicional.
