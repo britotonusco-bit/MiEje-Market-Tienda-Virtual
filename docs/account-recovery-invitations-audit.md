@@ -394,3 +394,17 @@ Se añadieron dos salvaguardas finales:
 - La página de aceptación reconoce una sesión de invitación que ya fue verificada. Si el enlace OTP ya se consumió pero la sesión sigue abierta, permite reintentar la finalización sin volver a consumir el mismo OTP. La Edge Function sigue comprobando identidad, correo y token individual.
 
 Si el envío de Auth devuelve error, el mensaje ahora indica revisar Authentication > Users antes de repetir: no se debe crear otra cuenta si Auth alcanzó a crear una invitación pese al error devuelto.
+
+
+### ACC-09 — Protección de invitaciones frente a operaciones administrativas
+
+Durante la revisión cruzada se encontró que el selector técnico de membresías podía incluir filas suspendidas por invitación y que las RPC administrativas genéricas permitían editar su rol/cargo mientras el proceso estaba pendiente.
+
+Se corrigió en la rama:
+
+- `list_business_members` excluye del selector las membresías marcadas como `Invitación pendiente de aceptación` o `Invitación revocada`.
+- `update_business_membership_assignment` rechaza cambios manuales de rol/cargo sobre esas filas.
+- `suspend_business_membership` y `reactivate_business_membership` rechazan operar sobre ellas.
+- El verificador SQL inspecciona las definiciones de las cuatro RPC para exigir estas barreras.
+
+Así, la aceptación es la única vía para activar una invitación pendiente y una invitación revocada no puede recuperarse mediante la acción administrativa genérica de reactivar una membresía.
