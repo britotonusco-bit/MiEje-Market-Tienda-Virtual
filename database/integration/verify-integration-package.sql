@@ -2295,7 +2295,7 @@ BEGIN
   IF position('m.status = ''active''' IN lower(v_role_helper)) = 0 THEN
     RAISE EXCEPTION 'FALLO: has_business_role no excluye membresías pendientes/suspendidas.';
   END IF;
-  IF v_role_helper !~* 'is_blocked\\s+(is\\s+)?=?\\s*false' THEN
+  IF v_role_helper !~* 'is_blocked\s+(is\s+)?=?\s*false' THEN
     RAISE EXCEPTION 'FALLO: has_business_role debe excluir perfiles bloqueados globalmente.';
   END IF;
 
