@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS public.business_invitations (
   created_by uuid NOT NULL REFERENCES public.profiles(id) ON DELETE RESTRICT,
   created_at timestamptz NOT NULL DEFAULT now(),
   expires_at timestamptz NOT NULL,
+  acceptance_lease_until timestamptz NULL,
   accepted_at timestamptz NULL,
   revoked_at timestamptz NULL,
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -39,6 +40,9 @@ CREATE TABLE IF NOT EXISTS public.business_invitations (
     OR (status IN ('pending','expired','failed') AND accepted_at IS NULL AND revoked_at IS NULL)
   )
 );
+
+ALTER TABLE public.business_invitations
+  ADD COLUMN IF NOT EXISTS acceptance_lease_until timestamptz NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS business_invitations_one_pending_email_idx
   ON public.business_invitations (business_id, email_normalized)
