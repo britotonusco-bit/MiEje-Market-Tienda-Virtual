@@ -688,7 +688,7 @@ Deno.serve(async (req: Request) => {
       if (!lookup.user) {
         const rawInvitationToken = createInvitationToken();
         const tokenHash = await sha256Hex(rawInvitationToken);
-        const invitationExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        const invitationExpiresAt = new Date(Date.now() + 55 * 60 * 1000).toISOString();
         const { data: prepared, error: prepareError } = await admin.rpc("prepare_business_invitation", {
           p_business_id: businessId,
           p_email: email,
