@@ -671,20 +671,77 @@ Deno.serve(async (req: Request) => {
       }
 
       if (lookup.user && !lookup.user.email_confirmed_at) {
-        if (lookup.user.invited_at) {
-          return reply(409, {
-            error: "Esta cuenta tiene una invitación anterior al nuevo proceso seguro y no tiene un registro individual de MiEje. Completa el enlace anterior y luego el técnico podrá asignarla, o solicita soporte para renovar la invitación.",
-            requires_email_confirmation: true,
-            assignment_created: false,
-          });
+        const recentCutoff = new Date(Date.now() - 60_000).toISOString();
+        const { data: recentFailure, error: recentFailureError } = await admin
+          .from("business_invitations")
+          .select("id,created_at")
+          .eq("business_id", businessId)
+          .eq("email_normalized", email)
+          .eq("status", "failed")
+          .gte("created_at", recentCutoff)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (recentFailureError) throw recentFailureError;
+        if (recentFailure) {
+          return reply(429, { error: "Ya se intentó enviar una confirmación hace poco. Espera al menos un minuto antes de solicitar otra.", retry_after_seconds: 60 });
         }
-        return reply(409, {
-          error: "La cuenta ya existe y todavía no ha confirmado su correo. No se creó una asignación ni se envió otro enlace.",
+
+        const rawInvitationToken = createInvitationToken();
+        const tokenHash = await sha256Hex(rawInvitationToken);
+        const invitationExpiresAt = new Date(Date.now() + 55 * 60 * 1000).toISOString();
+        const { data: prepared, error: prepareError } = await admin.rpc("prepare_business_invitation", {
+          p_business_id: businessId, p_email: email, p_role: role, p_job_title: jobTitle,
+          p_token_hash: tokenHash, p_actor_id: user.id, p_expires_at: invitationExpiresAt,
+        });
+        if (prepareError) {
+          if (prepareError.code === "23505") return reply(409, { error: "Ya existe una invitación pendiente para ese correo y negocio. No se envió otro correo." });
+          if (prepareError.code === "42501") return reply(403, { error: "No tienes autorización para renovar esta invitación." });
+          if (prepareError.code === "23514" || prepareError.code === "22023") return reply(400, { error: "Los datos de la invitación no son válidos." });
+          throw prepareError;
+        }
+        const invitationId = textValue(prepared?.invitation_id, 80);
+        if (!uuidPattern.test(invitationId)) throw new Error("La RPC no devolvió un identificador de invitación válido.");
+
+        const { data: attached, error: attachError } = await admin.rpc("attach_business_invitation_user", {
+          p_invitation_id: invitationId, p_user_id: lookup.user.id,
+        });
+        if (attachError || !attached?.membership_id) {
+          const { error: failedError } = await admin.rpc("mark_business_invitation_failed", {
+            p_invitation_id: invitationId, p_actor_id: user.id, p_failure_code: "legacy_account_attach_failed",
+          });
+          if (failedError) console.error("Could not mark legacy invitation as failed:", failedError.code || "unknown");
+          if (attachError?.code === "23505" || attachError?.code === "23514") {
+            return reply(409, { error: "La cuenta ya tiene una asignación que no se puede reutilizar como invitación. No se modificó su acceso." });
+          }
+          console.error("Legacy invitation attachment failed:", attachError?.code || "unknown");
+          return reply(503, { error: "No se pudo vincular la cuenta existente. No se envió el correo; puedes reintentar más tarde.", retryable: true });
+        }
+
+        const redirectUrl = new URL(redirectBase);
+        redirectUrl.hash = new URLSearchParams({
+          invitation_id: invitationId, invitation_token: rawInvitationToken, auth_type: "email",
+        }).toString();
+        const { error: resendError } = await userClient.auth.resend("signup" as any, {
+          email, options: { emailRedirectTo: redirectUrl.toString() },
+        } as any);
+        if (resendError) {
+          const failureCode = textValue((resendError as any)?.code, 80) || "signup_confirmation_resend_failed";
+          const { error: failedError } = await admin.rpc("mark_business_invitation_delivery_failed", {
+            p_invitation_id: invitationId, p_actor_id: user.id, p_failure_code: failureCode,
+          });
+          if (failedError) console.error("Could not mark resend failure:", failedError.code || "unknown");
+          console.error("Signup confirmation resend failed:", failureCode);
+          return reply(502, { error: "No se pudo reenviar el código de confirmación. La cuenta original se conservó y la membresía sigue bloqueada; espera un minuto e inténtalo otra vez.", invitation_sent: false, retryable: true });
+        }
+
+        return reply(200, {
+          ok: true, invitation_id: invitationId, invitation_pending: true, invitation_sent: true,
           requires_email_confirmation: true,
-          assignment_created: false,
+          membership: { id: attached.membership_id, business_id: businessId, user_id: lookup.user.id, role, status: "suspended", job_title: jobTitle },
+          message: "Se renovó la invitación de la cuenta existente. Se envió un nuevo código; el acceso seguirá bloqueado hasta verificarlo y crear la contraseña.",
         });
       }
-
       if (!lookup.user) {
         const rawInvitationToken = createInvitationToken();
         const tokenHash = await sha256Hex(rawInvitationToken);
@@ -715,6 +772,7 @@ Deno.serve(async (req: Request) => {
         redirectUrl.hash = new URLSearchParams({
           invitation_id: invitationId,
           invitation_token: rawInvitationToken,
+          auth_type: "invite",
         }).toString();
 
         const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
