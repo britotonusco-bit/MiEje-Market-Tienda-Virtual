@@ -91,7 +91,7 @@ BEGIN
      OR pg_catalog.char_length(v_job_title) NOT BETWEEN 2 AND 100
      OR p_token_hash !~ '^[0-9a-f]{64}$'
      OR p_expires_at <= pg_catalog.now()
-     OR p_expires_at > pg_catalog.now() + interval '7 days' THEN
+     OR p_expires_at > pg_catalog.now() + interval '55 minutes' THEN
     RAISE EXCEPTION 'Datos de invitación no válidos.' USING ERRCODE = '22023';
   END IF;
 
