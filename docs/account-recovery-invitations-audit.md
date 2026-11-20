@@ -449,7 +449,7 @@ La expiración de la tabla de invitaciones se limita a 55 minutos. La plantilla 
 Se implementó en la rama una reserva temporal para que la revocación no compita con el cambio de contraseña de Auth Admin:
 
 - La tabla `business_invitations` incorpora `acceptance_lease_until`.
-- `claim_business_invitation_acceptance` bloquea negocio e invitación, comprueba identidad, token, vencimiento, perfil y membresía pendiente, y reserva el proceso por cinco minutos.
+- `claim_business_invitation_acceptance` bloquea negocio e invitación, comprueba identidad, token, vencimiento, perfil y membresía pendiente, y reserva el proceso por siete minutos.
 - La Edge Function reclama la reserva antes de cambiar la contraseña.
 - `accept_business_invitation` exige que la reserva siga vigente y la elimina al activar la membresía.
 - `release_business_invitation_acceptance` libera la reserva si falla el cambio de contraseña o la RPC final. Si el proceso se interrumpe, la reserva caduca automáticamente.
@@ -457,6 +457,6 @@ Se implementó en la rama una reserva temporal para que la revocación no compit
 - La Edge Function responde de forma idempotente si una solicitud repetida encuentra la invitación ya aceptada.
 - El verificador SQL exige las nuevas RPC, sus permisos y las comprobaciones de bloqueo/reserva.
 
-La reserva serializa la revocación con la operación de aceptación. Si vence antes de finalizar, la activación se detiene; el usuario puede reintentar con el mismo enlace y la membresía permanece suspendida. La ventana de cinco minutos supera el timeout HTTP de 150 segundos documentado para las Edge Functions hospedadas.
+La reserva serializa la revocación con la operación de aceptación. Si vence antes de finalizar, la activación se detiene; el usuario puede reintentar con el mismo enlace y la membresía permanece suspendida. La ventana de siete minutos supera el límite máximo de ejecución de 400 segundos documentado para Edge Functions hospedadas en planes de pago; también cubre el límite de 150 segundos del plan gratuito.
 
 **Pendiente de validación real:** no se ha ejecutado este SQL en staging, no se ha hecho una prueba de concurrencia real ni se ha desplegado la Edge Function. La comprobación actual es estática y no demuestra que el flujo funcione en Supabase hospedado.
