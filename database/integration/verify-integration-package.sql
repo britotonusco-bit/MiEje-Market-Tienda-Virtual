@@ -2228,6 +2228,7 @@ DO $verify_invitations$
 DECLARE
   v_role_helper text;
   v_prepare text;
+  v_delivery_failed text;
   v_claim text;
   v_release text;
   v_accept text;
@@ -2263,6 +2264,7 @@ BEGIN
   IF to_regprocedure('public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz)') IS NULL
      OR to_regprocedure('public.attach_business_invitation_user(uuid,uuid)') IS NULL
      OR to_regprocedure('public.mark_business_invitation_failed(uuid,uuid,text)') IS NULL
+     OR to_regprocedure('public.mark_business_invitation_delivery_failed(uuid,uuid,text)') IS NULL
      OR to_regprocedure('public.claim_business_invitation_acceptance(uuid,uuid,text)') IS NULL
      OR to_regprocedure('public.release_business_invitation_acceptance(uuid,uuid,text)') IS NULL
      OR to_regprocedure('public.accept_business_invitation(uuid,uuid,text)') IS NULL
@@ -2273,11 +2275,13 @@ BEGIN
 
   IF has_function_privilege('anon','public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz)','EXECUTE')
      OR has_function_privilege('authenticated','public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz)','EXECUTE')
+     OR has_function_privilege('authenticated','public.mark_business_invitation_delivery_failed(uuid,uuid,text)','EXECUTE')
      OR has_function_privilege('authenticated','public.claim_business_invitation_acceptance(uuid,uuid,text)','EXECUTE')
      OR has_function_privilege('authenticated','public.release_business_invitation_acceptance(uuid,uuid,text)','EXECUTE')
      OR has_function_privilege('authenticated','public.accept_business_invitation(uuid,uuid,text)','EXECUTE')
      OR has_function_privilege('authenticated','public.expire_business_invitation(uuid)','EXECUTE')
      OR has_function_privilege('authenticated','public.revoke_business_invitation(uuid,uuid,text)','EXECUTE')
+     OR NOT has_function_privilege('service_role','public.mark_business_invitation_delivery_failed(uuid,uuid,text)','EXECUTE')
      OR NOT has_function_privilege('service_role','public.claim_business_invitation_acceptance(uuid,uuid,text)','EXECUTE')
      OR NOT has_function_privilege('service_role','public.release_business_invitation_acceptance(uuid,uuid,text)','EXECUTE')
      OR NOT has_function_privilege('service_role','public.accept_business_invitation(uuid,uuid,text)','EXECUTE')
@@ -2293,6 +2297,9 @@ BEGIN
 
   v_prepare := pg_get_functiondef(
     'public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz)'::regprocedure
+  );
+  v_delivery_failed := pg_get_functiondef(
+    'public.mark_business_invitation_delivery_failed(uuid,uuid,text)'::regprocedure
   );
   v_claim := pg_get_functiondef(
     'public.claim_business_invitation_acceptance(uuid,uuid,text)'::regprocedure
@@ -2317,6 +2324,10 @@ BEGIN
   );
 
   IF position('55 minutes' IN lower(v_prepare)) = 0
+     OR position('status = ''failed''' IN lower(v_delivery_failed)) = 0
+     OR position('blocked_reason' IN lower(v_delivery_failed)) = 0
+     OR position('invitación pendiente de aceptación' IN lower(v_delivery_failed)) = 0
+     OR position('platform_owner' IN lower(v_delivery_failed)) = 0
      OR position('acceptance_lease_until' IN lower(v_claim)) = 0
      OR position('for update' IN lower(v_claim)) = 0
      OR position('7 minutes' IN lower(v_claim)) = 0
