@@ -2319,7 +2319,7 @@ BEGIN
   IF position('55 minutes' IN lower(v_prepare)) = 0
      OR position('acceptance_lease_until' IN lower(v_claim)) = 0
      OR position('for update' IN lower(v_claim)) = 0
-     OR position('5 minutes' IN lower(v_claim)) = 0
+     OR position('7 minutes' IN lower(v_claim)) = 0
      OR position('acceptance_lease_until' IN lower(v_release)) = 0
      OR position('for update' IN lower(v_release)) = 0
      OR position('acceptance_lease_until' IN lower(v_accept)) = 0
