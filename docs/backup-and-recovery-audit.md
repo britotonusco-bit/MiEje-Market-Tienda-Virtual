@@ -142,3 +142,33 @@ En el plan Free, si se depende únicamente de exportaciones manuales, el RPO rea
 ## 8. Límites de esta revisión
 
 No se generó ni descargó una copia, no se consultaron contraseñas ni valores secretos, no se modificaron buckets, no se ejecutó una restauración, no se pausó el proyecto y no se desplegó nada. La revisión acredita configuración/estado consultado y brechas detectadas; no acredita que exista una copia recuperable.
+
+
+## 9. Verificación complementaria — 20 de noviembre de 2026
+
+Se repitieron comprobaciones de solo lectura sobre el proyecto y el repositorio para confirmar si había cambiado el estado desde la revisión inicial.
+
+| Componente | Verificación del 20 nov 2026 | Resultado |
+|---|---|---|
+| Organización Supabase | Consulta de metadatos de organización | Plan `free` confirmado. |
+| Proyecto | Metadatos de proyecto | `ACTIVE_HEALTHY`, Postgres 17.11. |
+| Historial de migraciones | Listado de migraciones registradas | 12 migraciones; la última sigue siendo `20261112202907_secure_public_job_application`. |
+| Branches de base de datos | Listado de branches Supabase | Ninguna. |
+| `pg_cron` | Catálogo de extensiones | Disponible como extensión, pero `installed_version` es NULL; no está instalada. |
+| Storage | Consulta agregada de buckets y objetos | `business-assets`: público, límite 5 MiB, 0 objetos. `job-applications-private`: privado, límite 5 MiB, 0 objetos. |
+| Código de backup | Árbol completo de la rama | No se identificó script específico de backup. |
+| GitHub Actions | Árbol completo de la rama | No se encontró `.github/workflows/`. |
+
+### Límite para comprobar los backups administrados por Supabase
+
+Las herramientas conectadas disponibles en esta revisión permiten consultar metadatos del proyecto, migraciones, extensiones, tablas y ejecutar SQL de lectura, pero no exponen un listado de backups administrados ni sus fechas de recuperación. Por tanto, **no se verificó directamente la pantalla Database → Backups ni se descargó un backup**. La ausencia de un listado en esta revisión no demuestra por sí sola que Supabase no tenga una copia interna; el plan Free sí confirma que no debemos depender de los backups diarios automáticos incluidos en Pro/Team/Enterprise.
+
+La documentación oficial actual indica que los proyectos Free deben exportar regularmente con Supabase CLI y conservar copias externas. También confirma que los backups de base de datos no incluyen los objetos de Storage. La restauración desde el Dashboard deja el proyecto inaccesible durante el proceso, por lo que no se debe usar el proyecto activo como entorno de ensayo.
+
+Referencia oficial consultada: https://supabase.com/docs/guides/platform/backups
+
+### Dictamen actualizado
+
+La evidencia disponible sigue sin acreditar una copia externa reciente ni una restauración probada. El inventario actual de Storage tiene cero objetos en los dos buckets observados, pero esto no elimina la necesidad de un proceso de copia para cuando se carguen imágenes, hojas de vida o comprobantes.
+
+No se activó `pg_cron`, no se creó una rama Supabase, no se ejecutó exportación, no se accedió a contraseñas ni secretos y no se restauró ni pausó el proyecto.
