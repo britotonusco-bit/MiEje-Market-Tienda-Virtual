@@ -647,7 +647,17 @@ Deno.serve(async (req: Request) => {
         if (pendingInvitation.user_id && pendingInvitation.user_id !== lookup.user.id) {
           return reply(409, { error: "La invitación está vinculada a otra cuenta. No se modificó ninguna membresía." });
         }
-        if (!pendingInvitation.user_id) {
+        if (!pendingInvitation.user_id && !lookup.user.email_confirmed_at) {
+          // El registro pendiente no quedó vinculado a la cuenta Auth. No conocemos
+          // si el correo original llegó; cerramos esa fila y renovamos con un OTP nuevo.
+          const { error: failedError } = await admin.rpc("mark_business_invitation_failed", {
+            p_invitation_id: pendingInvitation.id,
+            p_actor_id: user.id,
+            p_failure_code: "orphaned_auth_user_reconciliation",
+          });
+          if (failedError) throw failedError;
+          pendingInvitation = null;
+        } else if (!pendingInvitation.user_id) {
           const { data: attached, error: attachError } = await admin.rpc("attach_business_invitation_user", {
             p_invitation_id: pendingInvitation.id,
             p_user_id: lookup.user.id,
