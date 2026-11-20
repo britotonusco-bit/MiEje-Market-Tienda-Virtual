@@ -1,4 +1,8 @@
 (() => {
+  const otpSection = document.querySelector('#inviteOtpSection');
+  const otpButton = document.querySelector('#verifyInviteOtpBtn');
+  const emailInput = document.querySelector('#inviteEmail');
+  const otpInput = document.querySelector('#inviteOtp');
   const form = document.querySelector('#acceptInviteForm');
   const status = document.querySelector('#inviteStatus');
   let client;
@@ -11,6 +15,14 @@
     status.className = `message ${kind}`.trim();
   };
 
+  function revealPasswordStep() {
+    ready = true;
+    otpSection.hidden = true;
+    form.hidden = false;
+    show('Correo verificado. Crea una contraseña para activar únicamente el acceso al negocio invitado.', 'success');
+    form.elements.password.focus();
+  }
+
   async function init() {
     try {
       if (!window.supabase || !window.MIEJE_SUPABASE_URL || !window.MIEJE_SUPABASE_PUBLISHABLE_KEY) {
@@ -18,57 +30,88 @@
       }
 
       const url = new URL(window.location.href);
-      invitationId = url.searchParams.get('invitation_id') || '';
-      invitationToken = url.searchParams.get('invitation_token') || '';
-      const queryType = url.searchParams.get('type');
-      const hashParams = new URLSearchParams(url.hash.startsWith('#') ? url.hash.slice(1) : url.hash);
-      const hashType = hashParams.get('type');
-      const tokenHash = url.searchParams.get('token_hash');
+      const fragment = new URLSearchParams(url.hash.startsWith('#') ? url.hash.slice(1) : url.hash);
+      invitationId = fragment.get('invitation_id') || '';
+      invitationToken = fragment.get('invitation_token') || '';
+
+      // El secreto vive solo en memoria; se quita de la barra antes de iniciar Auth.
+      window.history.replaceState({}, document.title, url.pathname);
 
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invitationId)
           || !/^[A-Za-z0-9_-]{43}$/.test(invitationToken)) {
-        throw new Error('Este enlace no contiene una invitación individual válida de MiEje Market. Solicita una invitación nueva.');
+        throw new Error('Este enlace no contiene una invitación individual válida de MiEje Market. Solicita al propietario técnico que genere una nueva.');
       }
 
       client = window.supabase.createClient(
         window.MIEJE_SUPABASE_URL,
         window.MIEJE_SUPABASE_PUBLISHABLE_KEY,
-        { auth: { detectSessionInUrl: true, persistSession: true, autoRefreshToken: true } }
+        { auth: { detectSessionInUrl: false, persistSession: true, autoRefreshToken: true } }
       );
 
-      if (queryType !== 'invite' && hashType !== 'invite') {
-        throw new Error('Este enlace no corresponde a una invitación de MiEje Market.');
-      }
-
-      // Si el enlace ya se verificó en esta sesión, no se vuelve a consumir
-      // el OTP de un solo uso. El servidor comprobará después que la sesión
-      // pertenece al usuario destinatario de esta invitación.
-      const existingSession = await client.auth.getSession();
-      if (existingSession.error) throw existingSession.error;
-      if (!existingSession.data.session && queryType === 'invite' && tokenHash) {
-        const { error } = await client.auth.verifyOtp({ token_hash: tokenHash, type: 'invite' });
-        if (error) throw error;
-      }
-
-      const { data, error } = await client.auth.getSession();
-      if (error || !data.session) {
-        throw new Error('El enlace de Supabase no pudo verificarse o ya venció. Solicita una invitación nueva.');
-      }
-      if (!data.session.user?.email_confirmed_at) {
-        await client.auth.signOut({ scope: 'local' });
-        throw new Error('El correo todavía no aparece confirmado. Abre el enlace original recibido por correo.');
-      }
-
-      // El token individual se conserva solo en memoria durante esta página.
-      // Se eliminan inmediatamente los parámetros de Auth y de la invitación.
-      window.history.replaceState({}, document.title, url.pathname);
-      ready = true;
-      show('Correo verificado. Crea tu contraseña para activar únicamente el acceso al negocio invitado.', 'success');
+      show('Escribe el correo al que llegó la invitación y el código que aparece en ese mensaje.');
+      otpButton.disabled = false;
+      emailInput.focus();
     } catch (error) {
-      show(error.message || 'No se pudo verificar la invitación.', 'error');
-      form.querySelector('button').disabled = true;
+      show(error.message || 'No se pudo preparar la invitación.', 'error');
+      otpButton.disabled = true;
     }
   }
+
+  otpButton.addEventListener('click', async () => {
+    if (!client || ready) return;
+    const email = emailInput.value.trim().toLowerCase();
+    const token = otpInput.value.trim();
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      emailInput.focus();
+      return show('Escribe un correo válido.', 'error');
+    }
+    if (!/^\d{6,10}$/.test(token)) {
+      otpInput.focus();
+      return show('Escribe el código numérico recibido por correo.', 'error');
+    }
+
+    otpButton.disabled = true;
+    show('Verificando el código de invitación…');
+
+    try {
+      const { data: current, error: sessionError } = await client.auth.getSession();
+      if (sessionError) throw sessionError;
+      const currentUser = current.session?.user;
+      const currentEmail = currentUser?.email?.trim().toLowerCase();
+
+      if (currentUser && currentEmail === email && currentUser.email_confirmed_at) {
+        // Permite reintentar si el OTP ya fue consumido y la sesión del destinatario
+        // sigue activa en este mismo navegador.
+        revealPasswordStep();
+        return;
+      }
+
+      if (currentUser) {
+        const { error: signOutError } = await client.auth.signOut({ scope: 'local' });
+        if (signOutError) throw signOutError;
+      }
+
+      const { data, error } = await client.auth.verifyOtp({
+        email,
+        token,
+        type: 'invite',
+      });
+      if (error) throw error;
+
+      const verifiedUser = data.user || data.session?.user;
+      if (!data.session || !verifiedUser?.email_confirmed_at
+          || verifiedUser.email?.trim().toLowerCase() !== email) {
+        await client.auth.signOut({ scope: 'local' });
+        throw new Error('El código no confirmó el correo indicado. Comprueba el correo y vuelve a intentarlo.');
+      }
+
+      revealPasswordStep();
+    } catch (error) {
+      show(error.message || 'No se pudo verificar el código. Comprueba que no haya vencido.', 'error');
+      otpButton.disabled = false;
+    }
+  });
 
   form.addEventListener('submit', async event => {
     event.preventDefault();
