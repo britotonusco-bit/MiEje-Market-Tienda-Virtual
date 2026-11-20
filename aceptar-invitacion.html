@@ -14,15 +14,28 @@
   <main class="login-card">
     <a class="brand-login" href="index.html"><span class="brand-icon">M<span>+</span></span><span>MiEje <b>Market</b><small>Activación segura de cuenta</small></span></a>
     <h1>Activa tu cuenta</h1>
-    <p class="muted">Crea una contraseña personal para entrar al panel al que te invitó el propietario de la plataforma.</p>
-    <form id="acceptInviteForm">
+    <p class="muted">Confirma que recibiste la invitación en tu correo y crea una contraseña personal para acceder al panel asignado.</p>
+
+    <section id="inviteOtpSection" aria-labelledby="inviteOtpTitle">
+      <h2 id="inviteOtpTitle">1. Verifica tu correo</h2>
+      <p class="muted">Abre el correo de invitación, copia el código de un solo uso y escríbelo aquí. Abrir esta página no consume el código.</p>
+      <label for="inviteEmail">Correo al que llegó la invitación</label>
+      <input id="inviteEmail" name="inviteEmail" type="email" autocomplete="email" required placeholder="tu-correo@ejemplo.com">
+      <label for="inviteOtp">Código de invitación</label>
+      <input id="inviteOtp" name="inviteOtp" type="text" inputmode="numeric" autocomplete="one-time-code" minlength="6" maxlength="10" pattern="[0-9]{6,10}" required placeholder="Código recibido por correo">
+      <button id="verifyInviteOtpBtn" class="button primary full" type="button">Verificar correo</button>
+    </section>
+
+    <form id="acceptInviteForm" hidden>
+      <h2>2. Crea tu contraseña</h2>
       <label for="newPassword">Nueva contraseña</label>
-      <input id="newPassword" name="password" type="password" minlength="10" autocomplete="new-password" required placeholder="Mínimo 10 caracteres">
+      <input id="newPassword" name="password" type="password" minlength="10" maxlength="128" autocomplete="new-password" required placeholder="Mínimo 10 caracteres">
       <label for="confirmPassword">Confirma la contraseña</label>
-      <input id="confirmPassword" name="confirmPassword" type="password" minlength="10" autocomplete="new-password" required placeholder="Repite la contraseña">
+      <input id="confirmPassword" name="confirmPassword" type="password" minlength="10" maxlength="128" autocomplete="new-password" required placeholder="Repite la contraseña">
       <button class="button primary full" type="submit">Activar cuenta</button>
     </form>
-    <p id="inviteStatus" class="message" role="status" aria-live="polite">Verificando el enlace de invitación…</p>
+
+    <p id="inviteStatus" class="message" role="status" aria-live="polite">Preparando la invitación…</p>
     <a class="back-link" href="login.html">Ya activé mi cuenta: ir al inicio de sesión</a>
   </main>
 </body>
