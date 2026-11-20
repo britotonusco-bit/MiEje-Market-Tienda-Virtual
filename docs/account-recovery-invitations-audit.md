@@ -485,3 +485,36 @@ El verificador de integración ahora exige la nueva RPC y comprueba que el fallo
 **Configuración pendiente en el proyecto hospedado:** copiar `supabase/templates/confirm-signup.html` en Authentication → Email Templates → Confirm signup y permitir la URL de aceptación. La plantilla local de `supabase/config.toml` no modifica automáticamente la configuración hospedada.
 
 No se ha desplegado la Edge Function ni se ha ejecutado el SQL.
+
+### ACC-14 — Recuperación de contraseña y cierre de sesiones — 20 nov 2026
+
+#### Hallazgos
+
+- La solicitud de recuperación utilizaba `resetPasswordForEmail` y una URL de retorno específica, pero mostraba al usuario los errores originales de Auth. Se neutralizó la respuesta visible para no exponer diferencias que puedan revelar si una cuenta existe.
+- La página de cambio de contraseña exigía el evento `PASSWORD_RECOVERY`, no aceptaba una sesión normal ya guardada como autorización y limpiaba la URL después de validar el enlace. Se conserva ese comportamiento.
+- Tras cambiar la contraseña, el código anterior cerraba solo la sesión local. Eso no revocaba los refresh tokens de otros dispositivos.
+- Las páginas de solicitud y cambio ahora declaran `Referrer-Policy: no-referrer` mediante meta tag para reducir la exposición accidental de códigos o parámetros temporales en solicitudes de recursos externos.
+- `resolve-my-access` rechaza perfiles bloqueados y solo devuelve membresías activas asociadas a negocios activos. Restablecer la contraseña no modifica perfiles, membresías ni bloqueos.
+
+#### Cambios en la rama
+
+- Después de actualizar la contraseña, `actualizar-clave.js` solicita `signOut({ scope: 'global' })`, para cerrar las sesiones y revocar los refresh tokens de todos los dispositivos.
+- Si falla el cierre global, intenta cerrar al menos la sesión local y muestra un aviso que no afirma que los demás dispositivos hayan quedado desconectados.
+- La solicitud de recuperación utiliza el mismo mensaje visible tanto si Auth acepta la solicitud como si devuelve un error. No se muestran códigos ni mensajes específicos del proveedor.
+- Se mantiene la espera máxima de diez segundos del evento `PASSWORD_RECOVERY`; un enlace no validado deja deshabilitado el formulario.
+
+#### Límite importante de Supabase
+
+El cierre global revoca los refresh tokens, pero los access tokens JWT ya emitidos pueden seguir siendo válidos hasta su expiración. Por eso, no debe afirmarse que todos los dispositivos pierden acceso instantáneamente. Las operaciones privadas deben continuar comprobando autorización en servidor y RLS; la revalidación periódica del panel es una defensa adicional, no un reemplazo de esas comprobaciones.
+
+#### Pruebas pendientes
+
+- Solicitud con cuenta existente y correo inexistente: misma respuesta visible.
+- Enlace válido, vencido, reutilizado y con código alterado.
+- Enlace abierto con una sesión previa distinta en el navegador.
+- Cambio de contraseña correcto y contraseña que incumple la política.
+- Cierre global correcto y fallo simulado del cierre global con fallback local.
+- Sesión abierta en otro navegador: confirmar revocación del refresh token y comprobar el comportamiento del access token ya emitido hasta su expiración.
+- Perfil global bloqueado, membresía suspendida/revocada y negocio suspendido: confirmar que la recuperación de contraseña no restituye permisos.
+
+No se enviaron correos ni se modificó Auth activo. No se ejecutó SQL, no se desplegaron funciones y no se probaron enlaces reales. Los cambios son únicamente de la rama `correcciones-funcionales` y requieren validación en staging.
