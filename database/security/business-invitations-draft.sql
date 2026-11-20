@@ -129,6 +129,7 @@ BEGIN
       AND email_normalized = v_email
       AND status = 'pending'
       AND expires_at <= pg_catalog.now()
+      AND (acceptance_lease_until IS NULL OR acceptance_lease_until <= pg_catalog.now())
     RETURNING id
   LOOP
     INSERT INTO public.audit_logs (
@@ -651,6 +652,8 @@ $function$;
 REVOKE ALL ON FUNCTION public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.attach_business_invitation_user(uuid,uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.mark_business_invitation_failed(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.claim_business_invitation_acceptance(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.release_business_invitation_acceptance(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.accept_business_invitation(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.expire_business_invitation(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.revoke_business_invitation(uuid,uuid,text) FROM PUBLIC, anon, authenticated;
@@ -658,6 +661,8 @@ REVOKE ALL ON FUNCTION public.revoke_business_invitation(uuid,uuid,text) FROM PU
 GRANT EXECUTE ON FUNCTION public.prepare_business_invitation(uuid,text,text,text,text,uuid,timestamptz) TO service_role;
 GRANT EXECUTE ON FUNCTION public.attach_business_invitation_user(uuid,uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.mark_business_invitation_failed(uuid,uuid,text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.claim_business_invitation_acceptance(uuid,uuid,text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.release_business_invitation_acceptance(uuid,uuid,text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.accept_business_invitation(uuid,uuid,text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.expire_business_invitation(uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.revoke_business_invitation(uuid,uuid,text) TO service_role;
@@ -668,7 +673,8 @@ GRANT EXECUTE ON FUNCTION public.revoke_business_invitation(uuid,uuid,text) TO s
 -- 3) Aceptar token correcto activa solo esa membresía.
 -- 4) Token incorrecto, vencido, revocado o de otro usuario no activa nada.
 -- 5) Revocar conserva la fila de membresía en estado suspended con marca 'Invitación revocada', y conserva auth.users/otras membresías.
--- 6) Aceptación y revocación concurrentes producen exactamente un resultado válido.
+-- 6) La reserva de aceptación impide revocar mientras Auth Admin cambia la contraseña.
+-- 7) Una reserva caducada se puede reclamar de nuevo; aceptación y revocación concurrentes producen un único resultado válido.
  THEN
     RAISE EXCEPTION 'Datos de aceptación no válidos.' USING ERRCODE = '22023';
   END IF;
