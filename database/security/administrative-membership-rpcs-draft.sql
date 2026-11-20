@@ -245,6 +245,14 @@ BEGIN
     RAISE EXCEPTION 'La membresía cambió durante la operación.' USING ERRCODE = '40001';
   END IF;
 
+  IF v_before.blocked_reason IN (
+    'Invitación pendiente de aceptación',
+    'Invitación revocada'
+  ) THEN
+    RAISE EXCEPTION 'Esta membresía se administra desde el ciclo de invitación y no puede modificarse manualmente.'
+      USING ERRCODE = '42501';
+  END IF;
+
   SELECT p.is_blocked INTO v_target_blocked
   FROM public.profiles AS p
   WHERE p.id = v_before.user_id
@@ -389,6 +397,14 @@ BEGIN
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'La membresía cambió durante la operación.' USING ERRCODE = '40001';
+  END IF;
+
+  IF v_before.blocked_reason IN (
+    'Invitación pendiente de aceptación',
+    'Invitación revocada'
+  ) THEN
+    RAISE EXCEPTION 'Esta membresía se administra desde el ciclo de invitación y no puede modificarse manualmente.'
+      USING ERRCODE = '42501';
   END IF;
 
   IF v_before.status = 'suspended' THEN
