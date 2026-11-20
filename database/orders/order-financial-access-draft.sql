@@ -406,8 +406,11 @@ AS $function$
   SELECT EXISTS (
     SELECT 1
     FROM public.orders o
+    JOIN public.profiles p
+      ON p.id = o.customer_user_id
+     AND p.is_blocked = false
     WHERE o.id = p_order_id
-      AND o.customer_user_id = auth.uid()
+      AND o.customer_user_id = (SELECT auth.uid())
   );
 $function$;
 
