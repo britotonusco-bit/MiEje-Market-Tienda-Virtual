@@ -191,3 +191,20 @@ Se repitió la consulta en modo solo lectura sobre storage.buckets, storage.obje
 5. Mantener service_role y JOB_APPLICATION_CLEANUP_SECRET solo en el entorno de servidor.
 
 El verificador integral se amplió para exigir que las cuatro policies de business-assets usen la ruta real del objeto y que la policy privada vincule negocio, postulación y resume_path. Estas verificaciones siguen pendientes de ejecución en staging.
+
+
+## 9. ACC-20 — El verificador no descartaba políticas adicionales que ampliaran el acceso a CV privados
+
+**Hallazgo de revisión estática:** el verificador comprobaba que existiera la policy esperada `job_application_documents_business_admin_read` y que no hubiera una policy de `anon` que mencionara explícitamente el bucket privado. Sin embargo, no recorría todas las demás políticas de `storage.objects` para descartar una regla genérica de `authenticated` o `public` que pudiera permitir acceso al mismo bucket por combinación permisiva de políticas.
+
+En PostgreSQL, varias políticas permisivas aplicables se combinan de forma que una regla adicional amplia puede abrir filas que la policy específica pretendía restringir. La comprobación de una sola policy no basta para descartar ese escenario.
+
+**Corrección en la rama:** se reforzó `database/integration/verify-integration-package.sql` para:
+- Revisar las policies de `storage.objects` aplicables a `public`, `anon` y `authenticated`.
+- Exigir que cada policy distinta de la policy específica de CV limite expresamente el bucket y no incluya `job-applications-private`.
+- Revisar `USING` para SELECT/DELETE y `WITH CHECK` para INSERT/UPDATE.
+- Exigir que la policy de lectura de CV esté asignada exclusivamente a `authenticated`.
+
+**Commit:** `a23d42dd923f4e6cb678099150cf3e15453b0d98`.
+
+Este refuerzo es una comprobación preventiva del verificador. No demuestra que el proyecto activo tenga una política adicional vulnerable: las consultas de solo lectura anteriores no mostraron otra policy para el bucket privado. La condición nueva debe ejecutarse en staging después de aplicar el paquete y revisar manualmente cualquier policy que haga fallar el control.
