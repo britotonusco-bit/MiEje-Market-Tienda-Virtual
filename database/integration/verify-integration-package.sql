@@ -1027,6 +1027,7 @@ BEGIN
       AND qual ILIKE '%array_length%'
       AND qual ILIKE '%storage.filename%'
       AND qual ILIKE '%voided%'
+      AND qual ILIKE '%receipt_path%'
   ) OR NOT EXISTS (
     SELECT 1 FROM pg_policies
     WHERE schemaname='storage' AND tablename='objects'
