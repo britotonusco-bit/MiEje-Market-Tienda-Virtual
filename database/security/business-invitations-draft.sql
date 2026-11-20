@@ -418,25 +418,18 @@ BEGIN
       USING ERRCODE = '42501';
   END IF;
 
+  IF v_invitation.acceptance_lease_until IS NULL
+     OR v_invitation.acceptance_lease_until <= pg_catalog.now() THEN
+    RAISE EXCEPTION 'La reserva de aceptación venció; vuelve a intentar.'
+      USING ERRCODE = '55P03';
+  END IF;
+
   IF NOT EXISTS (
     SELECT 1 FROM public.profiles p
     WHERE p.id = p_user_id AND p.is_blocked IS FALSE
   ) THEN
     RAISE EXCEPTION 'La cuenta está bloqueada o ya no tiene un perfil activo.'
       USING ERRCODE = '42501';
-  END IF;
-
-  IF v_invitation.expires_at <= pg_catalog.now() THEN
-    UPDATE public.business_invitations
-    SET status = 'expired', updated_at = pg_catalog.now()
-    WHERE id = v_invitation.id;
-    INSERT INTO public.audit_logs (
-      business_id, actor_id, action, entity_type, entity_id, details
-    ) VALUES (
-      v_business_id, p_user_id, 'business.invitation_expired',
-      'business_invitation', v_invitation.id::text, '{}'::jsonb
-    );
-    RETURN pg_catalog.jsonb_build_object('ok', false, 'status', 'expired');
   END IF;
 
   SELECT m.* INTO v_membership
@@ -464,7 +457,8 @@ BEGIN
   END IF;
 
   UPDATE public.business_invitations
-  SET status = 'accepted', accepted_at = pg_catalog.now(), updated_at = pg_catalog.now()
+  SET status = 'accepted', accepted_at = pg_catalog.now(), acceptance_lease_until = NULL,
+      updated_at = pg_catalog.now()
   WHERE id = v_invitation.id;
 
   INSERT INTO public.audit_logs (
@@ -518,7 +512,9 @@ BEGIN
   END IF;
 
   IF v_invitation.status = 'pending'
-     AND v_invitation.expires_at <= pg_catalog.now() THEN
+     AND v_invitation.expires_at <= pg_catalog.now()
+     AND (v_invitation.acceptance_lease_until IS NULL
+          OR v_invitation.acceptance_lease_until <= pg_catalog.now()) THEN
     UPDATE public.business_invitations
     SET status = 'expired', updated_at = pg_catalog.now()
     WHERE id = v_invitation.id;
@@ -595,6 +591,11 @@ BEGIN
   IF NOT FOUND OR v_invitation.status <> 'pending' THEN
     RAISE EXCEPTION 'La invitación ya no está pendiente; no se realizaron cambios.'
       USING ERRCODE = '23514';
+  END IF;
+
+  IF v_invitation.acceptance_lease_until > pg_catalog.now() THEN
+    RAISE EXCEPTION 'La invitación se está aceptando; espera a que termine el proceso antes de revocar.'
+      USING ERRCODE = '55P03';
   END IF;
 
   IF v_invitation.membership_id IS NOT NULL THEN
